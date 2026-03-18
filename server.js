@@ -536,7 +536,10 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET") {
     const requestedPath = url.pathname === "/" ? "/index.html" : url.pathname;
-    const safePath = path.normalize(requestedPath).replace(/^(\.\.[/\\])+/, "");
+    const safePath = path
+      .normalize(requestedPath)
+      .replace(/^[/\\]+/, "")
+      .replace(/^(\.\.[/\\])+/, "");
     const filePath = path.join(PUBLIC_DIR, safePath);
 
     if (!filePath.startsWith(PUBLIC_DIR)) {
