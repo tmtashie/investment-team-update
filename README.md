@@ -16,13 +16,12 @@ A phone-friendly web app for logging investment updates and emailing your team a
 2. Copy `.env.example` to `.env`.
 3. Fill in the values in `.env`, especially:
    - `DATA_DIR`
-   - `TEAM_PASSWORD`
-   - `SESSION_SECRET`
-   - `TEAM_ALLOWED_EMAILS`
-   - `TEAM_EMAILS`
-   - `FROM_EMAIL`
-   - `RESEND_API_KEY`
-4. Start the app:
+   - `TEAM_PASSWORD` BV5341!
+   - `SESSION_SECRET` a18Partners
+   - `TEAM_ALLOWED_EMAILS` tyler@tylertashie.com
+   - `TEAM_EMAILS` tyler@tylertahsie.com  
+   - `FROM_EMAIL` updates@updates.tylertashie.com
+   - `RESEND_API_KEY` re_btHPh9Ye_Csn2D3cnejTmK1MKvCeArpHT
 
 ```bash
 node server.js
