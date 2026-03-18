@@ -1,0 +1,12 @@
+{
+  "name": "investment-team-updates",
+  "version": "1.0.0",
+  "description": "Mobile-friendly investment update app that emails team summaries.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

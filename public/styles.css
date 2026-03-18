@@ -1,0 +1,260 @@
+:root {
+  --bg: #f6efe5;
+  --surface: rgba(255, 252, 247, 0.82);
+  --surface-strong: #fffaf2;
+  --text: #1d1b18;
+  --muted: #655d52;
+  --border: rgba(90, 71, 44, 0.14);
+  --accent: #b4572f;
+  --accent-dark: #8f411f;
+  --success: #1f7a4c;
+  --warning: #8a5a00;
+  --shadow: 0 22px 60px rgba(86, 55, 22, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(236, 167, 94, 0.35), transparent 30%),
+    radial-gradient(circle at right center, rgba(192, 93, 52, 0.16), transparent 26%),
+    linear-gradient(180deg, #fbf5ec 0%, #f3eadb 100%);
+}
+
+.app-shell {
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 24px 16px 40px;
+}
+
+.hero-card,
+.panel {
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+}
+
+.hero-card {
+  padding: 28px;
+  margin-bottom: 18px;
+}
+
+.hero-topline {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.75rem;
+  color: var(--accent-dark);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2rem, 7vw, 3.4rem);
+  line-height: 0.95;
+  max-width: 10ch;
+}
+
+.hero-copy,
+.section-copy {
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.hero-copy {
+  margin: 16px 0 0;
+}
+
+.section-copy {
+  margin: 8px 0 0;
+}
+
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(31, 122, 76, 0.12);
+  color: var(--success);
+  font-size: 0.92rem;
+}
+
+.status-pill-muted {
+  background: rgba(101, 93, 82, 0.1);
+  color: var(--muted);
+}
+
+.panel {
+  padding: 20px;
+  margin-top: 18px;
+}
+
+.investment-form {
+  display: grid;
+  gap: 16px;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-strong);
+  padding: 14px 16px;
+  color: var(--text);
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  border: 0;
+  border-radius: 16px;
+  padding: 15px 18px;
+  background: linear-gradient(135deg, var(--accent) 0%, #d37a42 100%);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 30px rgba(180, 87, 47, 0.24);
+}
+
+button:hover {
+  filter: brightness(1.02);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.secondary-button {
+  background: rgba(29, 27, 24, 0.08);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.two-up {
+  display: grid;
+  gap: 16px;
+}
+
+.form-message {
+  min-height: 24px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.panel-header-stack {
+  align-items: start;
+}
+
+.updates-list {
+  display: grid;
+  gap: 12px;
+}
+
+.update-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 250, 242, 0.95);
+  border: 1px solid var(--border);
+}
+
+.update-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(180, 87, 47, 0.1);
+  color: var(--accent-dark);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.update-meta {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.93rem;
+}
+
+.update-notes {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (min-width: 640px) {
+  .app-shell {
+    padding: 40px 24px 56px;
+  }
+
+  .hero-card,
+  .panel {
+    padding: 28px;
+  }
+
+  .two-up {
+    grid-template-columns: 1fr 1fr;
+  }
+}

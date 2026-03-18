@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Investment Team Updates</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-card">
+        <div class="hero-topline">
+          <p class="eyebrow">Private Mobile Team Workflow</p>
+          <button id="logoutButton" type="button" class="secondary-button hidden">
+            Sign out
+          </button>
+        </div>
+        <h1>Share investment updates from your phone.</h1>
+        <p class="hero-copy">
+          Sign in, log the company, amount, status, and next step, then send a
+          polished update to your team automatically.
+        </p>
+        <div class="status-row">
+          <span id="authStatus" class="status-pill status-pill-muted">Checking sign-in...</span>
+          <span id="emailStatus" class="status-pill">Checking email setup...</span>
+          <span id="recipientStatus" class="status-pill status-pill-muted"></span>
+        </div>
+      </section>
+
+      <section id="loginPanel" class="panel">
+        <div class="panel-header panel-header-stack">
+          <div>
+            <h2>Team sign in</h2>
+            <p class="section-copy">
+              Use your email and the shared workspace password to unlock updates.
+            </p>
+          </div>
+        </div>
+
+        <form id="loginForm" class="investment-form">
+          <label>
+            Email
+            <input
+              name="email"
+              type="email"
+              autocomplete="email"
+              placeholder="you@company.com"
+              required
+            />
+          </label>
+
+          <label>
+            Team password
+            <input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Shared team password"
+              required
+            />
+          </label>
+
+          <button id="loginButton" type="submit">Sign in</button>
+          <p id="loginMessage" class="form-message" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section id="appPanel" class="hidden">
+        <section class="panel">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>New investment update</h2>
+              <p class="section-copy">
+                Each submission is saved to your workspace and can trigger an email
+                summary for the team.
+              </p>
+            </div>
+          </div>
+
+          <form id="investmentForm" class="investment-form">
+            <label>
+              Company
+              <input name="company" type="text" placeholder="Northwind Ventures" required />
+            </label>
+
+            <div class="two-up">
+              <label>
+                Amount
+                <input name="amount" type="number" min="0" step="0.01" placeholder="250000" />
+              </label>
+
+              <label>
+                Currency
+                <select name="currency">
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GBP">GBP</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="two-up">
+              <label>
+                Stage
+                <input name="stage" type="text" placeholder="Seed" />
+              </label>
+
+              <label>
+                Status
+                <select name="status" required>
+                  <option value="">Select status</option>
+                  <option value="New lead">New lead</option>
+                  <option value="Under review">Under review</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Passed">Passed</option>
+                  <option value="Closed">Closed</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              Owner
+              <input name="owner" type="text" placeholder="Tashie" />
+            </label>
+
+            <label>
+              Next step
+              <input name="nextStep" type="text" placeholder="Schedule partner review call" />
+            </label>
+
+            <label>
+              Team email recipients
+              <input
+                name="recipients"
+                type="text"
+                placeholder="team@example.com, ops@example.com"
+              />
+            </label>
+
+            <label>
+              Notes
+              <textarea
+                name="notes"
+                rows="5"
+                placeholder="Short update to include in the summary email."
+              ></textarea>
+            </label>
+
+            <button id="submitButton" type="submit">Save update and send email</button>
+            <p id="formMessage" class="form-message" aria-live="polite"></p>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Recent updates</h2>
+              <p class="section-copy">Your team can review the latest submissions here.</p>
+            </div>
+            <button id="refreshButton" type="button" class="secondary-button">Refresh</button>
+          </div>
+          <div id="updatesList" class="updates-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

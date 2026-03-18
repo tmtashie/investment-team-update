@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: investment-team-updates
+    runtime: node
+    plan: starter
+    buildCommand: "true"
+    startCommand: "node server.js"
+    healthCheckPath: /api/health
+    disk:
+      name: updates-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: NODE_ENV
+        value: production
+      - key: TEAM_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: TEAM_ALLOWED_EMAILS
+        sync: false
+      - key: TEAM_EMAILS
+        sync: false
+      - key: FROM_EMAIL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
