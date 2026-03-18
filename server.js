@@ -554,7 +554,7 @@ const server = http.createServer(async (request, response) => {
   sendText(response, 405, "Method not allowed");
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, () => {
   ensureDataFile();
   console.log(`Investment update app running at http://localhost:${PORT}`);
 });
