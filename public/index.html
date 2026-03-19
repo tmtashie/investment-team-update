@@ -140,11 +140,23 @@
             <label>
               Notes
               <textarea
+                id="notesField"
                 name="notes"
                 rows="5"
                 placeholder="Short update to include in the summary email."
               ></textarea>
             </label>
+
+            <div class="deck-tools">
+              <label>
+                Upload deck PDF
+                <input id="deckFile" name="deckFile" type="file" accept="application/pdf,.pdf" />
+              </label>
+              <button id="summarizeDeckButton" type="button" class="secondary-button">
+                Summarize deck into notes
+              </button>
+            </div>
+            <p id="deckMessage" class="form-message" aria-live="polite"></p>
 
             <button id="submitButton" type="submit">Save update and send email</button>
             <p id="formMessage" class="form-message" aria-live="polite"></p>

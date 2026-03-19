@@ -41,6 +41,8 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const SESSION_COOKIE = "investment_team_session";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-before-production";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
+const MAX_BODY_SIZE_BYTES = 20 * 1024 * 1024;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const DEFAULT_RECIPIENTS = splitCsv(process.env.TEAM_EMAILS || "");
 const ALLOWED_EMAILS = splitCsv(process.env.TEAM_ALLOWED_EMAILS || "").map((email) =>
@@ -215,7 +217,7 @@ function parseRequestBody(request) {
 
     request.on("data", (chunk) => {
       body += chunk.toString();
-      if (body.length > 1_000_000) {
+      if (body.length > MAX_BODY_SIZE_BYTES) {
         reject(new Error("Request body too large"));
         request.destroy();
       }
@@ -236,6 +238,97 @@ function parseRequestBody(request) {
 
     request.on("error", reject);
   });
+}
+
+function extractResponseText(payload) {
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  if (!Array.isArray(payload.output)) {
+    return "";
+  }
+
+  const fragments = [];
+  for (const item of payload.output) {
+    if (!Array.isArray(item.content)) {
+      continue;
+    }
+
+    for (const contentItem of item.content) {
+      if (contentItem.type === "output_text" && contentItem.text) {
+        fragments.push(contentItem.text);
+      }
+    }
+  }
+
+  return fragments.join("\n").trim();
+}
+
+async function summarizeDeck({ filename, fileData, company, stage }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI summarization is not configured yet.");
+  }
+
+  const companyLine = company ? `Company: ${company}` : "Company: Not provided";
+  const stageLine = stage ? `Stage: ${stage}` : "Stage: Not provided";
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                "Summarize this investment deck for a deal team.",
+                "Return concise markdown with these sections:",
+                "1. Company overview",
+                "2. Business model",
+                "3. Traction and metrics",
+                "4. Raise details",
+                "5. Key risks",
+                "6. Recommended next steps",
+                "",
+                companyLine,
+                stageLine,
+                "",
+                "If a detail is not in the deck, say that it was not clearly stated."
+              ].join("\n")
+            },
+            {
+              type: "input_file",
+              filename,
+              file_data: fileData
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI summary failed: ${errorText}`);
+  }
+
+  const payload = await response.json();
+  const summary = extractResponseText(payload);
+
+  if (!summary) {
+    throw new Error("OpenAI did not return a summary.");
+  }
+
+  return summary;
 }
 
 function escapeHtml(value) {
@@ -445,6 +538,7 @@ const server = http.createServer(async (request, response) => {
     sendJson(response, 200, {
       defaultRecipients: DEFAULT_RECIPIENTS,
       emailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL),
+      aiConfigured: Boolean(process.env.OPENAI_API_KEY),
       authConfigured: Boolean(process.env.TEAM_PASSWORD && process.env.SESSION_SECRET),
       user
     });
@@ -547,6 +641,38 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 500, {
         error: error.message || "Unexpected server error."
       });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/summarize-deck") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const filename = String(payload.filename || "").trim();
+      const fileData = String(payload.fileData || "").trim();
+      const company = String(payload.company || "").trim();
+      const stage = String(payload.stage || "").trim();
+
+      if (!filename.toLowerCase().endsWith(".pdf")) {
+        sendJson(response, 400, { error: "Please upload a PDF deck." });
+        return;
+      }
+
+      if (!fileData) {
+        sendJson(response, 400, { error: "Deck file data is required." });
+        return;
+      }
+
+      const summary = await summarizeDeck({ filename, fileData, company, stage });
+      sendJson(response, 200, { summary });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Deck summarization failed." });
       return;
     }
   }

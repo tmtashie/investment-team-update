@@ -12,6 +12,10 @@ const emailStatus = document.getElementById("emailStatus");
 const recipientStatus = document.getElementById("recipientStatus");
 const refreshButton = document.getElementById("refreshButton");
 const submitButton = document.getElementById("submitButton");
+const notesField = document.getElementById("notesField");
+const deckFile = document.getElementById("deckFile");
+const deckMessage = document.getElementById("deckMessage");
+const summarizeDeckButton = document.getElementById("summarizeDeckButton");
 
 let currentUser = null;
 
@@ -97,10 +101,28 @@ async function loadConfig() {
     ? `Default team emails: ${config.defaultRecipients.join(", ")}`
     : "No default team emails set";
 
+  if (!config.aiConfigured) {
+    deckMessage.textContent =
+      "Add OPENAI_API_KEY in Render to turn on deck summarization.";
+  }
+
   if (!config.authConfigured) {
     loginMessage.textContent =
       "The server still needs TEAM_PASSWORD and SESSION_SECRET in .env.";
   }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const [, base64 = ""] = result.split(",");
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("Could not read the PDF file."));
+    reader.readAsDataURL(file);
+  });
 }
 
 async function loadUpdates() {
@@ -163,6 +185,53 @@ logoutButton.addEventListener("click", async () => {
     loginMessage.textContent = error.message;
   } finally {
     logoutButton.disabled = false;
+  }
+});
+
+summarizeDeckButton.addEventListener("click", async () => {
+  const selectedFile = deckFile.files && deckFile.files[0];
+  if (!selectedFile) {
+    deckMessage.textContent = "Choose a PDF deck first.";
+    return;
+  }
+
+  if (!selectedFile.name.toLowerCase().endsWith(".pdf")) {
+    deckMessage.textContent = "Please choose a PDF file.";
+    return;
+  }
+
+  summarizeDeckButton.disabled = true;
+  deckMessage.textContent = "Reading deck and generating summary...";
+
+  try {
+    const fileData = await readFileAsBase64(selectedFile);
+    const companyValue = form.elements.company.value;
+    const stageValue = form.elements.stage.value;
+    const result = await fetchJson("/api/summarize-deck", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        filename: selectedFile.name,
+        fileData,
+        company: companyValue,
+        stage: stageValue
+      })
+    });
+
+    notesField.value = result.summary;
+    deckMessage.textContent = "Deck summary added to notes.";
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      deckMessage.textContent = "Your session expired. Please sign in again.";
+      return;
+    }
+
+    deckMessage.textContent = error.message;
+  } finally {
+    summarizeDeckButton.disabled = false;
   }
 });
 

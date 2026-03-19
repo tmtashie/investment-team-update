@@ -180,6 +180,15 @@ button:disabled {
   gap: 16px;
 }
 
+.deck-tools {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  background: rgba(255, 250, 242, 0.72);
+}
+
 .form-message {
   min-height: 24px;
   margin: 0;
@@ -256,5 +265,10 @@ button:disabled {
 
   .two-up {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .deck-tools {
+    grid-template-columns: 1fr auto;
+    align-items: end;
   }
 }
