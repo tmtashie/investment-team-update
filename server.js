@@ -415,8 +415,25 @@ function requireAuth(request, response) {
   return user;
 }
 
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught exception:", error);
+});
+
+process.on("unhandledRejection", (error) => {
+  console.error("Unhandled rejection:", error);
+});
+
 const server = http.createServer(async (request, response) => {
-  const url = new URL(request.url, `http://${request.headers.host}`);
+  const rawPath = request.url || "/";
+
+  if (request.method === "GET" && rawPath.startsWith("/api/health")) {
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  console.log(`[request] ${request.method} ${rawPath}`);
+
+  const url = new URL(rawPath, `http://${request.headers.host || "localhost"}`);
 
   if (request.method === "GET" && url.pathname === "/api/health") {
     sendJson(response, 200, { ok: true });
@@ -554,7 +571,12 @@ const server = http.createServer(async (request, response) => {
   sendText(response, 405, "Method not allowed");
 });
 
-server.listen(PORT, () => {
+server.on("clientError", (error, socket) => {
+  console.error("Client error:", error.message);
+  socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+});
+
+server.listen({ port: PORT, host: "::", ipv6Only: false }, () => {
   ensureDataFile();
   console.log(`Investment update app running at http://localhost:${PORT}`);
 });
