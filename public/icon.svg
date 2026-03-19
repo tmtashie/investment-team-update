@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f4e3cb" />
+      <stop offset="100%" stop-color="#c46836" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <rect x="28" y="28" width="456" height="456" rx="96" fill="none" stroke="#fff5e8" stroke-width="8" opacity="0.6" />
+  <text
+    x="256"
+    y="300"
+    text-anchor="middle"
+    font-family="'Trebuchet MS', 'Segoe UI', sans-serif"
+    font-size="164"
+    font-weight="700"
+    letter-spacing="-10"
+    fill="#fffaf2"
+  >
+    BVB
+  </text>
+</svg>
