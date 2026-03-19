@@ -189,6 +189,35 @@ button:disabled {
   background: rgba(255, 250, 242, 0.72);
 }
 
+.deck-drop-zone {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed rgba(180, 87, 47, 0.45);
+  border-radius: 18px;
+  background: rgba(255, 248, 238, 0.95);
+  cursor: pointer;
+}
+
+.deck-drop-zone input[type="file"] {
+  display: none;
+}
+
+.deck-drop-zone-active {
+  border-color: var(--accent);
+  background: rgba(255, 238, 224, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(180, 87, 47, 0.18);
+}
+
+.deck-drop-title {
+  font-weight: 700;
+}
+
+.deck-drop-subtitle {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
 .form-message {
   min-height: 24px;
   margin: 0;

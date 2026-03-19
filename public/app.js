@@ -16,6 +16,8 @@ const notesField = document.getElementById("notesField");
 const deckFile = document.getElementById("deckFile");
 const deckMessage = document.getElementById("deckMessage");
 const summarizeDeckButton = document.getElementById("summarizeDeckButton");
+const deckDropZone = document.getElementById("deckDropZone");
+const deckFileName = document.getElementById("deckFileName");
 
 let currentUser = null;
 
@@ -51,6 +53,16 @@ function setSignedInState(user) {
   authStatus.textContent = isSignedIn
     ? `Signed in as ${user.email}`
     : "Please sign in to view updates";
+}
+
+function selectedDeckFile() {
+  return deckFile.files && deckFile.files[0] ? deckFile.files[0] : null;
+}
+
+function updateDeckFileLabel(file) {
+  deckFileName.textContent = file
+    ? `Selected: ${file.name}`
+    : "No file selected yet";
 }
 
 function renderUpdates(investments) {
@@ -125,6 +137,37 @@ function readFileAsBase64(file) {
   });
 }
 
+deckFile.addEventListener("change", () => {
+  updateDeckFileLabel(selectedDeckFile());
+});
+
+["dragenter", "dragover"].forEach((eventName) => {
+  deckDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    deckDropZone.classList.add("deck-drop-zone-active");
+  });
+});
+
+["dragleave", "drop"].forEach((eventName) => {
+  deckDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    deckDropZone.classList.remove("deck-drop-zone-active");
+  });
+});
+
+deckDropZone.addEventListener("drop", (event) => {
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (!files || !files.length) {
+    return;
+  }
+
+  const transferredFile = files[0];
+  const transfer = new DataTransfer();
+  transfer.items.add(transferredFile);
+  deckFile.files = transfer.files;
+  updateDeckFileLabel(transferredFile);
+});
+
 async function loadUpdates() {
   try {
     const data = await fetchJson("/api/investments");
@@ -189,7 +232,7 @@ logoutButton.addEventListener("click", async () => {
 });
 
 summarizeDeckButton.addEventListener("click", async () => {
-  const selectedFile = deckFile.files && deckFile.files[0];
+  const selectedFile = selectedDeckFile();
   if (!selectedFile) {
     deckMessage.textContent = "Choose a PDF deck first.";
     return;

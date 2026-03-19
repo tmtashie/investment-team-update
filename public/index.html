@@ -148,8 +148,11 @@
             </label>
 
             <div class="deck-tools">
-              <label>
-                Upload deck PDF
+              <label id="deckDropZone" class="deck-drop-zone" for="deckFile">
+                <span class="deck-drop-title">Drop a PDF deck here or tap to choose</span>
+                <span id="deckFileName" class="deck-drop-subtitle">
+                  No file selected yet
+                </span>
                 <input id="deckFile" name="deckFile" type="file" accept="application/pdf,.pdf" />
               </label>
               <button id="summarizeDeckButton" type="button" class="secondary-button">
