@@ -274,6 +274,32 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
 
   const companyLine = company ? `Company: ${company}` : "Company: Not provided";
   const stageLine = stage ? `Stage: ${stage}` : "Stage: Not provided";
+  const fileBytes = Buffer.from(fileData, "base64");
+  const uploadForm = new FormData();
+  const pdfBlob = new Blob([fileBytes], { type: "application/pdf" });
+
+  uploadForm.append("purpose", "user_data");
+  uploadForm.append("file", pdfBlob, filename);
+
+  const uploadResponse = await fetch("https://api.openai.com/v1/files", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: uploadForm
+  });
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(`OpenAI file upload failed: ${errorText}`);
+  }
+
+  const uploadedFile = await uploadResponse.json();
+  const fileId = uploadedFile.id;
+
+  if (!fileId) {
+    throw new Error("OpenAI file upload did not return a file ID.");
+  }
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -307,8 +333,7 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
             },
             {
               type: "input_file",
-              filename,
-              file_data: fileData
+              file_id: fileId
             }
           ]
         }
