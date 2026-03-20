@@ -73,6 +73,16 @@
         <section class="panel">
           <div class="panel-header panel-header-stack">
             <div>
+              <h2>Dashboard</h2>
+              <p class="section-copy">Track pipeline size, stage mix, and company activity at a glance.</p>
+            </div>
+          </div>
+          <div id="dashboardCards" class="dashboard-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header panel-header-stack">
+            <div>
               <h2>New investment update</h2>
               <p class="section-copy">
                 Each submission is saved to your workspace and can trigger an email
@@ -82,6 +92,7 @@
           </div>
 
           <form id="investmentForm" class="investment-form">
+            <input id="editingInvestmentId" name="editingInvestmentId" type="hidden" />
             <label>
               Company
               <input name="company" type="text" placeholder="Northwind Ventures" required />
@@ -165,9 +176,61 @@
             </div>
             <p id="deckMessage" class="form-message" aria-live="polite"></p>
 
-            <button id="submitButton" type="submit">Save update and send email</button>
+            <div class="form-actions">
+              <button id="submitButton" type="submit">Save update and send email</button>
+              <button id="cancelEditButton" type="button" class="secondary-button hidden">
+                Cancel edit
+              </button>
+            </div>
             <p id="formMessage" class="form-message" aria-live="polite"></p>
           </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>Filters</h2>
+              <p class="section-copy">Narrow the list by deal, owner, stage, or status.</p>
+            </div>
+          </div>
+          <div class="filters-grid">
+            <label>
+              Search
+              <input id="searchFilter" type="text" placeholder="Search company or notes" />
+            </label>
+            <label>
+              Status
+              <select id="statusFilter">
+                <option value="">All statuses</option>
+              </select>
+            </label>
+            <label>
+              Stage
+              <select id="stageFilter">
+                <option value="">All stages</option>
+              </select>
+            </label>
+            <label>
+              Owner
+              <select id="ownerFilter">
+                <option value="">All owners</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel hidden" id="companyPanel">
+          <div class="panel-header">
+            <div>
+              <h2 id="companyPanelTitle">Company detail</h2>
+              <p id="companyPanelCopy" class="section-copy"></p>
+            </div>
+            <button id="closeCompanyPanelButton" type="button" class="secondary-button">
+              Close
+            </button>
+          </div>
+          <div id="companySummary" class="company-summary-grid"></div>
+          <div id="companyTimeline" class="company-timeline"></div>
         </section>
 
         <section class="panel">

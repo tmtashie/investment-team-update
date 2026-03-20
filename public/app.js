@@ -13,14 +13,29 @@ const recipientStatus = document.getElementById("recipientStatus");
 const refreshButton = document.getElementById("refreshButton");
 const submitButton = document.getElementById("submitButton");
 const downloadCsvButton = document.getElementById("downloadCsvButton");
+const cancelEditButton = document.getElementById("cancelEditButton");
+const editingInvestmentId = document.getElementById("editingInvestmentId");
 const notesField = document.getElementById("notesField");
 const deckFile = document.getElementById("deckFile");
 const deckMessage = document.getElementById("deckMessage");
 const summarizeDeckButton = document.getElementById("summarizeDeckButton");
 const deckDropZone = document.getElementById("deckDropZone");
 const deckFileName = document.getElementById("deckFileName");
+const dashboardCards = document.getElementById("dashboardCards");
+const searchFilter = document.getElementById("searchFilter");
+const statusFilter = document.getElementById("statusFilter");
+const stageFilter = document.getElementById("stageFilter");
+const ownerFilter = document.getElementById("ownerFilter");
+const companyPanel = document.getElementById("companyPanel");
+const companyPanelTitle = document.getElementById("companyPanelTitle");
+const companyPanelCopy = document.getElementById("companyPanelCopy");
+const companySummary = document.getElementById("companySummary");
+const companyTimeline = document.getElementById("companyTimeline");
+const closeCompanyPanelButton = document.getElementById("closeCompanyPanelButton");
 
 let currentUser = null;
+let allInvestments = [];
+let selectedCompany = "";
 
 function escapeHtml(value) {
   return String(value)
@@ -66,6 +81,198 @@ function updateDeckFileLabel(file) {
     : "No file selected yet";
 }
 
+function currentFilters() {
+  return {
+    search: searchFilter.value.trim().toLowerCase(),
+    status: statusFilter.value,
+    stage: stageFilter.value,
+    owner: ownerFilter.value
+  };
+}
+
+function filterInvestments(investments) {
+  const filters = currentFilters();
+  return investments.filter((investment) => {
+    const searchHaystack = [
+      investment.company,
+      investment.notes,
+      investment.owner,
+      investment.nextStep,
+      investment.submittedBy
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    const matchesSearch = !filters.search || searchHaystack.includes(filters.search);
+    const matchesStatus = !filters.status || investment.status === filters.status;
+    const matchesStage = !filters.stage || investment.stage === filters.stage;
+    const matchesOwner = !filters.owner || investment.owner === filters.owner;
+
+    return matchesSearch && matchesStatus && matchesStage && matchesOwner;
+  });
+}
+
+function toNumber(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function buildDashboardCards(investments) {
+  const uniqueCompanies = new Set(investments.map((investment) => investment.company).filter(Boolean));
+  const openCount = investments.filter(
+    (investment) => !["Passed", "Closed"].includes(investment.status)
+  ).length;
+  const approvedCount = investments.filter((investment) => investment.status === "Approved").length;
+  const totalAmount = investments.reduce((sum, investment) => sum + toNumber(investment.amount), 0);
+
+  return [
+    { label: "Updates", value: String(investments.length) },
+    { label: "Companies", value: String(uniqueCompanies.size) },
+    { label: "Active pipeline", value: String(openCount) },
+    { label: "Approved", value: String(approvedCount) },
+    { label: "Reported amount", value: `$${totalAmount.toLocaleString()}` }
+  ];
+}
+
+function renderDashboard(investments) {
+  const cards = buildDashboardCards(investments);
+  dashboardCards.innerHTML = cards
+    .map(
+      (card) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(card.label)}</p>
+          <p class="dashboard-value">${escapeHtml(card.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderFilterOptions() {
+  const statuses = Array.from(new Set(allInvestments.map((item) => item.status).filter(Boolean))).sort();
+  const stages = Array.from(new Set(allInvestments.map((item) => item.stage).filter(Boolean))).sort();
+  const owners = Array.from(new Set(allInvestments.map((item) => item.owner).filter(Boolean))).sort();
+
+  const assignOptions = (element, placeholder, values) => {
+    const currentValue = element.value;
+    element.innerHTML = [`<option value="">${placeholder}</option>`]
+      .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+      .join("");
+    element.value = values.includes(currentValue) ? currentValue : "";
+  };
+
+  assignOptions(statusFilter, "All statuses", statuses);
+  assignOptions(stageFilter, "All stages", stages);
+  assignOptions(ownerFilter, "All owners", owners);
+}
+
+function beginEditInvestment(investmentId) {
+  const investment = allInvestments.find((item) => item.id === investmentId);
+  if (!investment) {
+    return;
+  }
+
+  editingInvestmentId.value = investment.id;
+  form.elements.company.value = investment.company || "";
+  form.elements.amount.value = investment.amount || "";
+  form.elements.currency.value = investment.currency || "USD";
+  form.elements.stage.value = investment.stage || "";
+  form.elements.status.value = investment.status || "";
+  form.elements.owner.value = investment.owner || "";
+  form.elements.nextStep.value = investment.nextStep || "";
+  form.elements.recipients.value = Array.isArray(investment.recipients)
+    ? investment.recipients.join(", ")
+    : "";
+  notesField.value = investment.notes || "";
+  submitButton.textContent = "Save changes";
+  cancelEditButton.classList.remove("hidden");
+  formMessage.textContent = `Editing ${investment.company}.`;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function resetFormToCreateMode() {
+  form.reset();
+  editingInvestmentId.value = "";
+  submitButton.textContent = "Save update and send email";
+  cancelEditButton.classList.add("hidden");
+  updateDeckFileLabel(null);
+}
+
+async function deleteInvestmentById(investmentId) {
+  if (!window.confirm("Delete this investment update?")) {
+    return;
+  }
+
+  formMessage.textContent = "Deleting update...";
+
+  try {
+    await fetchJson(`/api/investments/${investmentId}`, { method: "DELETE" });
+    if (editingInvestmentId.value === investmentId) {
+      resetFormToCreateMode();
+    }
+    await loadUpdates();
+    formMessage.textContent = "Investment update deleted.";
+  } catch (error) {
+    formMessage.textContent = error.message;
+  }
+}
+
+function renderCompanyPanel() {
+  if (!selectedCompany) {
+    companyPanel.classList.add("hidden");
+    companySummary.innerHTML = "";
+    companyTimeline.innerHTML = "";
+    return;
+  }
+
+  const companyUpdates = allInvestments
+    .filter((investment) => investment.company === selectedCompany)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  if (!companyUpdates.length) {
+    companyPanel.classList.add("hidden");
+    return;
+  }
+
+  const latest = companyUpdates[0];
+  const totalAmount = companyUpdates.reduce((sum, investment) => sum + toNumber(investment.amount), 0);
+  companyPanel.classList.remove("hidden");
+  companyPanelTitle.textContent = selectedCompany;
+  companyPanelCopy.textContent = `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
+  companySummary.innerHTML = [
+    { label: "Latest status", value: latest.status || "Not set" },
+    { label: "Latest stage", value: latest.stage || "Not set" },
+    { label: "Latest owner", value: latest.owner || "Not set" },
+    { label: "Reported amount", value: `$${totalAmount.toLocaleString()}` }
+  ]
+    .map(
+      (item) => `
+        <article class="company-summary-card">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="dashboard-value">${escapeHtml(item.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  companyTimeline.innerHTML = companyUpdates
+    .map(
+      (investment) => `
+        <article class="timeline-card">
+          <div class="update-head">
+            <h3>${escapeHtml(investment.status || "Update")}</h3>
+            <span class="status-chip">${escapeHtml(investment.stage || "No stage")}</span>
+          </div>
+          <p class="update-meta">
+            ${escapeHtml(investment.createdAt)} • Owner: ${escapeHtml(investment.owner || "Not set")}
+          </p>
+          <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+        </article>
+      `
+    )
+    .join("");
+}
+
 function renderUpdates(investments) {
   if (!investments.length) {
     updatesList.innerHTML =
@@ -82,7 +289,9 @@ function renderUpdates(investments) {
       return `
         <article class="update-card">
           <div class="update-head">
-            <h3>${escapeHtml(investment.company)}</h3>
+            <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}">
+              ${escapeHtml(investment.company)}
+            </button>
             <span class="status-chip">${escapeHtml(investment.status)}</span>
           </div>
           <p class="update-meta">
@@ -96,10 +305,23 @@ function renderUpdates(investments) {
             Next: ${escapeHtml(investment.nextStep || "Not set")}
           </p>
           <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+          <div class="card-actions">
+            <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}">View company</button>
+            <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>
+            <button class="secondary-button card-action-button danger-button" type="button" data-action="delete" data-id="${investment.id}">Delete</button>
+          </div>
         </article>
       `;
     })
     .join("");
+}
+
+function renderAll() {
+  renderFilterOptions();
+  const filteredInvestments = filterInvestments(allInvestments);
+  renderDashboard(filteredInvestments);
+  renderUpdates(filteredInvestments);
+  renderCompanyPanel();
 }
 
 async function loadConfig() {
@@ -172,7 +394,8 @@ deckDropZone.addEventListener("drop", (event) => {
 async function loadUpdates() {
   try {
     const data = await fetchJson("/api/investments");
-    renderUpdates(data.investments);
+    allInvestments = data.investments;
+    renderAll();
     setSignedInState(data.user || currentUser);
   } catch (error) {
     if (error.status === 401) {
@@ -303,19 +526,22 @@ form.addEventListener("submit", async (event) => {
   };
 
   try {
-    const result = await fetchJson("/api/investments", {
-      method: "POST",
+    const editingId = editingInvestmentId.value;
+    const result = await fetchJson(editingId ? `/api/investments/${editingId}` : "/api/investments", {
+      method: editingId ? "PATCH" : "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify(payload)
     });
 
-    formMessage.textContent = result.email.sent
-      ? "Update saved and email sent to your team."
-      : "Update saved. Email is not configured yet, so the team email preview is available on the server.";
+    formMessage.textContent = editingId
+      ? "Investment update saved."
+      : result.email.sent
+        ? "Update saved and email sent to your team."
+        : "Update saved. Email is not configured yet, so the team email preview is available on the server.";
 
-    form.reset();
+    resetFormToCreateMode();
     await loadUpdates();
     await loadConfig();
   } catch (error) {
@@ -339,6 +565,48 @@ refreshButton.addEventListener("click", () => {
 
 downloadCsvButton.addEventListener("click", () => {
   window.location.href = "/api/investments.csv";
+});
+
+cancelEditButton.addEventListener("click", () => {
+  resetFormToCreateMode();
+  formMessage.textContent = "Edit canceled.";
+});
+
+[searchFilter, statusFilter, stageFilter, ownerFilter].forEach((element) => {
+  element.addEventListener("input", renderAll);
+  element.addEventListener("change", renderAll);
+});
+
+closeCompanyPanelButton.addEventListener("click", () => {
+  selectedCompany = "";
+  renderCompanyPanel();
+});
+
+updatesList.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-action], [data-company]");
+  if (!target) {
+    return;
+  }
+
+  const company = target.dataset.company || "";
+  const action = target.dataset.action || "";
+  const investmentId = target.dataset.id || "";
+
+  if (company && (!action || action === "view-company")) {
+    selectedCompany = company;
+    renderCompanyPanel();
+    companyPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "edit" && investmentId) {
+    beginEditInvestment(investmentId);
+    return;
+  }
+
+  if (action === "delete" && investmentId) {
+    deleteInvestmentById(investmentId);
+  }
 });
 
 Promise.all([loadConfig(), loadUpdates()]).catch((error) => {

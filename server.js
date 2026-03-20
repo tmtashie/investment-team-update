@@ -66,12 +66,50 @@ function ensureDataFile() {
   }
 }
 
+function makeId() {
+  return crypto.randomUUID();
+}
+
+function normalizeInvestment(entry) {
+  return {
+    id: entry.id || makeId(),
+    company: String(entry.company || "").trim(),
+    amount: String(entry.amount || "").trim(),
+    currency: String(entry.currency || "USD").trim() || "USD",
+    stage: String(entry.stage || "").trim(),
+    status: String(entry.status || "").trim(),
+    owner: String(entry.owner || "").trim(),
+    nextStep: String(entry.nextStep || "").trim(),
+    notes: String(entry.notes || "").trim(),
+    recipients: Array.isArray(entry.recipients)
+      ? entry.recipients.map((value) => String(value).trim()).filter(Boolean)
+      : [],
+    submittedBy: String(entry.submittedBy || "").trim(),
+    createdAt: String(entry.createdAt || new Date().toISOString())
+  };
+}
+
+function writeInvestments(investments) {
+  ensureDataFile();
+  fs.writeFileSync(DATA_FILE, JSON.stringify(investments, null, 2) + "\n", "utf8");
+}
+
 function readInvestments() {
   ensureDataFile();
   try {
     const raw = fs.readFileSync(DATA_FILE, "utf8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const normalized = parsed.map(normalizeInvestment);
+    const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
+    if (changed) {
+      writeInvestments(normalized);
+    }
+
+    return normalized;
   } catch (error) {
     return [];
   }
@@ -79,8 +117,41 @@ function readInvestments() {
 
 function saveInvestment(entry) {
   const investments = readInvestments();
-  investments.unshift(entry);
-  fs.writeFileSync(DATA_FILE, JSON.stringify(investments, null, 2) + "\n", "utf8");
+  investments.unshift(normalizeInvestment(entry));
+  writeInvestments(investments);
+}
+
+function updateInvestment(id, updates) {
+  const investments = readInvestments();
+  const index = investments.findIndex((investment) => investment.id === id);
+
+  if (index === -1) {
+    return null;
+  }
+
+  const merged = normalizeInvestment({
+    ...investments[index],
+    ...updates,
+    id: investments[index].id,
+    createdAt: investments[index].createdAt,
+    submittedBy: investments[index].submittedBy
+  });
+
+  investments[index] = merged;
+  writeInvestments(investments);
+  return merged;
+}
+
+function deleteInvestment(id) {
+  const investments = readInvestments();
+  const remaining = investments.filter((investment) => investment.id !== id);
+
+  if (remaining.length === investments.length) {
+    return false;
+  }
+
+  writeInvestments(remaining);
+  return true;
 }
 
 function signSession(payload) {
@@ -540,6 +611,32 @@ function validateLogin(payload) {
 }
 
 function validateSubmission(payload, sessionUser) {
+  const clean = normalizeInvestment({
+    company: payload.company,
+    amount: payload.amount,
+    currency: payload.currency,
+    stage: payload.stage,
+    status: payload.status,
+    owner: payload.owner,
+    nextStep: payload.nextStep,
+    notes: payload.notes,
+    recipients: payload.recipients,
+    submittedBy: sessionUser.email,
+    createdAt: new Date().toISOString()
+  });
+
+  if (!clean.company) {
+    return { error: "Company name is required." };
+  }
+
+  if (!clean.status) {
+    return { error: "Status is required." };
+  }
+
+  return { value: clean };
+}
+
+function validateInvestmentPatch(payload) {
   const clean = {
     company: String(payload.company || "").trim(),
     amount: String(payload.amount || "").trim(),
@@ -551,9 +648,7 @@ function validateSubmission(payload, sessionUser) {
     notes: String(payload.notes || "").trim(),
     recipients: Array.isArray(payload.recipients)
       ? payload.recipients.map((value) => String(value).trim()).filter(Boolean)
-      : [],
-    submittedBy: sessionUser.email,
-    createdAt: new Date().toISOString()
+      : []
   };
 
   if (!clean.company) {
@@ -727,6 +822,54 @@ const server = http.createServer(async (request, response) => {
       });
       return;
     }
+  }
+
+  if (request.method === "PATCH" && url.pathname.startsWith("/api/investments/")) {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const investmentId = url.pathname.split("/").pop();
+      const payload = await parseRequestBody(request);
+      const validation = validateInvestmentPatch(payload);
+
+      if (validation.error) {
+        sendJson(response, 400, { error: validation.error });
+        return;
+      }
+
+      const updated = updateInvestment(investmentId, validation.value);
+      if (!updated) {
+        sendJson(response, 404, { error: "Investment update not found." });
+        return;
+      }
+
+      sendJson(response, 200, { investment: updated });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Update failed." });
+      return;
+    }
+  }
+
+  if (request.method === "DELETE" && url.pathname.startsWith("/api/investments/")) {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    const investmentId = url.pathname.split("/").pop();
+    const deleted = deleteInvestment(investmentId);
+
+    if (!deleted) {
+      sendJson(response, 404, { error: "Investment update not found." });
+      return;
+    }
+
+    sendJson(response, 200, { message: "Investment update deleted." });
+    return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/summarize-deck") {

@@ -121,6 +121,12 @@ h1 {
   gap: 16px;
 }
 
+.dashboard-grid,
+.company-summary-grid {
+  display: grid;
+  gap: 12px;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -238,6 +244,11 @@ button:disabled {
   gap: 10px;
 }
 
+.filters-grid {
+  display: grid;
+  gap: 14px;
+}
+
 .panel-header-stack {
   align-items: start;
 }
@@ -252,6 +263,27 @@ button:disabled {
   border-radius: 18px;
   background: rgba(255, 250, 242, 0.95);
   border: 1px solid var(--border);
+}
+
+.dashboard-card,
+.company-summary-card,
+.timeline-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 250, 242, 0.95);
+  border: 1px solid var(--border);
+}
+
+.dashboard-label {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.dashboard-value {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
 }
 
 .update-head {
@@ -284,6 +316,50 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.card-action-button {
+  padding: 10px 14px;
+}
+
+.danger-button {
+  background: rgba(124, 29, 29, 0.08);
+  color: #7c1d1d;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.company-timeline {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.15rem;
+  font-weight: 700;
+  text-align: left;
+  box-shadow: none;
+}
+
+.link-button:hover {
+  color: var(--accent-dark);
+  filter: none;
+}
+
 .hidden {
   display: none !important;
 }
@@ -305,5 +381,14 @@ button:disabled {
   .deck-tools {
     grid-template-columns: 1fr auto;
     align-items: end;
+  }
+
+  .dashboard-grid,
+  .company-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .filters-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
