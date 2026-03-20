@@ -35,7 +35,7 @@
         <div class="panel-header panel-header-stack">
           <div>
             <h2>Team sign in</h2>
-            <p class="section-copy">
+            <p id="loginCopy" class="section-copy">
               Use your email and the shared workspace password to unlock updates.
             </p>
           </div>
@@ -230,6 +230,16 @@
             </button>
           </div>
           <div id="companySummary" class="company-summary-grid"></div>
+          <div class="company-detail-grid">
+            <section class="company-detail-card">
+              <h3>Snapshot</h3>
+              <div id="companyHighlights" class="company-highlights"></div>
+            </section>
+            <section class="company-detail-card">
+              <h3>Open next steps</h3>
+              <div id="companyNextSteps" class="company-next-steps"></div>
+            </section>
+          </div>
           <div id="companyTimeline" class="company-timeline"></div>
         </section>
 
@@ -240,6 +250,9 @@
               <p class="section-copy">Your team can review the latest submissions here.</p>
             </div>
             <div class="panel-actions">
+              <button id="downloadExcelButton" type="button" class="secondary-button">
+                Download Excel
+              </button>
               <button id="downloadCsvButton" type="button" class="secondary-button">
                 Download CSV
               </button>

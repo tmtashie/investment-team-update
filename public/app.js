@@ -2,6 +2,7 @@ const loginPanel = document.getElementById("loginPanel");
 const appPanel = document.getElementById("appPanel");
 const loginForm = document.getElementById("loginForm");
 const loginMessage = document.getElementById("loginMessage");
+const loginCopy = document.getElementById("loginCopy");
 const loginButton = document.getElementById("loginButton");
 const logoutButton = document.getElementById("logoutButton");
 const form = document.getElementById("investmentForm");
@@ -13,6 +14,7 @@ const recipientStatus = document.getElementById("recipientStatus");
 const refreshButton = document.getElementById("refreshButton");
 const submitButton = document.getElementById("submitButton");
 const downloadCsvButton = document.getElementById("downloadCsvButton");
+const downloadExcelButton = document.getElementById("downloadExcelButton");
 const cancelEditButton = document.getElementById("cancelEditButton");
 const editingInvestmentId = document.getElementById("editingInvestmentId");
 const notesField = document.getElementById("notesField");
@@ -30,6 +32,8 @@ const companyPanel = document.getElementById("companyPanel");
 const companyPanelTitle = document.getElementById("companyPanelTitle");
 const companyPanelCopy = document.getElementById("companyPanelCopy");
 const companySummary = document.getElementById("companySummary");
+const companyHighlights = document.getElementById("companyHighlights");
+const companyNextSteps = document.getElementById("companyNextSteps");
 const companyTimeline = document.getElementById("companyTimeline");
 const closeCompanyPanelButton = document.getElementById("closeCompanyPanelButton");
 
@@ -115,6 +119,10 @@ function filterInvestments(investments) {
 function toNumber(value) {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : 0;
+}
+
+function formatMoney(value) {
+  return `$${toNumber(value).toLocaleString()}`;
 }
 
 function buildDashboardCards(investments) {
@@ -221,6 +229,8 @@ function renderCompanyPanel() {
   if (!selectedCompany) {
     companyPanel.classList.add("hidden");
     companySummary.innerHTML = "";
+    companyHighlights.innerHTML = "";
+    companyNextSteps.innerHTML = "";
     companyTimeline.innerHTML = "";
     return;
   }
@@ -235,7 +245,17 @@ function renderCompanyPanel() {
   }
 
   const latest = companyUpdates[0];
+  const earliest = companyUpdates[companyUpdates.length - 1];
   const totalAmount = companyUpdates.reduce((sum, investment) => sum + toNumber(investment.amount), 0);
+  const uniqueOwners = Array.from(
+    new Set(companyUpdates.map((investment) => investment.owner).filter(Boolean))
+  );
+  const uniqueStatuses = Array.from(
+    new Set(companyUpdates.map((investment) => investment.status).filter(Boolean))
+  );
+  const nextSteps = Array.from(
+    new Set(companyUpdates.map((investment) => investment.nextStep).filter(Boolean))
+  );
   companyPanel.classList.remove("hidden");
   companyPanelTitle.textContent = selectedCompany;
   companyPanelCopy.textContent = `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
@@ -243,7 +263,7 @@ function renderCompanyPanel() {
     { label: "Latest status", value: latest.status || "Not set" },
     { label: "Latest stage", value: latest.stage || "Not set" },
     { label: "Latest owner", value: latest.owner || "Not set" },
-    { label: "Reported amount", value: `$${totalAmount.toLocaleString()}` }
+    { label: "Reported amount", value: formatMoney(totalAmount) }
   ]
     .map(
       (item) => `
@@ -255,6 +275,31 @@ function renderCompanyPanel() {
     )
     .join("");
 
+  companyHighlights.innerHTML = [
+    { label: "First entered", value: earliest.createdAt || "Unknown" },
+    { label: "Latest update", value: latest.createdAt || "Unknown" },
+    { label: "Submitted by", value: latest.submittedBy || "Unknown" },
+    { label: "Owners involved", value: uniqueOwners.length ? uniqueOwners.join(", ") : "Not set" },
+    { label: "Statuses used", value: uniqueStatuses.length ? uniqueStatuses.join(", ") : "Not set" },
+    { label: "Latest notes", value: latest.notes || "No notes provided." }
+  ]
+    .map(
+      (item) => `
+        <div class="highlight-row">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="highlight-value">${escapeHtml(item.value)}</p>
+        </div>
+      `
+    )
+    .join("");
+
+  companyNextSteps.innerHTML = nextSteps.length
+    ? `<ul class="company-list">${nextSteps
+        .slice(0, 6)
+        .map((nextStep) => `<li>${escapeHtml(nextStep)}</li>`)
+        .join("")}</ul>`
+    : '<p class="update-meta">No next steps recorded yet.</p>';
+
   companyTimeline.innerHTML = companyUpdates
     .map(
       (investment) => `
@@ -265,6 +310,16 @@ function renderCompanyPanel() {
           </div>
           <p class="update-meta">
             ${escapeHtml(investment.createdAt)} • Owner: ${escapeHtml(investment.owner || "Not set")}
+          </p>
+          <p class="update-meta">
+            Amount: ${
+              investment.amount
+                ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.amount)}`
+                : "Amount not specified"
+            } • Submitted by: ${escapeHtml(investment.submittedBy || "Unknown")}
+          </p>
+          <p class="update-meta">
+            Next: ${escapeHtml(investment.nextStep || "No next step provided")}
           </p>
           <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
         </article>
@@ -336,6 +391,11 @@ async function loadConfig() {
     ? `Default team emails: ${config.defaultRecipients.join(", ")}`
     : "No default team emails set";
 
+  loginCopy.textContent =
+    config.authMode === "individual"
+      ? `Use your email and your personal workspace password to sign in. ${config.teamUserCount} team login${config.teamUserCount === 1 ? "" : "s"} configured.`
+      : "Use your email and the shared workspace password to unlock updates.";
+
   if (!config.aiConfigured) {
     deckMessage.textContent =
       "Add OPENAI_API_KEY in Render to turn on deck summarization.";
@@ -343,7 +403,7 @@ async function loadConfig() {
 
   if (!config.authConfigured) {
     loginMessage.textContent =
-      "The server still needs TEAM_PASSWORD and SESSION_SECRET in .env.";
+      "The server still needs SESSION_SECRET plus TEAM_PASSWORD or TEAM_USERS in Render.";
   }
 }
 
@@ -565,6 +625,10 @@ refreshButton.addEventListener("click", () => {
 
 downloadCsvButton.addEventListener("click", () => {
   window.location.href = "/api/investments.csv";
+});
+
+downloadExcelButton.addEventListener("click", () => {
+  window.location.href = "/api/investments.xlsx";
 });
 
 cancelEditButton.addEventListener("click", () => {

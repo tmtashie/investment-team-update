@@ -45,9 +45,6 @@ const MAX_BODY_SIZE_BYTES = 20 * 1024 * 1024;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const DEFAULT_RECIPIENTS = splitCsv(process.env.TEAM_EMAILS || "");
-const ALLOWED_EMAILS = splitCsv(process.env.TEAM_ALLOWED_EMAILS || "").map((email) =>
-  email.toLowerCase()
-);
 
 function splitCsv(value) {
   return String(value)
@@ -55,6 +52,37 @@ function splitCsv(value) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+
+function parseTeamUsers(value) {
+  return splitCsv(value).reduce((users, entry) => {
+    const separatorIndex = entry.indexOf(":");
+    if (separatorIndex === -1) {
+      return users;
+    }
+
+    const email = entry.slice(0, separatorIndex).trim().toLowerCase();
+    const password = entry.slice(separatorIndex + 1).trim();
+
+    if (!email || !password) {
+      return users;
+    }
+
+    users[email] = {
+      email,
+      password
+    };
+    return users;
+  }, {});
+}
+
+const TEAM_USERS = parseTeamUsers(process.env.TEAM_USERS || "");
+const ALLOWED_EMAILS = Array.from(
+  new Set(
+    splitCsv(process.env.TEAM_ALLOWED_EMAILS || "")
+      .map((email) => email.toLowerCase())
+      .concat(Object.keys(TEAM_USERS))
+  )
+);
 
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -301,6 +329,28 @@ function buildInvestmentsCsv(investments) {
   return [headers.map(csvEscape).join(","), ...rows].join("\n");
 }
 
+function buildInvestmentsWorkbookBuffer(investments) {
+  const XLSX = require("xlsx");
+  const rows = investments.map((investment) => ({
+    Company: investment.company,
+    Amount: investment.amount,
+    Currency: investment.currency,
+    Stage: investment.stage,
+    Status: investment.status,
+    Owner: investment.owner,
+    "Next Step": investment.nextStep,
+    Notes: investment.notes,
+    "Submitted By": investment.submittedBy,
+    Recipients: Array.isArray(investment.recipients) ? investment.recipients.join(", ") : "",
+    "Created At": investment.createdAt
+  }));
+
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Investment Updates");
+  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+}
+
 function serveStaticFile(response, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const contentTypes = {
@@ -431,19 +481,22 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
             {
               type: "input_text",
               text: [
-                "Summarize this investment deck for a deal team.",
-                "Return concise markdown with these sections:",
-                "1. Company overview",
-                "2. Business model",
-                "3. Traction and metrics",
-                "4. Raise details",
-                "5. Key risks",
-                "6. Recommended next steps",
+                "Summarize this investment deck for an investment committee update.",
+                "Return concise markdown using exactly these headings:",
+                "## Thesis",
+                "## Business",
+                "## Market and traction",
+                "## Financing",
+                "## Risks",
+                "## Recommendation",
+                "## Questions for the team",
                 "",
                 companyLine,
                 stageLine,
                 "",
-                "If a detail is not in the deck, say that it was not clearly stated."
+                "Under each heading, use short bullets.",
+                "If a detail is missing, say that it was not clearly stated.",
+                "Keep the tone direct and useful for a deal team."
               ].join("\n")
             },
             {
@@ -458,6 +511,11 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
 
   if (!response.ok) {
     const errorText = await response.text();
+    if (errorText.includes("insufficient_quota")) {
+      throw new Error(
+        "OpenAI summary failed: your OpenAI API account needs billing or more quota before deck summaries can run."
+      );
+    }
     throw new Error(`OpenAI summary failed: ${errorText}`);
   }
 
@@ -590,13 +648,26 @@ function validateLogin(payload) {
   const email = String(payload.email || "").trim().toLowerCase();
   const password = String(payload.password || "");
   const sharedPassword = String(process.env.TEAM_PASSWORD || "");
+  const teamUser = TEAM_USERS[email];
 
   if (!email) {
     return { error: "Email is required." };
   }
 
+  if (Object.keys(TEAM_USERS).length > 0) {
+    if (!teamUser) {
+      return { error: "That email is not set up for this workspace yet." };
+    }
+
+    if (password !== teamUser.password) {
+      return { error: "Incorrect password." };
+    }
+
+    return { value: email };
+  }
+
   if (!sharedPassword) {
-    return { error: "TEAM_PASSWORD is not configured on the server yet." };
+    return { error: "Set TEAM_PASSWORD or TEAM_USERS on the server first." };
   }
 
   if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(email)) {
@@ -703,7 +774,11 @@ const server = http.createServer(async (request, response) => {
       defaultRecipients: DEFAULT_RECIPIENTS,
       emailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL),
       aiConfigured: Boolean(process.env.OPENAI_API_KEY),
-      authConfigured: Boolean(process.env.TEAM_PASSWORD && process.env.SESSION_SECRET),
+      authConfigured: Boolean(
+        (process.env.TEAM_PASSWORD || Object.keys(TEAM_USERS).length > 0) && process.env.SESSION_SECRET
+      ),
+      authMode: Object.keys(TEAM_USERS).length > 0 ? "individual" : "shared",
+      teamUserCount: Object.keys(TEAM_USERS).length,
       user
     });
     return;
@@ -782,6 +857,27 @@ const server = http.createServer(async (request, response) => {
     });
     response.end(csv);
     return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/investments.xlsx") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const workbookBuffer = buildInvestmentsWorkbookBuffer(readInvestments());
+      response.writeHead(200, {
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": 'attachment; filename="investment-updates.xlsx"'
+      });
+      response.end(workbookBuffer);
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Excel export failed." });
+      return;
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/investments") {

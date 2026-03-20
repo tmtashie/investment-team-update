@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node server.js"
   },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  },
   "engines": {
     "node": ">=18"
   }

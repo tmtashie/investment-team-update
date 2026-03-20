@@ -127,6 +127,12 @@ h1 {
   gap: 12px;
 }
 
+.company-detail-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -267,7 +273,8 @@ button:disabled {
 
 .dashboard-card,
 .company-summary-card,
-.timeline-card {
+.timeline-card,
+.company-detail-card {
   padding: 16px;
   border-radius: 18px;
   background: rgba(255, 250, 242, 0.95);
@@ -344,6 +351,29 @@ button:disabled {
   margin-top: 16px;
 }
 
+.company-highlights {
+  display: grid;
+  gap: 12px;
+}
+
+.highlight-row {
+  display: grid;
+  gap: 4px;
+}
+
+.highlight-value {
+  margin: 0;
+  font-weight: 600;
+  white-space: pre-wrap;
+}
+
+.company-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+}
+
 .link-button {
   padding: 0;
   border: 0;
@@ -390,5 +420,9 @@ button:disabled {
 
   .filters-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .company-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
