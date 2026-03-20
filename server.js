@@ -186,6 +186,50 @@ function sendText(response, statusCode, body, headers = {}) {
   response.end(body);
 }
 
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function buildInvestmentsCsv(investments) {
+  const headers = [
+    "Company",
+    "Amount",
+    "Currency",
+    "Stage",
+    "Status",
+    "Owner",
+    "Next Step",
+    "Notes",
+    "Submitted By",
+    "Recipients",
+    "Created At"
+  ];
+
+  const rows = investments.map((investment) =>
+    [
+      investment.company,
+      investment.amount,
+      investment.currency,
+      investment.stage,
+      investment.status,
+      investment.owner,
+      investment.nextStep,
+      investment.notes,
+      investment.submittedBy,
+      Array.isArray(investment.recipients) ? investment.recipients.join(", ") : "",
+      investment.createdAt
+    ]
+      .map(csvEscape)
+      .join(",")
+  );
+
+  return [headers.map(csvEscape).join(","), ...rows].join("\n");
+}
+
 function serveStaticFile(response, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const contentTypes = {
@@ -627,6 +671,21 @@ const server = http.createServer(async (request, response) => {
     }
 
     sendJson(response, 200, { investments: readInvestments(), user });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/investments.csv") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    const csv = buildInvestmentsCsv(readInvestments());
+    response.writeHead(200, {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="investment-updates.csv"'
+    });
+    response.end(csv);
     return;
   }
 

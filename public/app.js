@@ -12,6 +12,7 @@ const emailStatus = document.getElementById("emailStatus");
 const recipientStatus = document.getElementById("recipientStatus");
 const refreshButton = document.getElementById("refreshButton");
 const submitButton = document.getElementById("submitButton");
+const downloadCsvButton = document.getElementById("downloadCsvButton");
 const notesField = document.getElementById("notesField");
 const deckFile = document.getElementById("deckFile");
 const deckMessage = document.getElementById("deckMessage");
@@ -334,6 +335,10 @@ refreshButton.addEventListener("click", () => {
   loadUpdates().catch((error) => {
     formMessage.textContent = error.message;
   });
+});
+
+downloadCsvButton.addEventListener("click", () => {
+  window.location.href = "/api/investments.csv";
 });
 
 Promise.all([loadConfig(), loadUpdates()]).catch((error) => {
