@@ -43,6 +43,12 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-before-productio
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_BODY_SIZE_BYTES = 20 * 1024 * 1024;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const INVESTMENT_ENTITIES = [
+  "Beaman Ventures",
+  "Lee Beaman",
+  "Katherine Trust",
+  "Natalie Trust"
+];
 
 const DEFAULT_RECIPIENTS = splitCsv(process.env.TEAM_EMAILS || "");
 
@@ -114,10 +120,12 @@ function findLatestByCompanyKey(companyKey, investments) {
 }
 
 function normalizeInvestment(entry) {
+  const entity = String(entry.entity || "").trim();
   return {
     id: entry.id || makeId(),
     company: String(entry.company || "").trim(),
     companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
+    entity,
     amount: String(entry.amount || "").trim(),
     currency: String(entry.currency || "USD").trim() || "USD",
     stage: String(entry.stage || "").trim(),
@@ -328,6 +336,7 @@ function csvEscape(value) {
 
 function buildInvestmentsCsv(investments) {
   const headers = [
+    "Entity",
     "Company",
     "Amount",
     "Currency",
@@ -343,6 +352,7 @@ function buildInvestmentsCsv(investments) {
 
   const rows = investments.map((investment) =>
     [
+      investment.entity,
       investment.company,
       investment.amount,
       investment.currency,
@@ -365,6 +375,7 @@ function buildInvestmentsCsv(investments) {
 function buildInvestmentsWorkbookBuffer(investments) {
   const XLSX = require("xlsx");
   const rows = investments.map((investment) => ({
+    Entity: investment.entity,
     Company: investment.company,
     Amount: investment.amount,
     Currency: investment.currency,
@@ -648,6 +659,7 @@ function formatAmount(entry) {
 }
 
 function buildSummary(entry) {
+  const entityLine = entry.entity || "Entity not specified";
   const companyLine = entry.company || "Unnamed investment";
   const amountLine = formatAmount(entry);
   const stageLine = entry.stage || "Stage not specified";
@@ -661,6 +673,7 @@ function buildSummary(entry) {
     `${entry.status} investment update`,
     "",
     `Company: ${companyLine}`,
+    `Entity: ${entityLine}`,
     `Amount: ${amountLine}`,
     `Stage: ${stageLine}`,
     `Owner: ${ownerLine}`,
@@ -692,7 +705,8 @@ function buildSummary(entry) {
           </span>
         </p>
         <table style="border-collapse: collapse; width: 100%;">
-          <tr><td style="padding: 8px 0; font-weight: bold; width: 140px;">Amount</td><td>${escapeHtml(amountLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold; width: 140px;">Entity</td><td>${escapeHtml(entityLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Amount</td><td>${escapeHtml(amountLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Stage</td><td>${escapeHtml(stageLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Owner</td><td>${escapeHtml(ownerLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Submitted by</td><td>${escapeHtml(entry.submittedBy)}</td></tr>
@@ -789,6 +803,7 @@ function validateLogin(payload) {
 function validateSubmission(payload, sessionUser) {
   const clean = normalizeInvestment({
     company: payload.company,
+    entity: payload.entity,
     amount: payload.amount,
     currency: payload.currency,
     stage: payload.stage,
@@ -805,6 +820,10 @@ function validateSubmission(payload, sessionUser) {
     return { error: "Company name is required." };
   }
 
+  if (!clean.entity) {
+    return { error: "Entity is required." };
+  }
+
   if (!clean.status) {
     return { error: "Status is required." };
   }
@@ -815,6 +834,7 @@ function validateSubmission(payload, sessionUser) {
 function validateInvestmentPatch(payload) {
   const clean = {
     company: String(payload.company || "").trim(),
+    entity: String(payload.entity || "").trim(),
     amount: String(payload.amount || "").trim(),
     currency: String(payload.currency || "USD").trim() || "USD",
     stage: String(payload.stage || "").trim(),
@@ -829,6 +849,10 @@ function validateInvestmentPatch(payload) {
 
   if (!clean.company) {
     return { error: "Company name is required." };
+  }
+
+  if (!clean.entity) {
+    return { error: "Entity is required." };
   }
 
   if (!clean.status) {
@@ -879,6 +903,7 @@ const server = http.createServer(async (request, response) => {
       defaultRecipients: DEFAULT_RECIPIENTS,
       emailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL),
       aiConfigured: Boolean(process.env.OPENAI_API_KEY),
+      entities: INVESTMENT_ENTITIES,
       authConfigured: Boolean(
         (process.env.TEAM_PASSWORD || Object.keys(TEAM_USERS).length > 0) && process.env.SESSION_SECRET
       ),

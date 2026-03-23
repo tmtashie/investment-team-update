@@ -331,6 +331,11 @@ button:disabled {
   gap: 16px;
 }
 
+.three-up {
+  display: grid;
+  gap: 16px;
+}
+
 .deck-tools {
   display: grid;
   gap: 12px;
@@ -567,6 +572,10 @@ button:disabled {
     grid-template-columns: 1fr 1fr;
   }
 
+  .three-up {
+    grid-template-columns: 1.1fr 1fr 0.7fr;
+  }
+
   .deck-tools {
     grid-template-columns: 1fr auto;
     align-items: end;
@@ -578,7 +587,7 @@ button:disabled {
   }
 
   .filters-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .company-detail-grid {

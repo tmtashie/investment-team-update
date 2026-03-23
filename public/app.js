@@ -27,6 +27,7 @@ const emailSummaryInput = document.getElementById("emailSummaryInput");
 const summarizeEmailButton = document.getElementById("summarizeEmailButton");
 const emailMessage = document.getElementById("emailMessage");
 const dashboardCards = document.getElementById("dashboardCards");
+const entityFilter = document.getElementById("entityFilter");
 const searchFilter = document.getElementById("searchFilter");
 const statusFilter = document.getElementById("statusFilter");
 const stageFilter = document.getElementById("stageFilter");
@@ -44,6 +45,7 @@ const closeCompanyPanelButton = document.getElementById("closeCompanyPanelButton
 let currentUser = null;
 let allInvestments = [];
 let selectedCompany = "";
+let configuredEntities = [];
 
 function companyKey(value) {
   return String(value || "")
@@ -98,6 +100,7 @@ function updateDeckFileLabel(file) {
 
 function currentFilters() {
   return {
+    entity: entityFilter.value,
     search: searchFilter.value.trim().toLowerCase(),
     status: statusFilter.value,
     stage: stageFilter.value,
@@ -109,6 +112,7 @@ function filterInvestments(investments) {
   const filters = currentFilters();
   return investments.filter((investment) => {
     const searchHaystack = [
+      investment.entity,
       investment.company,
       investment.notes,
       investment.owner,
@@ -119,11 +123,12 @@ function filterInvestments(investments) {
       .toLowerCase();
 
     const matchesSearch = !filters.search || searchHaystack.includes(filters.search);
+    const matchesEntity = !filters.entity || investment.entity === filters.entity;
     const matchesStatus = !filters.status || investment.status === filters.status;
     const matchesStage = !filters.stage || investment.stage === filters.stage;
     const matchesOwner = !filters.owner || investment.owner === filters.owner;
 
-    return matchesSearch && matchesStatus && matchesStage && matchesOwner;
+    return matchesEntity && matchesSearch && matchesStatus && matchesStage && matchesOwner;
   });
 }
 
@@ -144,13 +149,21 @@ function buildDashboardCards(investments) {
   const approvedCount = investments.filter((investment) => investment.status === "Approved").length;
   const totalAmount = investments.reduce((sum, investment) => sum + toNumber(investment.amount), 0);
 
-  return [
+  const cards = [
     { label: "Updates", value: String(investments.length) },
     { label: "Companies", value: String(uniqueCompanies.size) },
     { label: "Active pipeline", value: String(openCount) },
     { label: "Approved", value: String(approvedCount) },
     { label: "Reported amount", value: `$${totalAmount.toLocaleString()}` }
   ];
+
+  const entityTotals = (configuredEntities.length ? configuredEntities : [])
+    .map((entity) => ({
+      label: entity,
+      value: String(investments.filter((investment) => investment.entity === entity).length)
+    }));
+
+  return cards.concat(entityTotals);
 }
 
 function renderDashboard(investments) {
@@ -168,6 +181,9 @@ function renderDashboard(investments) {
 }
 
 function renderFilterOptions() {
+  const entities = Array.from(
+    new Set(configuredEntities.concat(allInvestments.map((item) => item.entity).filter(Boolean)))
+  ).sort();
   const statuses = Array.from(new Set(allInvestments.map((item) => item.status).filter(Boolean))).sort();
   const stages = Array.from(new Set(allInvestments.map((item) => item.stage).filter(Boolean))).sort();
   const owners = Array.from(new Set(allInvestments.map((item) => item.owner).filter(Boolean))).sort();
@@ -180,6 +196,7 @@ function renderFilterOptions() {
     element.value = values.includes(currentValue) ? currentValue : "";
   };
 
+  assignOptions(entityFilter, "All entities", entities);
   assignOptions(statusFilter, "All statuses", statuses);
   assignOptions(stageFilter, "All stages", stages);
   assignOptions(ownerFilter, "All owners", owners);
@@ -203,6 +220,7 @@ function beginEditInvestment(investmentId) {
 
   editingInvestmentId.value = investment.id;
   form.elements.company.value = investment.company || "";
+  form.elements.entity.value = investment.entity || "";
   form.elements.amount.value = investment.amount || "";
   form.elements.currency.value = investment.currency || "USD";
   form.elements.stage.value = investment.stage || "";
@@ -284,6 +302,7 @@ function renderCompanyPanel() {
   companyPanelCopy.textContent = `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
   companySummary.innerHTML = [
     { label: "Latest status", value: latest.status || "Not set" },
+    { label: "Latest entity", value: latest.entity || "Not set" },
     { label: "Latest stage", value: latest.stage || "Not set" },
     { label: "Latest owner", value: latest.owner || "Not set" },
     { label: "Reported amount", value: formatMoney(totalAmount) }
@@ -302,6 +321,7 @@ function renderCompanyPanel() {
     { label: "First entered", value: earliest.createdAt || "Unknown" },
     { label: "Latest update", value: latest.createdAt || "Unknown" },
     { label: "Submitted by", value: latest.submittedBy || "Unknown" },
+    { label: "Entities used", value: Array.from(new Set(companyUpdates.map((investment) => investment.entity).filter(Boolean))).join(", ") || "Not set" },
     { label: "Owners involved", value: uniqueOwners.length ? uniqueOwners.join(", ") : "Not set" },
     { label: "Statuses used", value: uniqueStatuses.length ? uniqueStatuses.join(", ") : "Not set" },
     { label: "Latest notes", value: latest.notes || "No notes provided." }
@@ -332,7 +352,7 @@ function renderCompanyPanel() {
             <span class="status-chip">${escapeHtml(investment.stage || "No stage")}</span>
           </div>
           <p class="update-meta">
-            ${escapeHtml(investment.createdAt)} • Owner: ${escapeHtml(investment.owner || "Not set")}
+            ${escapeHtml(investment.createdAt)} • ${escapeHtml(investment.entity || "No entity")} • Owner: ${escapeHtml(investment.owner || "Not set")}
           </p>
           <p class="update-meta">
             Amount: ${
@@ -373,7 +393,7 @@ function renderUpdates(investments) {
             <span class="status-chip">${escapeHtml(investment.status)}</span>
           </div>
           <p class="update-meta">
-            ${amount} • ${escapeHtml(investment.stage || "Stage not specified")}
+            ${escapeHtml(investment.entity || "Entity not specified")} • ${amount} • ${escapeHtml(investment.stage || "Stage not specified")}
           </p>
           <p class="update-meta">
             Owner: ${escapeHtml(investment.owner || "Not set")} • Submitted by:
@@ -414,6 +434,7 @@ async function loadConfig() {
   recipientStatus.textContent = config.defaultRecipients.length
     ? `Default team emails: ${config.defaultRecipients.join(", ")}`
     : "No default team emails set";
+  configuredEntities = Array.isArray(config.entities) ? config.entities : [];
 
   loginCopy.textContent =
     config.authMode === "individual"
@@ -639,6 +660,7 @@ form.addEventListener("submit", async (event) => {
 
   const payload = {
     company: formData.get("company"),
+    entity: formData.get("entity"),
     amount: formData.get("amount"),
     currency: formData.get("currency"),
     stage: formData.get("stage"),
@@ -700,7 +722,7 @@ cancelEditButton.addEventListener("click", () => {
   formMessage.textContent = "Edit canceled.";
 });
 
-[searchFilter, statusFilter, stageFilter, ownerFilter].forEach((element) => {
+[entityFilter, searchFilter, statusFilter, stageFilter, ownerFilter].forEach((element) => {
   element.addEventListener("input", renderAll);
   element.addEventListener("change", renderAll);
 });

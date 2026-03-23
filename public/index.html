@@ -158,7 +158,18 @@
               Pick an existing company name to add a new update to that investment history.
             </p>
 
-            <div class="two-up">
+            <div class="three-up">
+              <label>
+                Entity
+                <select name="entity" id="entityField" required>
+                  <option value="">Select entity</option>
+                  <option value="Beaman Ventures">Beaman Ventures</option>
+                  <option value="Lee Beaman">Lee Beaman</option>
+                  <option value="Katherine Trust">Katherine Trust</option>
+                  <option value="Natalie Trust">Natalie Trust</option>
+                </select>
+              </label>
+
               <label>
                 Amount
                 <input name="amount" type="number" min="0" step="0.01" placeholder="250000" />
@@ -267,10 +278,16 @@
           <div class="panel-header panel-header-stack">
             <div>
               <h2>Filters</h2>
-              <p class="section-copy">Narrow the list by deal, owner, stage, or status.</p>
+              <p class="section-copy">Narrow the list by entity, deal, owner, stage, or status.</p>
             </div>
           </div>
           <div class="filters-grid">
+            <label>
+              Entity
+              <select id="entityFilter">
+                <option value="">All entities</option>
+              </select>
+            </label>
             <label>
               Search
               <input id="searchFilter" type="text" placeholder="Search company or notes" />
