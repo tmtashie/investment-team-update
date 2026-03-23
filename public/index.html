@@ -13,17 +13,44 @@
   <body>
     <main class="app-shell">
       <section class="hero-card">
-        <div class="hero-topline">
-          <p class="eyebrow">Private Mobile Team Workflow</p>
-          <button id="logoutButton" type="button" class="secondary-button hidden">
-            Sign out
-          </button>
+        <div class="hero-grid">
+          <div class="hero-copy-block">
+            <div class="hero-topline">
+              <p class="eyebrow">Private Mobile Team Workflow</p>
+              <button id="logoutButton" type="button" class="secondary-button hidden">
+                Sign out
+              </button>
+            </div>
+            <h1>Professional investment updates, without the spreadsheet scramble.</h1>
+            <p class="hero-copy">
+              Capture deals from your phone, summarize decks and emails with AI, and send
+              polished internal updates in one place.
+            </p>
+            <div class="hero-actions">
+              <span class="hero-chip">Mobile-first workflow</span>
+              <span class="hero-chip">AI deck and email summaries</span>
+              <span class="hero-chip">Team-ready exports</span>
+            </div>
+          </div>
+
+          <aside class="hero-side-panel">
+            <p class="hero-side-label">What your team gets</p>
+            <div class="hero-metric-list">
+              <div class="hero-metric">
+                <span class="hero-metric-value">1</span>
+                <span class="hero-metric-copy">shared place for pipeline updates</span>
+              </div>
+              <div class="hero-metric">
+                <span class="hero-metric-value">2</span>
+                <span class="hero-metric-copy">AI shortcuts for decks and emails</span>
+              </div>
+              <div class="hero-metric">
+                <span class="hero-metric-value">3</span>
+                <span class="hero-metric-copy">clean exports for Excel and team review</span>
+              </div>
+            </div>
+          </aside>
         </div>
-        <h1>Share investment updates from your phone.</h1>
-        <p class="hero-copy">
-          Sign in, log the company, amount, status, and next step, then send a
-          polished update to your team automatically.
-        </p>
         <div class="status-row">
           <span id="authStatus" class="status-pill status-pill-muted">Checking sign-in...</span>
           <span id="emailStatus" class="status-pill">Checking email setup...</span>
@@ -31,42 +58,71 @@
         </div>
       </section>
 
+      <section class="feature-strip">
+        <article class="feature-card">
+          <p class="feature-kicker">Capture</p>
+          <h2>Log updates fast</h2>
+          <p class="section-copy">
+            Record company, amount, owner, stage, status, and next steps from one clean form.
+          </p>
+        </article>
+        <article class="feature-card">
+          <p class="feature-kicker">Summarize</p>
+          <h2>Turn raw inputs into clear notes</h2>
+          <p class="section-copy">
+            Use AI to turn decks and email threads into structured internal investment summaries.
+          </p>
+        </article>
+        <article class="feature-card">
+          <p class="feature-kicker">Share</p>
+          <h2>Keep the team aligned</h2>
+          <p class="section-copy">
+            Send polished email updates, review company history, and export the full pipeline.
+          </p>
+        </article>
+      </section>
+
       <section id="loginPanel" class="panel">
-        <div class="panel-header panel-header-stack">
-          <div>
+        <div class="login-panel-shell">
+          <div class="login-panel-copy">
+            <p class="feature-kicker">Secure access</p>
             <h2>Team sign in</h2>
             <p id="loginCopy" class="section-copy">
               Use your email and the shared workspace password to unlock updates.
             </p>
+            <div class="login-bullets">
+              <span>Private workspace</span>
+              <span>Persistent update history</span>
+              <span>Exports and team email delivery</span>
+            </div>
           </div>
+          <form id="loginForm" class="investment-form login-form-card">
+            <label>
+              Email
+              <input
+                name="email"
+                type="email"
+                autocomplete="email"
+                placeholder="you@company.com"
+                required
+              />
+            </label>
+
+            <label>
+              Team password
+              <input
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Shared team password"
+                required
+              />
+            </label>
+
+            <button id="loginButton" type="submit">Sign in</button>
+            <p id="loginMessage" class="form-message" aria-live="polite"></p>
+          </form>
         </div>
-
-        <form id="loginForm" class="investment-form">
-          <label>
-            Email
-            <input
-              name="email"
-              type="email"
-              autocomplete="email"
-              placeholder="you@company.com"
-              required
-            />
-          </label>
-
-          <label>
-            Team password
-            <input
-              name="password"
-              type="password"
-              autocomplete="current-password"
-              placeholder="Shared team password"
-              required
-            />
-          </label>
-
-          <button id="loginButton" type="submit">Sign in</button>
-          <p id="loginMessage" class="form-message" aria-live="polite"></p>
-        </form>
       </section>
 
       <section id="appPanel" class="hidden">
