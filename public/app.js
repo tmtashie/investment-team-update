@@ -31,6 +31,7 @@ const searchFilter = document.getElementById("searchFilter");
 const statusFilter = document.getElementById("statusFilter");
 const stageFilter = document.getElementById("stageFilter");
 const ownerFilter = document.getElementById("ownerFilter");
+const companySuggestions = document.getElementById("companySuggestions");
 const companyPanel = document.getElementById("companyPanel");
 const companyPanelTitle = document.getElementById("companyPanelTitle");
 const companyPanelCopy = document.getElementById("companyPanelCopy");
@@ -43,6 +44,13 @@ const closeCompanyPanelButton = document.getElementById("closeCompanyPanelButton
 let currentUser = null;
 let allInvestments = [];
 let selectedCompany = "";
+
+function companyKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -177,6 +185,16 @@ function renderFilterOptions() {
   assignOptions(ownerFilter, "All owners", owners);
 }
 
+function renderCompanySuggestions() {
+  const companies = Array.from(
+    new Set(allInvestments.map((item) => item.company).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right));
+
+  companySuggestions.innerHTML = companies
+    .map((company) => `<option value="${escapeHtml(company)}"></option>`)
+    .join("");
+}
+
 function beginEditInvestment(investmentId) {
   const investment = allInvestments.find((item) => item.id === investmentId);
   if (!investment) {
@@ -241,7 +259,7 @@ function renderCompanyPanel() {
   }
 
   const companyUpdates = allInvestments
-    .filter((investment) => investment.company === selectedCompany)
+    .filter((investment) => companyKey(investment.company) === companyKey(selectedCompany))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   if (!companyUpdates.length) {
@@ -262,7 +280,7 @@ function renderCompanyPanel() {
     new Set(companyUpdates.map((investment) => investment.nextStep).filter(Boolean))
   );
   companyPanel.classList.remove("hidden");
-  companyPanelTitle.textContent = selectedCompany;
+  companyPanelTitle.textContent = latest.company || selectedCompany;
   companyPanelCopy.textContent = `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
   companySummary.innerHTML = [
     { label: "Latest status", value: latest.status || "Not set" },
@@ -377,6 +395,7 @@ function renderUpdates(investments) {
 }
 
 function renderAll() {
+  renderCompanySuggestions();
   renderFilterOptions();
   const filteredInvestments = filterInvestments(allInvestments);
   renderDashboard(filteredInvestments);

@@ -98,10 +98,26 @@ function makeId() {
   return crypto.randomUUID();
 }
 
+function normalizeCompanyKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function findLatestByCompanyKey(companyKey, investments) {
+  if (!companyKey) {
+    return null;
+  }
+
+  return investments.find((investment) => investment.companyKey === companyKey) || null;
+}
+
 function normalizeInvestment(entry) {
   return {
     id: entry.id || makeId(),
     company: String(entry.company || "").trim(),
+    companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
     amount: String(entry.amount || "").trim(),
     currency: String(entry.currency || "USD").trim() || "USD",
     stage: String(entry.stage || "").trim(),
@@ -145,7 +161,14 @@ function readInvestments() {
 
 function saveInvestment(entry) {
   const investments = readInvestments();
-  investments.unshift(normalizeInvestment(entry));
+  const normalizedEntry = normalizeInvestment(entry);
+  const latestMatch = findLatestByCompanyKey(normalizedEntry.companyKey, investments);
+
+  if (latestMatch && latestMatch.company) {
+    normalizedEntry.company = latestMatch.company;
+  }
+
+  investments.unshift(normalizedEntry);
   writeInvestments(investments);
 }
 
@@ -161,9 +184,19 @@ function updateInvestment(id, updates) {
     ...investments[index],
     ...updates,
     id: investments[index].id,
+    companyKey: normalizeCompanyKey(updates.company || investments[index].company),
     createdAt: investments[index].createdAt,
     submittedBy: investments[index].submittedBy
   });
+
+  const latestMatch = findLatestByCompanyKey(
+    merged.companyKey,
+    investments.filter((investment) => investment.id !== id)
+  );
+
+  if (latestMatch && latestMatch.company) {
+    merged.company = latestMatch.company;
+  }
 
   investments[index] = merged;
   writeInvestments(investments);

@@ -151,8 +151,12 @@
             <input id="editingInvestmentId" name="editingInvestmentId" type="hidden" />
             <label>
               Company
-              <input name="company" type="text" placeholder="Northwind Ventures" required />
+              <input name="company" type="text" placeholder="Northwind Ventures" list="companySuggestions" required />
             </label>
+            <datalist id="companySuggestions"></datalist>
+            <p class="section-copy form-help">
+              Pick an existing company name to add a new update to that investment history.
+            </p>
 
             <div class="two-up">
               <label>
@@ -182,6 +186,7 @@
                   <option value="">Select status</option>
                   <option value="New lead">New lead</option>
                   <option value="Under review">Under review</option>
+                  <option value="Investment update">Investment update</option>
                   <option value="Approved">Approved</option>
                   <option value="Passed">Passed</option>
                   <option value="Closed">Closed</option>

@@ -375,6 +375,10 @@ button:disabled {
   color: var(--muted);
 }
 
+.form-help {
+  margin-top: -8px;
+}
+
 .panel-header {
   display: flex;
   align-items: center;
