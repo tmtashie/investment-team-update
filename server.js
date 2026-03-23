@@ -541,7 +541,7 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
         return;
       }
 
-      const tag = `[Workbook Import:${updateSheetName}:${index + 2}:${companyKey(company)}]`;
+      const tag = `[Workbook Import:${updateSheetName}:${index + 2}:${normalizeCompanyKey(company)}]`;
       const notes = buildImportNote(tag, [
         `Imported from workbook sheet "${updateSheetName}".`,
         String(row.Notes || "").trim()
@@ -722,7 +722,7 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
           return;
         }
 
-        const tag = `[Workbook Import:${sheetName}:${headerRowIndex + offset + 2}:${companyKey(
+        const tag = `[Workbook Import:${sheetName}:${headerRowIndex + offset + 2}:${normalizeCompanyKey(
           investmentName
         )}]`;
         const importNotes = buildImportNote(tag, [
