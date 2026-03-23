@@ -529,6 +529,78 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
   return summary;
 }
 
+async function summarizeEmail({ emailText, company, stage }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI summarization is not configured yet.");
+  }
+
+  const companyLine = company ? `Company: ${company}` : "Company: Not provided";
+  const stageLine = stage ? `Stage: ${stage}` : "Stage: Not provided";
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                "Summarize this investment email or email thread for an investment team update.",
+                "Return concise markdown using exactly these headings:",
+                "## Thesis",
+                "## Business",
+                "## Traction or evidence",
+                "## Financing or ask",
+                "## Risks or open questions",
+                "## Recommendation",
+                "## Suggested next steps",
+                "",
+                companyLine,
+                stageLine,
+                "",
+                "Under each heading, use short bullets.",
+                "If the email does not mention a detail, say that it was not clearly stated.",
+                "Focus on the parts that matter to a deal team.",
+                "",
+                "Email content:",
+                emailText
+              ].join("\n")
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    if (errorText.includes("insufficient_quota")) {
+      throw new Error(
+        "OpenAI summary failed: your OpenAI API account needs billing or more quota before email summaries can run."
+      );
+    }
+    throw new Error(`OpenAI summary failed: ${errorText}`);
+  }
+
+  const payload = await response.json();
+  const summary = extractResponseText(payload);
+
+  if (!summary) {
+    throw new Error("OpenAI did not return a summary.");
+  }
+
+  return summary;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -996,6 +1068,32 @@ const server = http.createServer(async (request, response) => {
       return;
     } catch (error) {
       sendJson(response, 500, { error: error.message || "Deck summarization failed." });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/summarize-email") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const emailText = String(payload.emailText || "").trim();
+      const company = String(payload.company || "").trim();
+      const stage = String(payload.stage || "").trim();
+
+      if (!emailText) {
+        sendJson(response, 400, { error: "Paste email content first." });
+        return;
+      }
+
+      const summary = await summarizeEmail({ emailText, company, stage });
+      sendJson(response, 200, { summary });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Email summarization failed." });
       return;
     }
   }

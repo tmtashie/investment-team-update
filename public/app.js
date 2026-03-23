@@ -23,6 +23,9 @@ const deckMessage = document.getElementById("deckMessage");
 const summarizeDeckButton = document.getElementById("summarizeDeckButton");
 const deckDropZone = document.getElementById("deckDropZone");
 const deckFileName = document.getElementById("deckFileName");
+const emailSummaryInput = document.getElementById("emailSummaryInput");
+const summarizeEmailButton = document.getElementById("summarizeEmailButton");
+const emailMessage = document.getElementById("emailMessage");
 const dashboardCards = document.getElementById("dashboardCards");
 const searchFilter = document.getElementById("searchFilter");
 const statusFilter = document.getElementById("statusFilter");
@@ -204,6 +207,8 @@ function resetFormToCreateMode() {
   submitButton.textContent = "Save update and send email";
   cancelEditButton.classList.add("hidden");
   updateDeckFileLabel(null);
+  emailMessage.textContent = "";
+  deckMessage.textContent = "";
 }
 
 async function deleteInvestmentById(investmentId) {
@@ -559,6 +564,46 @@ summarizeDeckButton.addEventListener("click", async () => {
     deckMessage.textContent = error.message;
   } finally {
     summarizeDeckButton.disabled = false;
+  }
+});
+
+summarizeEmailButton.addEventListener("click", async () => {
+  const emailText = emailSummaryInput.value.trim();
+  if (!emailText) {
+    emailMessage.textContent = "Paste an email or thread first.";
+    return;
+  }
+
+  summarizeEmailButton.disabled = true;
+  emailMessage.textContent = "Summarizing email into notes...";
+
+  try {
+    const companyValue = form.elements.company.value;
+    const stageValue = form.elements.stage.value;
+    const result = await fetchJson("/api/summarize-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        emailText,
+        company: companyValue,
+        stage: stageValue
+      })
+    });
+
+    notesField.value = result.summary;
+    emailMessage.textContent = "Email summary added to notes.";
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      emailMessage.textContent = "Your session expired. Please sign in again.";
+      return;
+    }
+
+    emailMessage.textContent = error.message;
+  } finally {
+    summarizeEmailButton.disabled = false;
   }
 });
 

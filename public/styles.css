@@ -250,6 +250,12 @@ button:disabled {
   gap: 10px;
 }
 
+.email-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .filters-grid {
   display: grid;
   gap: 14px;

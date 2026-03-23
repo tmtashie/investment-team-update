@@ -176,6 +176,22 @@
             </div>
             <p id="deckMessage" class="form-message" aria-live="polite"></p>
 
+            <label>
+              Email content
+              <textarea
+                id="emailSummaryInput"
+                name="emailSummaryInput"
+                rows="6"
+                placeholder="Paste an email or email thread here to summarize it into notes."
+              ></textarea>
+            </label>
+            <div class="email-tools">
+              <button id="summarizeEmailButton" type="button" class="secondary-button">
+                Summarize email into notes
+              </button>
+            </div>
+            <p id="emailMessage" class="form-message" aria-live="polite"></p>
+
             <div class="form-actions">
               <button id="submitButton" type="submit">Save update and send email</button>
               <button id="cancelEditButton" type="button" class="secondary-button hidden">
