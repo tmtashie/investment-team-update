@@ -37,6 +37,10 @@ const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "investments.json");
+const FAMILY_OFFICE_WORKBOOK_FILE = path.join(
+  __dirname,
+  "Family_Office_Private_Investment_Tracker.xlsx"
+);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const SESSION_COOKIE = "investment_team_session";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-before-production";
@@ -49,6 +53,14 @@ const INVESTMENT_ENTITIES = [
   "Katherine Trust",
   "Natalie Trust"
 ];
+const ENTITY_ALIASES = {
+  "Beaman Ventures": "Beaman Ventures",
+  "Lee Beaman": "Lee Beaman",
+  "Kat Trust": "Katherine Trust",
+  "Nat Trust": "Natalie Trust",
+  "Katherine Trust": "Katherine Trust",
+  "Natalie Trust": "Natalie Trust"
+};
 
 const DEFAULT_RECIPIENTS = splitCsv(process.env.TEAM_EMAILS || "");
 
@@ -57,6 +69,11 @@ function splitCsv(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeEntityName(value) {
+  const raw = String(value || "").trim();
+  return ENTITY_ALIASES[raw] || raw;
 }
 
 function parseTeamUsers(value) {
@@ -326,6 +343,59 @@ function sendText(response, statusCode, body, headers = {}) {
   response.end(body);
 }
 
+function parseNumericValue(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  const cleaned = String(value ?? "")
+    .trim()
+    .replace(/[$,()\s]/g, "")
+    .replace(/[^\d.-]/g, "");
+
+  if (!cleaned) {
+    return 0;
+  }
+
+  const amount = Number(cleaned);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function parseWorkbookDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+
+  const text = String(value || "").trim();
+  if (!text) {
+    return new Date().toISOString();
+  }
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
+function extractImportTag(notes) {
+  const match = String(notes || "").match(/^\[Workbook Import:[^\]]+\]/);
+  return match ? match[0] : "";
+}
+
+function getExistingImportTags(investments) {
+  return new Set(
+    investments
+      .map((investment) => extractImportTag(investment.notes))
+      .filter(Boolean)
+  );
+}
+
+function buildImportNote(tag, lines) {
+  return [tag].concat(lines.filter(Boolean)).join("\n");
+}
+
 function csvEscape(value) {
   const text = String(value ?? "");
   if (/[",\n]/.test(text)) {
@@ -393,6 +463,156 @@ function buildInvestmentsWorkbookBuffer(investments) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, "Investment Updates");
   return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+}
+
+function importWorkbookIntoInvestments(buffer, sessionUser) {
+  const XLSX = require("xlsx");
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const investments = readInvestments();
+  const existingTags = getExistingImportTags(investments);
+  const imported = [];
+  const usedSheets = [];
+
+  function pushImported(entry, tag) {
+    if (existingTags.has(tag)) {
+      return false;
+    }
+
+    imported.push(normalizeInvestment(entry));
+    existingTags.add(tag);
+    return true;
+  }
+
+  const updateSheetNames = ["Investment Updates", "App Updates Export"];
+  const updateSheetName = updateSheetNames.find((name) => workbook.Sheets[name]);
+  if (updateSheetName) {
+    usedSheets.push(updateSheetName);
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[updateSheetName], {
+      defval: "",
+      raw: false,
+      cellDates: true
+    });
+
+    rows.forEach((row, index) => {
+      const company = String(row.Company || row["Investment Name"] || "").trim();
+      const entity = normalizeEntityName(row.Entity);
+
+      if (!company || !entity) {
+        return;
+      }
+
+      const tag = `[Workbook Import:${updateSheetName}:${index + 2}:${companyKey(company)}]`;
+      const notes = buildImportNote(tag, [
+        `Imported from workbook sheet "${updateSheetName}".`,
+        String(row.Notes || "").trim()
+      ]);
+
+      pushImported(
+        {
+          company,
+          entity,
+          amount: String(row.Amount || "").trim(),
+          currency: String(row.Currency || "USD").trim() || "USD",
+          stage: String(row.Stage || "").trim(),
+          status: String(row.Status || "Investment update").trim() || "Investment update",
+          owner: String(row.Owner || "Workbook import").trim(),
+          nextStep: String(row["Next Step"] || "").trim(),
+          notes,
+          recipients: splitCsv(row.Recipients || ""),
+          submittedBy: sessionUser.email,
+          createdAt: parseWorkbookDate(row["Created At"] || row.Date)
+        },
+        tag
+      );
+    });
+  }
+
+  const cashSheetNames = ["Cash Flow Ledger", "Capital Call & Distribution Ledger"];
+  const cashSheetName = cashSheetNames.find((name) => workbook.Sheets[name]);
+  if (cashSheetName) {
+    usedSheets.push(cashSheetName);
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[cashSheetName], {
+      defval: "",
+      raw: false,
+      cellDates: true
+    });
+
+    rows.forEach((row, index) => {
+      const company = String(
+        row["Investment Name"] || row.Company || row.Investment || row["Investment ID"] || ""
+      ).trim();
+      const entity = normalizeEntityName(row.Entity);
+
+      if (!company || !entity) {
+        return;
+      }
+
+      const contributionAmount = parseNumericValue(row["Contribution Amount"]);
+      const distributionAmount = parseNumericValue(row["Distribution Amount"]);
+      const netCashFlow = parseNumericValue(row["Net Cash Flow"]);
+      const amount = distributionAmount || contributionAmount || Math.abs(netCashFlow) || 0;
+      const transactionType = String(row["Transaction Type"] || "Investment update").trim();
+      const transactionDate = row["Transaction Date"] || row.Date;
+      const transactionId =
+        String(row["Transaction ID"] || "").trim() || `${cashSheetName}-${index + 2}`;
+      const linkedValuationDate = String(row["Linked valuation date"] || row["Linked valuation date if relevant"] || "").trim();
+      const notes = buildImportNote(`[Workbook Import:${transactionId}]`, [
+        `Imported from workbook sheet "${cashSheetName}".`,
+        transactionType ? `Transaction type: ${transactionType}` : "",
+        transactionDate ? `Transaction date: ${String(transactionDate)}` : "",
+        contributionAmount ? `Contribution amount: ${contributionAmount.toLocaleString()}` : "",
+        distributionAmount ? `Distribution amount: ${distributionAmount.toLocaleString()}` : "",
+        linkedValuationDate ? `Linked valuation date: ${linkedValuationDate}` : "",
+        String(row.Description || "").trim(),
+        String(row.Notes || "").trim()
+      ]);
+
+      const status =
+        transactionType === "Full Exit"
+          ? "Closed"
+          : transactionType === "Write-off adjustment"
+            ? "Passed"
+            : "Investment update";
+
+      pushImported(
+        {
+          company,
+          entity,
+          amount: amount ? String(amount) : "",
+          currency: "USD",
+          stage: String(row["Realized / Unrealized flag"] || "").trim(),
+          status,
+          owner: "Workbook import",
+          nextStep: linkedValuationDate
+            ? `Review valuation tied to ${linkedValuationDate}`
+            : "",
+          notes,
+          recipients: [],
+          submittedBy: sessionUser.email,
+          createdAt: parseWorkbookDate(transactionDate)
+        },
+        `[Workbook Import:${transactionId}]`
+      );
+    });
+  }
+
+  if (!imported.length) {
+    throw new Error(
+      "No importable rows were found. Use a workbook with an Investment Updates sheet or a Cash Flow Ledger sheet."
+    );
+  }
+
+  const merged = imported
+    .concat(investments)
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+
+  writeInvestments(merged);
+
+  return {
+    importedCount: imported.length,
+    skippedCount: 0,
+    sheets: usedSheets
+  };
 }
 
 function serveStaticFile(response, filePath) {
@@ -904,6 +1124,7 @@ const server = http.createServer(async (request, response) => {
       emailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL),
       aiConfigured: Boolean(process.env.OPENAI_API_KEY),
       entities: INVESTMENT_ENTITIES,
+      familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
       authConfigured: Boolean(
         (process.env.TEAM_PASSWORD || Object.keys(TEAM_USERS).length > 0) && process.env.SESSION_SECRET
       ),
@@ -1006,6 +1227,65 @@ const server = http.createServer(async (request, response) => {
       return;
     } catch (error) {
       sendJson(response, 500, { error: error.message || "Excel export failed." });
+      return;
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/family-office-workbook.xlsx") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    if (!fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE)) {
+      sendJson(response, 404, {
+        error: "The family office workbook template is not available on the server yet."
+      });
+      return;
+    }
+
+    response.writeHead(200, {
+      "Content-Type":
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition":
+        'attachment; filename="family-office-private-investment-tracker.xlsx"'
+    });
+    fs.createReadStream(FAMILY_OFFICE_WORKBOOK_FILE).pipe(response);
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/import-workbook") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const filename = String(payload.filename || "").trim();
+      const fileData = String(payload.fileData || "").trim();
+
+      if (!filename.match(/\.(xlsx|xlsm|xls)$/i)) {
+        sendJson(response, 400, {
+          error: "Please upload an Excel workbook (.xlsx, .xlsm, or .xls)."
+        });
+        return;
+      }
+
+      if (!fileData) {
+        sendJson(response, 400, { error: "Workbook file data is required." });
+        return;
+      }
+
+      const buffer = Buffer.from(fileData, "base64");
+      const result = importWorkbookIntoInvestments(buffer, user);
+      sendJson(response, 200, {
+        message: `Imported ${result.importedCount} update${result.importedCount === 1 ? "" : "s"} from workbook.`,
+        ...result
+      });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Workbook import failed." });
       return;
     }
   }

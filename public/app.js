@@ -15,6 +15,11 @@ const refreshButton = document.getElementById("refreshButton");
 const submitButton = document.getElementById("submitButton");
 const downloadCsvButton = document.getElementById("downloadCsvButton");
 const downloadExcelButton = document.getElementById("downloadExcelButton");
+const downloadFamilyOfficeWorkbookButton = document.getElementById(
+  "downloadFamilyOfficeWorkbookButton"
+);
+const importWorkbookFile = document.getElementById("importWorkbookFile");
+const importWorkbookMessage = document.getElementById("importWorkbookMessage");
 const cancelEditButton = document.getElementById("cancelEditButton");
 const editingInvestmentId = document.getElementById("editingInvestmentId");
 const notesField = document.getElementById("notesField");
@@ -446,6 +451,11 @@ async function loadConfig() {
       "Add OPENAI_API_KEY in Render to turn on deck summarization.";
   }
 
+  if (!config.familyOfficeWorkbookAvailable) {
+    importWorkbookMessage.textContent =
+      "The family office workbook template is not on the server yet.";
+  }
+
   if (!config.authConfigured) {
     loginMessage.textContent =
       "The server still needs SESSION_SECRET plus TEAM_PASSWORD or TEAM_USERS in Render.";
@@ -715,6 +725,45 @@ downloadCsvButton.addEventListener("click", () => {
 
 downloadExcelButton.addEventListener("click", () => {
   window.location.href = "/api/investments.xlsx";
+});
+
+downloadFamilyOfficeWorkbookButton.addEventListener("click", () => {
+  window.location.href = "/api/family-office-workbook.xlsx";
+});
+
+importWorkbookFile.addEventListener("change", async () => {
+  const selectedFile = importWorkbookFile.files && importWorkbookFile.files[0];
+  if (!selectedFile) {
+    return;
+  }
+
+  importWorkbookMessage.textContent = "Reading workbook and importing updates...";
+
+  try {
+    const fileData = await readFileAsBase64(selectedFile);
+    const result = await fetchJson("/api/import-workbook", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        filename: selectedFile.name,
+        fileData
+      })
+    });
+
+    importWorkbookMessage.textContent = `${result.message} Sheets used: ${result.sheets.join(", ")}.`;
+    importWorkbookFile.value = "";
+    await loadUpdates();
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      importWorkbookMessage.textContent = "Your session expired. Please sign in again.";
+      return;
+    }
+
+    importWorkbookMessage.textContent = error.message;
+  }
 });
 
 cancelEditButton.addEventListener("click", () => {

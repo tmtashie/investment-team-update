@@ -326,6 +326,17 @@ button:disabled {
   box-shadow: none;
 }
 
+.file-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
 .two-up {
   display: grid;
   gap: 16px;

@@ -344,6 +344,18 @@
               <p class="section-copy">Your team can review the latest submissions here.</p>
             </div>
             <div class="panel-actions">
+              <button id="downloadFamilyOfficeWorkbookButton" type="button" class="secondary-button">
+                Family Office Workbook
+              </button>
+              <label class="secondary-button file-action-button" for="importWorkbookFile">
+                Import Workbook
+              </label>
+              <input
+                id="importWorkbookFile"
+                type="file"
+                accept=".xlsx,.xlsm,.xls"
+                class="hidden-file-input"
+              />
               <button id="downloadExcelButton" type="button" class="secondary-button">
                 Download Excel
               </button>
@@ -353,6 +365,7 @@
               <button id="refreshButton" type="button" class="secondary-button">Refresh</button>
             </div>
           </div>
+          <p id="importWorkbookMessage" class="form-message" aria-live="polite"></p>
           <div id="updatesList" class="updates-list"></div>
         </section>
       </section>
