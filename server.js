@@ -379,6 +379,46 @@ function parseWorkbookDate(value) {
   return new Date().toISOString();
 }
 
+function normalizeHeaderKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function inferEntityFromContext(...values) {
+  const haystack = values
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+
+  if (haystack.includes("beaman ventures") || /\bbv\b/.test(haystack)) {
+    return "Beaman Ventures";
+  }
+
+  if (haystack.includes("lee beaman") || /\blee\b/.test(haystack)) {
+    return "Lee Beaman";
+  }
+
+  if (
+    haystack.includes("kat trust") ||
+    haystack.includes("katherine trust") ||
+    /\bkat\b/.test(haystack)
+  ) {
+    return "Katherine Trust";
+  }
+
+  if (
+    haystack.includes("nat trust") ||
+    haystack.includes("natalie trust") ||
+    /\bnat\b/.test(haystack)
+  ) {
+    return "Natalie Trust";
+  }
+
+  return "";
+}
+
 function extractImportTag(notes) {
   const match = String(notes || "").match(/^\[Workbook Import:[^\]]+\]/);
   return match ? match[0] : "";
@@ -597,8 +637,146 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
   }
 
   if (!imported.length) {
+    workbook.SheetNames.forEach((sheetName) => {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) {
+        return;
+      }
+
+      const rows = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+        defval: "",
+        raw: false,
+        cellDates: true
+      });
+
+      let headerRowIndex = -1;
+      let headerMap = {};
+
+      rows.forEach((row, index) => {
+        if (headerRowIndex !== -1) {
+          return;
+        }
+
+        const normalized = row.map(normalizeHeaderKey);
+        if (
+          normalized.includes("investment name") &&
+          (normalized.includes("current valuation") ||
+            normalized.includes("current valuation $") ||
+            normalized.includes("active exited lost"))
+        ) {
+          headerRowIndex = index;
+          headerMap = normalized.reduce((map, header, headerIndex) => {
+            if (header) {
+              map[header] = headerIndex;
+            }
+            return map;
+          }, {});
+        }
+      });
+
+      if (headerRowIndex === -1) {
+        return;
+      }
+
+      usedSheets.push(sheetName);
+      const inferredEntity = normalizeEntityName(
+        inferEntityFromContext(sheetName, workbook.Props && workbook.Props.Title, workbook.SheetNames.join(" "))
+      );
+
+      rows.slice(headerRowIndex + 1).forEach((row, offset) => {
+        const investmentName = String(row[headerMap["investment name"]] || "").trim();
+        const category = String(row[headerMap["category"]] || "").trim();
+        const statusText = String(row[headerMap["active exited lost"]] || "").trim();
+        const notes = String(row[headerMap["notes"]] || "").trim();
+        const leadContact = String(row[headerMap["lead contact"]] || "").trim();
+        const dateCommitted = row[headerMap["date committed"]];
+        const committedAmount = parseNumericValue(
+          row[headerMap["committed $"]] || row[headerMap["committed"]]
+        );
+        const calledAmount = parseNumericValue(
+          row[headerMap["called $"]] || row[headerMap["called"]]
+        );
+        const currentValuation = parseNumericValue(
+          row[headerMap["current valuation $"]] || row[headerMap["current valuation"]]
+        );
+        const remainingAmount = parseNumericValue(
+          row[headerMap["remaining $"]] || row[headerMap["remaining"]]
+        );
+
+        if (!investmentName) {
+          return;
+        }
+
+        const looksLikeSectionRow =
+          !category &&
+          !statusText &&
+          !notes &&
+          !leadContact &&
+          !committedAmount &&
+          !calledAmount &&
+          !currentValuation &&
+          !remainingAmount;
+
+        if (looksLikeSectionRow) {
+          return;
+        }
+
+        const tag = `[Workbook Import:${sheetName}:${headerRowIndex + offset + 2}:${companyKey(
+          investmentName
+        )}]`;
+        const importNotes = buildImportNote(tag, [
+          `Imported from workbook sheet "${sheetName}".`,
+          category ? `Category: ${category}` : "",
+          leadContact ? `Lead contact: ${leadContact}` : "",
+          committedAmount ? `Committed: ${committedAmount.toLocaleString()}` : "",
+          calledAmount ? `Called: ${calledAmount.toLocaleString()}` : "",
+          remainingAmount ? `Remaining: ${remainingAmount.toLocaleString()}` : "",
+          currentValuation ? `Current valuation: ${currentValuation.toLocaleString()}` : "",
+          notes
+        ]);
+
+        const normalizedStatus = (() => {
+          const lowered = statusText.toLowerCase();
+          if (lowered.includes("exit")) {
+            return "Closed";
+          }
+          if (lowered.includes("lost") || lowered.includes("written")) {
+            return "Passed";
+          }
+          if (lowered.includes("active")) {
+            return "Investment update";
+          }
+          return statusText || "Investment update";
+        })();
+
+        pushImported(
+          {
+            company: investmentName,
+            entity: inferredEntity || "Beaman Ventures",
+            amount: String(calledAmount || committedAmount || currentValuation || ""),
+            currency: "USD",
+            stage: category,
+            status: normalizedStatus,
+            owner: leadContact || "Workbook import",
+            nextStep:
+              currentValuation && !statusText.toLowerCase().includes("exit")
+                ? "Review valuation and update official/internal marks"
+                : "",
+            notes: importNotes,
+            recipients: [],
+            submittedBy: sessionUser.email,
+            createdAt: parseWorkbookDate(dateCommitted)
+          },
+          tag
+        );
+      });
+    });
+  }
+
+  if (!imported.length) {
     throw new Error(
-      "No importable rows were found. Use a workbook with an Investment Updates sheet or a Cash Flow Ledger sheet."
+      "No importable rows were found. Use a workbook with an Investment Updates sheet, a Cash Flow Ledger sheet, or a holdings sheet with columns like Investment Name and Current Valuation."
     );
   }
 
