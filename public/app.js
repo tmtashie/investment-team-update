@@ -23,6 +23,7 @@ const importWorkbookMessage = document.getElementById("importWorkbookMessage");
 const cancelEditButton = document.getElementById("cancelEditButton");
 const editingInvestmentId = document.getElementById("editingInvestmentId");
 const notesField = document.getElementById("notesField");
+const deckSummaryField = document.getElementById("deckSummaryField");
 const deckFile = document.getElementById("deckFile");
 const deckMessage = document.getElementById("deckMessage");
 const summarizeDeckButton = document.getElementById("summarizeDeckButton");
@@ -43,7 +44,9 @@ const companyPanelTitle = document.getElementById("companyPanelTitle");
 const companyPanelCopy = document.getElementById("companyPanelCopy");
 const companySummary = document.getElementById("companySummary");
 const companyHighlights = document.getElementById("companyHighlights");
+const companyDeckSummaries = document.getElementById("companyDeckSummaries");
 const companyNextSteps = document.getElementById("companyNextSteps");
+const companyFollowOnCapital = document.getElementById("companyFollowOnCapital");
 const companyTimeline = document.getElementById("companyTimeline");
 const closeCompanyPanelButton = document.getElementById("closeCompanyPanelButton");
 
@@ -120,8 +123,11 @@ function filterInvestments(investments) {
       investment.entity,
       investment.company,
       investment.notes,
+      investment.deckSummary,
       investment.owner,
       investment.nextStep,
+      investment.followOnCapitalStatus,
+      investment.followOnCapitalNotes,
       investment.submittedBy
     ]
       .join(" ")
@@ -217,6 +223,15 @@ function renderCompanySuggestions() {
     .join("");
 }
 
+function summarizeText(value, fallback) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return fallback;
+  }
+
+  return text.length > 220 ? `${text.slice(0, 217)}...` : text;
+}
+
 function beginEditInvestment(investmentId) {
   const investment = allInvestments.find((item) => item.id === investmentId);
   if (!investment) {
@@ -236,6 +251,10 @@ function beginEditInvestment(investmentId) {
     ? investment.recipients.join(", ")
     : "";
   notesField.value = investment.notes || "";
+  deckSummaryField.value = investment.deckSummary || "";
+  form.elements.followOnCapitalAmount.value = investment.followOnCapitalAmount || "";
+  form.elements.followOnCapitalStatus.value = investment.followOnCapitalStatus || "";
+  form.elements.followOnCapitalNotes.value = investment.followOnCapitalNotes || "";
   submitButton.textContent = "Save changes";
   cancelEditButton.classList.remove("hidden");
   formMessage.textContent = `Editing ${investment.company}.`;
@@ -250,6 +269,7 @@ function resetFormToCreateMode() {
   updateDeckFileLabel(null);
   emailMessage.textContent = "";
   deckMessage.textContent = "";
+  deckSummaryField.value = "";
 }
 
 async function deleteInvestmentById(investmentId) {
@@ -276,7 +296,9 @@ function renderCompanyPanel() {
     companyPanel.classList.add("hidden");
     companySummary.innerHTML = "";
     companyHighlights.innerHTML = "";
+    companyDeckSummaries.innerHTML = "";
     companyNextSteps.innerHTML = "";
+    companyFollowOnCapital.innerHTML = "";
     companyTimeline.innerHTML = "";
     return;
   }
@@ -301,6 +323,13 @@ function renderCompanyPanel() {
   );
   const nextSteps = Array.from(
     new Set(companyUpdates.map((investment) => investment.nextStep).filter(Boolean))
+  );
+  const deckSummaries = companyUpdates.filter((investment) => investment.deckSummary);
+  const followOnUpdates = companyUpdates.filter(
+    (investment) =>
+      investment.followOnCapitalAmount ||
+      investment.followOnCapitalStatus ||
+      investment.followOnCapitalNotes
   );
   companyPanel.classList.remove("hidden");
   companyPanelTitle.textContent = latest.company || selectedCompany;
@@ -329,7 +358,11 @@ function renderCompanyPanel() {
     { label: "Entities used", value: Array.from(new Set(companyUpdates.map((investment) => investment.entity).filter(Boolean))).join(", ") || "Not set" },
     { label: "Owners involved", value: uniqueOwners.length ? uniqueOwners.join(", ") : "Not set" },
     { label: "Statuses used", value: uniqueStatuses.length ? uniqueStatuses.join(", ") : "Not set" },
-    { label: "Latest notes", value: latest.notes || "No notes provided." }
+    { label: "Latest notes", value: latest.notes || "No notes provided." },
+    {
+      label: "Latest deck summary",
+      value: summarizeText(latest.deckSummary, "No deck summary provided yet.")
+    }
   ]
     .map(
       (item) => `
@@ -347,6 +380,39 @@ function renderCompanyPanel() {
         .map((nextStep) => `<li>${escapeHtml(nextStep)}</li>`)
         .join("")}</ul>`
     : '<p class="update-meta">No next steps recorded yet.</p>';
+
+  companyDeckSummaries.innerHTML = deckSummaries.length
+    ? deckSummaries
+        .slice(0, 4)
+        .map(
+          (investment) => `
+            <article class="timeline-card timeline-card-compact">
+              <p class="dashboard-label">${escapeHtml(investment.createdAt)}</p>
+              <p class="highlight-value">${escapeHtml(investment.deckSummary)}</p>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No deck summaries saved yet.</p>';
+
+  companyFollowOnCapital.innerHTML = followOnUpdates.length
+    ? followOnUpdates
+        .slice(0, 4)
+        .map(
+          (investment) => `
+            <div class="highlight-row">
+              <p class="dashboard-label">${escapeHtml(investment.createdAt)}</p>
+              <p class="highlight-value">${
+                investment.followOnCapitalAmount
+                  ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.followOnCapitalAmount)}`
+                  : "Amount not set"
+              } • ${escapeHtml(investment.followOnCapitalStatus || "Status not set")}</p>
+              <p class="update-meta">${escapeHtml(investment.followOnCapitalNotes || "No follow-on notes.")}</p>
+            </div>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No follow-on capital entries yet.</p>';
 
   companyTimeline.innerHTML = companyUpdates
     .map(
@@ -370,6 +436,20 @@ function renderCompanyPanel() {
             Next: ${escapeHtml(investment.nextStep || "No next step provided")}
           </p>
           <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+          ${
+            investment.deckSummary
+              ? `<div class="update-subsection"><p class="dashboard-label">Deck summary</p><p class="update-notes">${escapeHtml(investment.deckSummary)}</p></div>`
+              : ""
+          }
+          ${
+            investment.followOnCapitalAmount || investment.followOnCapitalStatus || investment.followOnCapitalNotes
+              ? `<div class="update-subsection"><p class="dashboard-label">Follow-on capital</p><p class="update-meta">${
+                  investment.followOnCapitalAmount
+                    ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.followOnCapitalAmount)}`
+                    : "Amount not set"
+                } • ${escapeHtml(investment.followOnCapitalStatus || "Status not set")}</p><p class="update-meta">${escapeHtml(investment.followOnCapitalNotes || "No follow-on notes.")}</p></div>`
+              : ""
+          }
         </article>
       `
     )
@@ -408,6 +488,20 @@ function renderUpdates(investments) {
             Next: ${escapeHtml(investment.nextStep || "Not set")}
           </p>
           <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+          ${
+            investment.deckSummary
+              ? `<p class="update-meta"><strong>Deck summary:</strong> ${escapeHtml(summarizeText(investment.deckSummary, ""))}</p>`
+              : ""
+          }
+          ${
+            investment.followOnCapitalAmount || investment.followOnCapitalStatus
+              ? `<p class="update-meta"><strong>Follow-on:</strong> ${
+                  investment.followOnCapitalAmount
+                    ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.followOnCapitalAmount)}`
+                    : "Amount not set"
+                } • ${escapeHtml(investment.followOnCapitalStatus || "Status not set")}</p>`
+              : ""
+          }
           <div class="card-actions">
             <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}">View company</button>
             <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>
@@ -602,8 +696,8 @@ summarizeDeckButton.addEventListener("click", async () => {
       })
     });
 
-    notesField.value = result.summary;
-    deckMessage.textContent = "Deck summary added to notes.";
+    deckSummaryField.value = result.summary;
+    deckMessage.textContent = "Deck summary added to the deck summary section.";
   } catch (error) {
     if (error.status === 401) {
       setSignedInState(null);
@@ -678,7 +772,11 @@ form.addEventListener("submit", async (event) => {
     owner: formData.get("owner"),
     nextStep: formData.get("nextStep"),
     recipients,
-    notes: formData.get("notes")
+    notes: formData.get("notes"),
+    deckSummary: formData.get("deckSummary"),
+    followOnCapitalAmount: formData.get("followOnCapitalAmount"),
+    followOnCapitalStatus: formData.get("followOnCapitalStatus"),
+    followOnCapitalNotes: formData.get("followOnCapitalNotes")
   };
 
   try {

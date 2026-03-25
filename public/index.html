@@ -13,40 +13,55 @@
   <body>
     <main class="app-shell">
       <section class="hero-card">
+        <div class="hero-backdrop"></div>
         <div class="hero-grid">
           <div class="hero-copy-block">
             <div class="hero-topline">
-              <p class="eyebrow">Private Mobile Team Workflow</p>
+              <p class="eyebrow">Family Office Investment Platform</p>
               <button id="logoutButton" type="button" class="secondary-button hidden">
                 Sign out
               </button>
             </div>
-            <h1>Professional investment updates, without the spreadsheet scramble.</h1>
+            <h1>One institutional source of truth for private investments.</h1>
             <p class="hero-copy">
-              Capture deals from your phone, summarize decks and emails with AI, and send
-              polished internal updates in one place.
+              Track deals, research, follow-on capital decisions, team updates, and export-ready
+              portfolio data from one polished internal workspace.
             </p>
             <div class="hero-actions">
-              <span class="hero-chip">Mobile-first workflow</span>
-              <span class="hero-chip">AI deck and email summaries</span>
-              <span class="hero-chip">Team-ready exports</span>
+              <span class="hero-chip">Investment memory</span>
+              <span class="hero-chip">AI research workflow</span>
+              <span class="hero-chip">Portfolio exports</span>
+            </div>
+            <div class="hero-kpi-row">
+              <article class="hero-kpi-card">
+                <span class="hero-kpi-label">Track</span>
+                <strong>Deals, notes, capital</strong>
+              </article>
+              <article class="hero-kpi-card">
+                <span class="hero-kpi-label">Review</span>
+                <strong>Decks, emails, follow-ons</strong>
+              </article>
+              <article class="hero-kpi-card">
+                <span class="hero-kpi-label">Report</span>
+                <strong>Family office ready exports</strong>
+              </article>
             </div>
           </div>
 
           <aside class="hero-side-panel">
-            <p class="hero-side-label">What your team gets</p>
+            <p class="hero-side-label">Operating rhythm</p>
             <div class="hero-metric-list">
               <div class="hero-metric">
                 <span class="hero-metric-value">1</span>
-                <span class="hero-metric-copy">shared place for pipeline updates</span>
+                <span class="hero-metric-copy">capture each investment update as it happens</span>
               </div>
               <div class="hero-metric">
                 <span class="hero-metric-value">2</span>
-                <span class="hero-metric-copy">AI shortcuts for decks and emails</span>
+                <span class="hero-metric-copy">store deck research separately from running notes</span>
               </div>
               <div class="hero-metric">
                 <span class="hero-metric-value">3</span>
-                <span class="hero-metric-copy">clean exports for Excel and team review</span>
+                <span class="hero-metric-copy">monitor reserve and follow-on capital decisions</span>
               </div>
             </div>
           </aside>
@@ -61,23 +76,23 @@
       <section class="feature-strip">
         <article class="feature-card">
           <p class="feature-kicker">Capture</p>
-          <h2>Log updates fast</h2>
+          <h2>Maintain clean investment records</h2>
           <p class="section-copy">
-            Record company, amount, owner, stage, status, and next steps from one clean form.
+            Record company, entity, owner, status, capital, and next steps from one structured workflow.
           </p>
         </article>
         <article class="feature-card">
-          <p class="feature-kicker">Summarize</p>
-          <h2>Turn raw inputs into clear notes</h2>
+          <p class="feature-kicker">Research</p>
+          <h2>Separate deck intelligence from general updates</h2>
           <p class="section-copy">
-            Use AI to turn decks and email threads into structured internal investment summaries.
+            Use AI to turn decks and email threads into structured internal research without losing operating notes.
           </p>
         </article>
         <article class="feature-card">
-          <p class="feature-kicker">Share</p>
-          <h2>Keep the team aligned</h2>
+          <p class="feature-kicker">Decide</p>
+          <h2>Track follow-on capital with context</h2>
           <p class="section-copy">
-            Send polished email updates, review company history, and export the full pipeline.
+            Keep reserve thinking, follow-on checks, exports, and company history together for better decisions.
           </p>
         </article>
       </section>
@@ -229,8 +244,8 @@
               <textarea
                 id="notesField"
                 name="notes"
-                rows="5"
-                placeholder="Short update to include in the summary email."
+                rows="4"
+                placeholder="General operating notes, call takeaways, or quick updates."
               ></textarea>
             </label>
 
@@ -243,10 +258,20 @@
                 <input id="deckFile" name="deckFile" type="file" accept="application/pdf,.pdf" />
               </label>
               <button id="summarizeDeckButton" type="button" class="secondary-button">
-                Summarize deck into notes
+                Summarize deck
               </button>
             </div>
             <p id="deckMessage" class="form-message" aria-live="polite"></p>
+
+            <label>
+              Deck summary
+              <textarea
+                id="deckSummaryField"
+                name="deckSummary"
+                rows="7"
+                placeholder="Structured AI deck summary lives here instead of inside general notes."
+              ></textarea>
+            </label>
 
             <label>
               Email content
@@ -263,6 +288,51 @@
               </button>
             </div>
             <p id="emailMessage" class="form-message" aria-live="polite"></p>
+
+            <section class="subsection-card">
+              <div class="subsection-copy">
+                <p class="feature-kicker">Follow-on capital</p>
+                <h3>Track reserve and participation decisions</h3>
+                <p class="section-copy">
+                  Keep planned reserve checks, follow-on sizing, and decision notes tied to the investment.
+                </p>
+              </div>
+              <div class="three-up">
+                <label>
+                  Follow-on amount
+                  <input
+                    id="followOnCapitalAmountField"
+                    name="followOnCapitalAmount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="500000"
+                  />
+                </label>
+
+                <label>
+                  Follow-on status
+                  <select id="followOnCapitalStatusField" name="followOnCapitalStatus">
+                    <option value="">Select status</option>
+                    <option value="Monitoring">Monitoring</option>
+                    <option value="Reserve planned">Reserve planned</option>
+                    <option value="Approved for follow-on">Approved for follow-on</option>
+                    <option value="Participated">Participated</option>
+                    <option value="Declined">Declined</option>
+                  </select>
+                </label>
+
+                <label>
+                  Next reserve check
+                  <input
+                    id="followOnCapitalNotesField"
+                    name="followOnCapitalNotes"
+                    type="text"
+                    placeholder="Waiting for round terms and board materials"
+                  />
+                </label>
+              </div>
+            </section>
 
             <div class="form-actions">
               <button id="submitButton" type="submit">Save update and send email</button>
@@ -330,8 +400,16 @@
               <div id="companyHighlights" class="company-highlights"></div>
             </section>
             <section class="company-detail-card">
+              <h3>Deck summaries</h3>
+              <div id="companyDeckSummaries" class="company-rich-text"></div>
+            </section>
+            <section class="company-detail-card">
               <h3>Open next steps</h3>
               <div id="companyNextSteps" class="company-next-steps"></div>
+            </section>
+            <section class="company-detail-card">
+              <h3>Follow-on capital</h3>
+              <div id="companyFollowOnCapital" class="company-highlights"></div>
             </section>
           </div>
           <div id="companyTimeline" class="company-timeline"></div>

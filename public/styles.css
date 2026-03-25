@@ -1,16 +1,18 @@
 :root {
-  --bg: #f4efe7;
-  --surface: rgba(255, 252, 248, 0.86);
-  --surface-strong: #fffdf9;
-  --text: #191714;
-  --muted: #676056;
-  --border: rgba(76, 58, 36, 0.12);
-  --accent: #b96532;
-  --accent-dark: #8b4620;
+  --bg: #edf1f7;
+  --surface: rgba(250, 252, 255, 0.9);
+  --surface-strong: #ffffff;
+  --text: #132033;
+  --muted: #5b6677;
+  --border: rgba(19, 32, 51, 0.1);
+  --accent: #ba6837;
+  --accent-dark: #8b4d28;
+  --navy: #17324d;
+  --navy-soft: #dae6f3;
   --success: #235f43;
   --warning: #8a5a00;
-  --shadow: 0 22px 60px rgba(57, 40, 21, 0.12);
-  --shadow-soft: 0 14px 34px rgba(57, 40, 21, 0.08);
+  --shadow: 0 24px 60px rgba(23, 50, 77, 0.12);
+  --shadow-soft: 0 14px 34px rgba(23, 50, 77, 0.08);
 }
 
 * {
@@ -20,12 +22,12 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(232, 182, 122, 0.32), transparent 28%),
-    radial-gradient(circle at right top, rgba(185, 101, 50, 0.12), transparent 24%),
-    linear-gradient(180deg, #fbf7f1 0%, #f0e7d8 100%);
+    radial-gradient(circle at top left, rgba(77, 124, 171, 0.2), transparent 28%),
+    radial-gradient(circle at right top, rgba(186, 104, 55, 0.14), transparent 24%),
+    linear-gradient(180deg, #f8fbff 0%, #eef3f9 100%);
 }
 
 .app-shell {
@@ -48,6 +50,14 @@ body {
   margin-bottom: 20px;
   position: relative;
   overflow: hidden;
+}
+
+.hero-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, rgba(23, 50, 77, 0.97) 0%, rgba(27, 68, 105, 0.9) 55%, rgba(186, 104, 55, 0.16) 100%);
+  pointer-events: none;
 }
 
 .hero-card::after {
@@ -85,7 +95,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-size: 0.75rem;
-  color: var(--accent-dark);
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .feature-kicker,
@@ -106,8 +116,9 @@ h3 {
 h1 {
   font-family: Georgia, "Times New Roman", serif;
   font-size: clamp(2.2rem, 7vw, 4rem);
-  line-height: 0.96;
-  max-width: 11ch;
+  line-height: 0.98;
+  max-width: 13ch;
+  color: #f6f8fb;
 }
 
 .hero-copy,
@@ -118,7 +129,8 @@ h1 {
 
 .hero-copy {
   margin: 0;
-  max-width: 40rem;
+  max-width: 42rem;
+  color: rgba(246, 248, 251, 0.78);
 }
 
 .section-copy {
@@ -146,8 +158,8 @@ h1 {
 }
 
 .status-pill-muted {
-  background: rgba(101, 93, 82, 0.1);
-  color: var(--muted);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(246, 248, 251, 0.76);
 }
 
 .panel {
@@ -164,7 +176,7 @@ h1 {
 .feature-card {
   padding: 20px;
   border-radius: 24px;
-  background: rgba(255, 252, 248, 0.72);
+  background: rgba(255, 255, 255, 0.82);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-soft);
 }
@@ -182,17 +194,39 @@ h1 {
   min-height: 36px;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(25, 23, 20, 0.06);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
+  color: #f6f8fb;
   font-size: 0.92rem;
   font-weight: 600;
+}
+
+.hero-kpi-row {
+  display: grid;
+  gap: 12px;
+}
+
+.hero-kpi-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f6f8fb;
+}
+
+.hero-kpi-label {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.72rem;
+  color: rgba(246, 248, 251, 0.66);
 }
 
 .hero-side-panel {
   padding: 20px;
   border-radius: 24px;
-  background: linear-gradient(180deg, rgba(255, 250, 242, 0.92) 0%, rgba(251, 241, 231, 0.92) 100%);
-  border: 1px solid rgba(185, 101, 50, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.08) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow: var(--shadow-soft);
 }
 
@@ -215,13 +249,13 @@ h1 {
   width: 34px;
   height: 34px;
   border-radius: 999px;
-  background: rgba(185, 101, 50, 0.12);
-  color: var(--accent-dark);
+  background: rgba(255, 255, 255, 0.18);
+  color: #f6f8fb;
   font-weight: 800;
 }
 
 .hero-metric-copy {
-  color: var(--muted);
+  color: rgba(246, 248, 251, 0.76);
   font-weight: 600;
 }
 
@@ -351,9 +385,9 @@ button:disabled {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border: 1px dashed var(--border);
+  border: 1px dashed rgba(23, 50, 77, 0.18);
   border-radius: 18px;
-  background: rgba(255, 250, 242, 0.72);
+  background: linear-gradient(180deg, rgba(239, 245, 252, 0.92) 0%, rgba(253, 247, 241, 0.82) 100%);
 }
 
 .deck-drop-zone {
@@ -362,7 +396,7 @@ button:disabled {
   padding: 18px;
   border: 1px dashed rgba(180, 87, 47, 0.45);
   border-radius: 18px;
-  background: rgba(255, 248, 238, 0.95);
+  background: rgba(255, 255, 255, 0.9);
   cursor: pointer;
 }
 
@@ -415,6 +449,20 @@ button:disabled {
   gap: 10px;
 }
 
+.subsection-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(239, 245, 252, 0.72) 0%, rgba(255, 252, 248, 0.92) 100%);
+  border: 1px solid rgba(23, 50, 77, 0.12);
+}
+
+.subsection-copy {
+  display: grid;
+  gap: 8px;
+}
+
 .filters-grid {
   display: grid;
   gap: 14px;
@@ -442,8 +490,12 @@ button:disabled {
 .company-detail-card {
   padding: 16px;
   border-radius: 18px;
-  background: rgba(255, 250, 242, 0.95);
+  background: rgba(255, 255, 255, 0.92);
   border: 1px solid var(--border);
+}
+
+.timeline-card-compact {
+  padding: 14px;
 }
 
 .dashboard-label {
@@ -486,6 +538,12 @@ button:disabled {
 .update-notes {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.update-subsection {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(19, 32, 51, 0.08);
 }
 
 .card-actions {
@@ -539,6 +597,11 @@ button:disabled {
   gap: 10px;
 }
 
+.company-rich-text {
+  display: grid;
+  gap: 12px;
+}
+
 .link-button {
   padding: 0;
   border: 0;
@@ -576,6 +639,10 @@ button:disabled {
   }
 
   .feature-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .hero-kpi-row {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 

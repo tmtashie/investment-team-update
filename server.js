@@ -150,6 +150,10 @@ function normalizeInvestment(entry) {
     owner: String(entry.owner || "").trim(),
     nextStep: String(entry.nextStep || "").trim(),
     notes: String(entry.notes || "").trim(),
+    deckSummary: String(entry.deckSummary || "").trim(),
+    followOnCapitalAmount: String(entry.followOnCapitalAmount || "").trim(),
+    followOnCapitalStatus: String(entry.followOnCapitalStatus || "").trim(),
+    followOnCapitalNotes: String(entry.followOnCapitalNotes || "").trim(),
     recipients: Array.isArray(entry.recipients)
       ? entry.recipients.map((value) => String(value).trim()).filter(Boolean)
       : [],
@@ -455,6 +459,10 @@ function buildInvestmentsCsv(investments) {
     "Owner",
     "Next Step",
     "Notes",
+    "Deck Summary",
+    "Follow-On Capital Amount",
+    "Follow-On Capital Status",
+    "Follow-On Capital Notes",
     "Submitted By",
     "Recipients",
     "Created At"
@@ -471,6 +479,10 @@ function buildInvestmentsCsv(investments) {
       investment.owner,
       investment.nextStep,
       investment.notes,
+      investment.deckSummary,
+      investment.followOnCapitalAmount,
+      investment.followOnCapitalStatus,
+      investment.followOnCapitalNotes,
       investment.submittedBy,
       Array.isArray(investment.recipients) ? investment.recipients.join(", ") : "",
       investment.createdAt
@@ -494,6 +506,10 @@ function buildInvestmentsWorkbookBuffer(investments) {
     Owner: investment.owner,
     "Next Step": investment.nextStep,
     Notes: investment.notes,
+    "Deck Summary": investment.deckSummary,
+    "Follow-On Capital Amount": investment.followOnCapitalAmount,
+    "Follow-On Capital Status": investment.followOnCapitalStatus,
+    "Follow-On Capital Notes": investment.followOnCapitalNotes,
     "Submitted By": investment.submittedBy,
     Recipients: Array.isArray(investment.recipients) ? investment.recipients.join(", ") : "",
     "Created At": investment.createdAt
@@ -558,6 +574,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
           owner: String(row.Owner || "Workbook import").trim(),
           nextStep: String(row["Next Step"] || "").trim(),
           notes,
+          deckSummary: String(row["Deck Summary"] || "").trim(),
+          followOnCapitalAmount: String(row["Follow-On Capital Amount"] || "").trim(),
+          followOnCapitalStatus: String(row["Follow-On Capital Status"] || "").trim(),
+          followOnCapitalNotes: String(row["Follow-On Capital Notes"] || "").trim(),
           recipients: splitCsv(row.Recipients || ""),
           submittedBy: sessionUser.email,
           createdAt: parseWorkbookDate(row["Created At"] || row.Date)
@@ -764,6 +784,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
                 ? "Review valuation and update official/internal marks"
                 : "",
             notes: importNotes,
+            deckSummary: "",
+            followOnCapitalAmount: "",
+            followOnCapitalStatus: "",
+            followOnCapitalNotes: "",
             recipients: [],
             submittedBy: sessionUser.email,
             createdAt: parseWorkbookDate(dateCommitted)
@@ -1064,6 +1088,12 @@ function buildSummary(entry) {
   const ownerLine = entry.owner || "No owner listed";
   const nextStepLine = entry.nextStep || "No next step provided";
   const noteLine = entry.notes || "No additional notes.";
+  const deckSummaryLine = entry.deckSummary || "No deck summary attached.";
+  const followOnAmountLine = entry.followOnCapitalAmount
+    ? `${entry.currency} ${entry.followOnCapitalAmount}`
+    : "No follow-on capital amount recorded";
+  const followOnStatusLine = entry.followOnCapitalStatus || "No follow-on decision recorded";
+  const followOnNotesLine = entry.followOnCapitalNotes || "No follow-on notes provided.";
 
   const subject = `${entry.status}: ${companyLine}`;
 
@@ -1077,9 +1107,17 @@ function buildSummary(entry) {
     `Owner: ${ownerLine}`,
     `Submitted by: ${entry.submittedBy}`,
     `Next step: ${nextStepLine}`,
+    `Follow-on capital amount: ${followOnAmountLine}`,
+    `Follow-on capital status: ${followOnStatusLine}`,
     "",
     "Summary",
     noteLine,
+    "",
+    "Deck summary",
+    deckSummaryLine,
+    "",
+    "Follow-on capital notes",
+    followOnNotesLine,
     "",
     `Submitted at: ${entry.createdAt}`
   ].join("\n");
@@ -1109,11 +1147,17 @@ function buildSummary(entry) {
           <tr><td style="padding: 8px 0; font-weight: bold;">Owner</td><td>${escapeHtml(ownerLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Submitted by</td><td>${escapeHtml(entry.submittedBy)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Next step</td><td>${escapeHtml(nextStepLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on capital</td><td>${escapeHtml(followOnAmountLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on status</td><td>${escapeHtml(followOnStatusLine)}</td></tr>
         </table>
       </div>
       <div style="padding: 20px 8px 0;">
         <h3 style="margin-bottom: 8px;">Summary</h3>
         <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(noteLine)}</p>
+        <h3 style="margin-bottom: 8px;">Deck Summary</h3>
+        <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(deckSummaryLine)}</p>
+        <h3 style="margin-bottom: 8px;">Follow-on Capital Notes</h3>
+        <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(followOnNotesLine)}</p>
         <p style="margin-top: 20px; color: #6b7280; font-size: 14px;">Submitted at: ${escapeHtml(entry.createdAt)}</p>
       </div>
     </div>
@@ -1209,6 +1253,10 @@ function validateSubmission(payload, sessionUser) {
     owner: payload.owner,
     nextStep: payload.nextStep,
     notes: payload.notes,
+    deckSummary: payload.deckSummary,
+    followOnCapitalAmount: payload.followOnCapitalAmount,
+    followOnCapitalStatus: payload.followOnCapitalStatus,
+    followOnCapitalNotes: payload.followOnCapitalNotes,
     recipients: payload.recipients,
     submittedBy: sessionUser.email,
     createdAt: new Date().toISOString()
@@ -1240,6 +1288,10 @@ function validateInvestmentPatch(payload) {
     owner: String(payload.owner || "").trim(),
     nextStep: String(payload.nextStep || "").trim(),
     notes: String(payload.notes || "").trim(),
+    deckSummary: String(payload.deckSummary || "").trim(),
+    followOnCapitalAmount: String(payload.followOnCapitalAmount || "").trim(),
+    followOnCapitalStatus: String(payload.followOnCapitalStatus || "").trim(),
+    followOnCapitalNotes: String(payload.followOnCapitalNotes || "").trim(),
     recipients: Array.isArray(payload.recipients)
       ? payload.recipients.map((value) => String(value).trim()).filter(Boolean)
       : []
