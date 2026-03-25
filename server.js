@@ -151,6 +151,14 @@ function normalizeInvestment(entry) {
     nextStep: String(entry.nextStep || "").trim(),
     notes: String(entry.notes || "").trim(),
     deckSummary: String(entry.deckSummary || "").trim(),
+    capitalCallDate: String(entry.capitalCallDate || "").trim(),
+    capitalCallAmount: String(entry.capitalCallAmount || "").trim(),
+    distributionDate: String(entry.distributionDate || "").trim(),
+    distributionAmount: String(entry.distributionAmount || "").trim(),
+    valuationDate: String(entry.valuationDate || "").trim(),
+    officialValue: String(entry.officialValue || "").trim(),
+    internalValue: String(entry.internalValue || "").trim(),
+    exitValue: String(entry.exitValue || "").trim(),
     followOnCapitalAmount: String(entry.followOnCapitalAmount || "").trim(),
     followOnCapitalStatus: String(entry.followOnCapitalStatus || "").trim(),
     followOnCapitalNotes: String(entry.followOnCapitalNotes || "").trim(),
@@ -383,6 +391,106 @@ function parseWorkbookDate(value) {
   return new Date().toISOString();
 }
 
+function toPositiveNumber(value) {
+  const amount = parseNumericValue(value);
+  return amount > 0 ? amount : 0;
+}
+
+function yearFraction(fromDate, toDate) {
+  return (toDate.getTime() - fromDate.getTime()) / (365 * 24 * 60 * 60 * 1000);
+}
+
+function xnpv(rate, cashFlows) {
+  const firstDate = cashFlows[0].date;
+  return cashFlows.reduce(
+    (sum, cashFlow) =>
+      sum + cashFlow.amount / Math.pow(1 + rate, yearFraction(firstDate, cashFlow.date)),
+    0
+  );
+}
+
+function dxnpv(rate, cashFlows) {
+  const firstDate = cashFlows[0].date;
+  return cashFlows.reduce((sum, cashFlow) => {
+    const fraction = yearFraction(firstDate, cashFlow.date);
+    if (fraction === 0) {
+      return sum;
+    }
+
+    return sum - (fraction * cashFlow.amount) / Math.pow(1 + rate, fraction + 1);
+  }, 0);
+}
+
+function calculateXirr(cashFlows) {
+  if (!Array.isArray(cashFlows) || cashFlows.length < 2) {
+    return null;
+  }
+
+  const sorted = cashFlows
+    .filter((cashFlow) => cashFlow.date instanceof Date && Number.isFinite(cashFlow.amount))
+    .sort((left, right) => left.date - right.date);
+
+  const hasNegative = sorted.some((cashFlow) => cashFlow.amount < 0);
+  const hasPositive = sorted.some((cashFlow) => cashFlow.amount > 0);
+
+  if (sorted.length < 2 || !hasNegative || !hasPositive) {
+    return null;
+  }
+
+  let rate = 0.15;
+  for (let index = 0; index < 50; index += 1) {
+    const value = xnpv(rate, sorted);
+    const derivative = dxnpv(rate, sorted);
+
+    if (Math.abs(value) < 1e-7) {
+      return rate;
+    }
+
+    if (!Number.isFinite(derivative) || Math.abs(derivative) < 1e-10) {
+      break;
+    }
+
+    const nextRate = rate - value / derivative;
+    if (!Number.isFinite(nextRate) || nextRate <= -0.9999 || nextRate > 1000) {
+      break;
+    }
+
+    rate = nextRate;
+  }
+
+  let low = -0.9999;
+  let high = 1;
+  let lowValue = xnpv(low, sorted);
+  let highValue = xnpv(high, sorted);
+
+  for (let attempt = 0; attempt < 12 && lowValue * highValue > 0; attempt += 1) {
+    high *= 2;
+    highValue = xnpv(high, sorted);
+  }
+
+  if (lowValue * highValue > 0) {
+    return null;
+  }
+
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const mid = (low + high) / 2;
+    const midValue = xnpv(mid, sorted);
+
+    if (Math.abs(midValue) < 1e-7) {
+      return mid;
+    }
+
+    if (lowValue * midValue <= 0) {
+      high = mid;
+    } else {
+      low = mid;
+      lowValue = midValue;
+    }
+  }
+
+  return (low + high) / 2;
+}
+
 function normalizeHeaderKey(value) {
   return String(value || "")
     .trim()
@@ -460,6 +568,14 @@ function buildInvestmentsCsv(investments) {
     "Next Step",
     "Notes",
     "Deck Summary",
+    "Capital Call Date",
+    "Capital Call Amount",
+    "Distribution Date",
+    "Distribution Amount",
+    "Valuation Date",
+    "Official Value",
+    "Internal Value",
+    "Exit Value",
     "Follow-On Capital Amount",
     "Follow-On Capital Status",
     "Follow-On Capital Notes",
@@ -480,6 +596,14 @@ function buildInvestmentsCsv(investments) {
       investment.nextStep,
       investment.notes,
       investment.deckSummary,
+      investment.capitalCallDate,
+      investment.capitalCallAmount,
+      investment.distributionDate,
+      investment.distributionAmount,
+      investment.valuationDate,
+      investment.officialValue,
+      investment.internalValue,
+      investment.exitValue,
       investment.followOnCapitalAmount,
       investment.followOnCapitalStatus,
       investment.followOnCapitalNotes,
@@ -507,6 +631,14 @@ function buildInvestmentsWorkbookBuffer(investments) {
     "Next Step": investment.nextStep,
     Notes: investment.notes,
     "Deck Summary": investment.deckSummary,
+    "Capital Call Date": investment.capitalCallDate,
+    "Capital Call Amount": investment.capitalCallAmount,
+    "Distribution Date": investment.distributionDate,
+    "Distribution Amount": investment.distributionAmount,
+    "Valuation Date": investment.valuationDate,
+    "Official Value": investment.officialValue,
+    "Internal Value": investment.internalValue,
+    "Exit Value": investment.exitValue,
     "Follow-On Capital Amount": investment.followOnCapitalAmount,
     "Follow-On Capital Status": investment.followOnCapitalStatus,
     "Follow-On Capital Notes": investment.followOnCapitalNotes,
@@ -575,6 +707,14 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
           nextStep: String(row["Next Step"] || "").trim(),
           notes,
           deckSummary: String(row["Deck Summary"] || "").trim(),
+          capitalCallDate: String(row["Capital Call Date"] || "").trim(),
+          capitalCallAmount: String(row["Capital Call Amount"] || "").trim(),
+          distributionDate: String(row["Distribution Date"] || "").trim(),
+          distributionAmount: String(row["Distribution Amount"] || "").trim(),
+          valuationDate: String(row["Valuation Date"] || "").trim(),
+          officialValue: String(row["Official Value"] || "").trim(),
+          internalValue: String(row["Internal Value"] || "").trim(),
+          exitValue: String(row["Exit Value"] || "").trim(),
           followOnCapitalAmount: String(row["Follow-On Capital Amount"] || "").trim(),
           followOnCapitalStatus: String(row["Follow-On Capital Status"] || "").trim(),
           followOnCapitalNotes: String(row["Follow-On Capital Notes"] || "").trim(),
@@ -647,6 +787,22 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
             ? `Review valuation tied to ${linkedValuationDate}`
             : "",
           notes,
+          capitalCallDate:
+            contributionAmount || netCashFlow < 0 ? parseWorkbookDate(transactionDate) : "",
+          capitalCallAmount:
+            contributionAmount || netCashFlow < 0
+              ? String(contributionAmount || Math.abs(netCashFlow) || "")
+              : "",
+          distributionDate:
+            distributionAmount || netCashFlow > 0 ? parseWorkbookDate(transactionDate) : "",
+          distributionAmount:
+            distributionAmount || netCashFlow > 0
+              ? String(distributionAmount || netCashFlow || "")
+              : "",
+          valuationDate: linkedValuationDate,
+          officialValue: "",
+          internalValue: "",
+          exitValue: "",
           recipients: [],
           submittedBy: sessionUser.email,
           createdAt: parseWorkbookDate(transactionDate)
@@ -785,6 +941,14 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
                 : "",
             notes: importNotes,
             deckSummary: "",
+            capitalCallDate: parseWorkbookDate(dateCommitted),
+            capitalCallAmount: calledAmount ? String(calledAmount) : "",
+            distributionDate: "",
+            distributionAmount: "",
+            valuationDate: parseWorkbookDate(dateCommitted),
+            officialValue: currentValuation ? String(currentValuation) : "",
+            internalValue: currentValuation ? String(currentValuation) : "",
+            exitValue: "",
             followOnCapitalAmount: "",
             followOnCapitalStatus: "",
             followOnCapitalNotes: "",
@@ -1089,6 +1253,22 @@ function buildSummary(entry) {
   const nextStepLine = entry.nextStep || "No next step provided";
   const noteLine = entry.notes || "No additional notes.";
   const deckSummaryLine = entry.deckSummary || "No deck summary attached.";
+  const capitalCallLine = entry.capitalCallAmount
+    ? `${entry.currency} ${entry.capitalCallAmount} on ${entry.capitalCallDate || "date not set"}`
+    : "No capital call recorded";
+  const distributionLine = entry.distributionAmount
+    ? `${entry.currency} ${entry.distributionAmount} on ${entry.distributionDate || "date not set"}`
+    : "No distribution recorded";
+  const officialValueLine = entry.officialValue
+    ? `${entry.currency} ${entry.officialValue}`
+    : "No official value recorded";
+  const internalValueLine = entry.internalValue
+    ? `${entry.currency} ${entry.internalValue}`
+    : "No internal value recorded";
+  const exitValueLine = entry.exitValue
+    ? `${entry.currency} ${entry.exitValue}`
+    : "No exit value recorded";
+  const valuationDateLine = entry.valuationDate || "No valuation date recorded";
   const followOnAmountLine = entry.followOnCapitalAmount
     ? `${entry.currency} ${entry.followOnCapitalAmount}`
     : "No follow-on capital amount recorded";
@@ -1107,6 +1287,12 @@ function buildSummary(entry) {
     `Owner: ${ownerLine}`,
     `Submitted by: ${entry.submittedBy}`,
     `Next step: ${nextStepLine}`,
+    `Capital call: ${capitalCallLine}`,
+    `Distribution: ${distributionLine}`,
+    `Valuation date: ${valuationDateLine}`,
+    `Official value: ${officialValueLine}`,
+    `Internal value: ${internalValueLine}`,
+    `Exit value: ${exitValueLine}`,
     `Follow-on capital amount: ${followOnAmountLine}`,
     `Follow-on capital status: ${followOnStatusLine}`,
     "",
@@ -1147,6 +1333,12 @@ function buildSummary(entry) {
           <tr><td style="padding: 8px 0; font-weight: bold;">Owner</td><td>${escapeHtml(ownerLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Submitted by</td><td>${escapeHtml(entry.submittedBy)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Next step</td><td>${escapeHtml(nextStepLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Capital call</td><td>${escapeHtml(capitalCallLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Distribution</td><td>${escapeHtml(distributionLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Valuation date</td><td>${escapeHtml(valuationDateLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Official value</td><td>${escapeHtml(officialValueLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Internal value</td><td>${escapeHtml(internalValueLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Exit value</td><td>${escapeHtml(exitValueLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on capital</td><td>${escapeHtml(followOnAmountLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on status</td><td>${escapeHtml(followOnStatusLine)}</td></tr>
         </table>
@@ -1254,6 +1446,14 @@ function validateSubmission(payload, sessionUser) {
     nextStep: payload.nextStep,
     notes: payload.notes,
     deckSummary: payload.deckSummary,
+    capitalCallDate: payload.capitalCallDate,
+    capitalCallAmount: payload.capitalCallAmount,
+    distributionDate: payload.distributionDate,
+    distributionAmount: payload.distributionAmount,
+    valuationDate: payload.valuationDate,
+    officialValue: payload.officialValue,
+    internalValue: payload.internalValue,
+    exitValue: payload.exitValue,
     followOnCapitalAmount: payload.followOnCapitalAmount,
     followOnCapitalStatus: payload.followOnCapitalStatus,
     followOnCapitalNotes: payload.followOnCapitalNotes,
@@ -1289,6 +1489,14 @@ function validateInvestmentPatch(payload) {
     nextStep: String(payload.nextStep || "").trim(),
     notes: String(payload.notes || "").trim(),
     deckSummary: String(payload.deckSummary || "").trim(),
+    capitalCallDate: String(payload.capitalCallDate || "").trim(),
+    capitalCallAmount: String(payload.capitalCallAmount || "").trim(),
+    distributionDate: String(payload.distributionDate || "").trim(),
+    distributionAmount: String(payload.distributionAmount || "").trim(),
+    valuationDate: String(payload.valuationDate || "").trim(),
+    officialValue: String(payload.officialValue || "").trim(),
+    internalValue: String(payload.internalValue || "").trim(),
+    exitValue: String(payload.exitValue || "").trim(),
     followOnCapitalAmount: String(payload.followOnCapitalAmount || "").trim(),
     followOnCapitalStatus: String(payload.followOnCapitalStatus || "").trim(),
     followOnCapitalNotes: String(payload.followOnCapitalNotes || "").trim(),

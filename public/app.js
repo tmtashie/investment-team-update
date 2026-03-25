@@ -44,6 +44,7 @@ const companyPanelTitle = document.getElementById("companyPanelTitle");
 const companyPanelCopy = document.getElementById("companyPanelCopy");
 const companySummary = document.getElementById("companySummary");
 const companyHighlights = document.getElementById("companyHighlights");
+const companyPerformanceSummary = document.getElementById("companyPerformanceSummary");
 const companyDeckSummaries = document.getElementById("companyDeckSummaries");
 const companyNextSteps = document.getElementById("companyNextSteps");
 const companyFollowOnCapital = document.getElementById("companyFollowOnCapital");
@@ -54,6 +55,7 @@ let currentUser = null;
 let allInvestments = [];
 let selectedCompany = "";
 let configuredEntities = [];
+let companyPerformanceMap = new Map();
 
 function companyKey(value) {
   return String(value || "")
@@ -126,6 +128,11 @@ function filterInvestments(investments) {
       investment.deckSummary,
       investment.owner,
       investment.nextStep,
+      investment.capitalCallAmount,
+      investment.distributionAmount,
+      investment.officialValue,
+      investment.internalValue,
+      investment.exitValue,
       investment.followOnCapitalStatus,
       investment.followOnCapitalNotes,
       investment.submittedBy
@@ -152,20 +159,268 @@ function formatMoney(value) {
   return `$${toNumber(value).toLocaleString()}`;
 }
 
+function formatPercent(value) {
+  if (!Number.isFinite(value)) {
+    return "N/A";
+  }
+
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatTurns(value) {
+  if (!Number.isFinite(value)) {
+    return "N/A";
+  }
+
+  return `${value.toFixed(2)}x`;
+}
+
+function parseDateValue(value, fallback) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return fallback || null;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? fallback || null : parsed;
+}
+
+function yearFraction(startDate, endDate) {
+  return (endDate.getTime() - startDate.getTime()) / (365 * 24 * 60 * 60 * 1000);
+}
+
+function xnpv(rate, cashFlows) {
+  const firstDate = cashFlows[0].date;
+  return cashFlows.reduce(
+    (sum, cashFlow) =>
+      sum + cashFlow.amount / Math.pow(1 + rate, yearFraction(firstDate, cashFlow.date)),
+    0
+  );
+}
+
+function dxnpv(rate, cashFlows) {
+  const firstDate = cashFlows[0].date;
+  return cashFlows.reduce((sum, cashFlow) => {
+    const fraction = yearFraction(firstDate, cashFlow.date);
+    if (fraction === 0) {
+      return sum;
+    }
+
+    return sum - (fraction * cashFlow.amount) / Math.pow(1 + rate, fraction + 1);
+  }, 0);
+}
+
+function calculateXirr(cashFlows) {
+  if (!Array.isArray(cashFlows) || cashFlows.length < 2) {
+    return null;
+  }
+
+  const sorted = cashFlows
+    .filter((cashFlow) => cashFlow.date instanceof Date && Number.isFinite(cashFlow.amount))
+    .sort((left, right) => left.date - right.date);
+
+  const hasNegative = sorted.some((cashFlow) => cashFlow.amount < 0);
+  const hasPositive = sorted.some((cashFlow) => cashFlow.amount > 0);
+  if (sorted.length < 2 || !hasNegative || !hasPositive) {
+    return null;
+  }
+
+  let rate = 0.15;
+  for (let index = 0; index < 50; index += 1) {
+    const value = xnpv(rate, sorted);
+    const derivative = dxnpv(rate, sorted);
+    if (Math.abs(value) < 1e-7) {
+      return rate;
+    }
+
+    if (!Number.isFinite(derivative) || Math.abs(derivative) < 1e-10) {
+      break;
+    }
+
+    const nextRate = rate - value / derivative;
+    if (!Number.isFinite(nextRate) || nextRate <= -0.9999 || nextRate > 1000) {
+      break;
+    }
+
+    rate = nextRate;
+  }
+
+  let low = -0.9999;
+  let high = 1;
+  let lowValue = xnpv(low, sorted);
+  let highValue = xnpv(high, sorted);
+
+  for (let attempt = 0; attempt < 12 && lowValue * highValue > 0; attempt += 1) {
+    high *= 2;
+    highValue = xnpv(high, sorted);
+  }
+
+  if (lowValue * highValue > 0) {
+    return null;
+  }
+
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const mid = (low + high) / 2;
+    const midValue = xnpv(mid, sorted);
+    if (Math.abs(midValue) < 1e-7) {
+      return mid;
+    }
+
+    if (lowValue * midValue <= 0) {
+      high = mid;
+    } else {
+      low = mid;
+      lowValue = midValue;
+    }
+  }
+
+  return (low + high) / 2;
+}
+
+function pickLatestNumericValue(updates, fieldName) {
+  const sorted = [...updates].sort((left, right) => {
+    const rightDate = parseDateValue(right.valuationDate, parseDateValue(right.createdAt, new Date(0)));
+    const leftDate = parseDateValue(left.valuationDate, parseDateValue(left.createdAt, new Date(0)));
+    return rightDate - leftDate;
+  });
+
+  for (const update of sorted) {
+    const amount = toNumber(update[fieldName]);
+    if (amount > 0) {
+      return {
+        value: amount,
+        date: parseDateValue(update.valuationDate, parseDateValue(update.createdAt, new Date()))
+      };
+    }
+  }
+
+  return { value: 0, date: parseDateValue(sorted[0] && sorted[0].createdAt, new Date()) };
+}
+
+function buildCompanyPerformance(updates) {
+  const investedCapital = updates.reduce(
+    (sum, update) => sum + toNumber(update.capitalCallAmount),
+    0
+  );
+  const distributions = updates.reduce(
+    (sum, update) => sum + toNumber(update.distributionAmount),
+    0
+  );
+  const officialMark = pickLatestNumericValue(updates, "officialValue");
+  const internalMark = pickLatestNumericValue(updates, "internalValue");
+  const exitMark = pickLatestNumericValue(updates, "exitValue");
+  const valuationDate =
+    officialMark.date || internalMark.date || exitMark.date || new Date();
+
+  const baseCashFlows = [];
+  updates.forEach((update) => {
+    const capitalCallAmount = toNumber(update.capitalCallAmount);
+    const distributionAmount = toNumber(update.distributionAmount);
+    const capitalCallDate = parseDateValue(
+      update.capitalCallDate,
+      parseDateValue(update.createdAt, null)
+    );
+    const distributionDate = parseDateValue(
+      update.distributionDate,
+      parseDateValue(update.createdAt, null)
+    );
+
+    if (capitalCallAmount > 0 && capitalCallDate) {
+      baseCashFlows.push({ date: capitalCallDate, amount: -capitalCallAmount });
+    }
+
+    if (distributionAmount > 0 && distributionDate) {
+      baseCashFlows.push({ date: distributionDate, amount: distributionAmount });
+    }
+  });
+
+  const buildView = (terminalValue) => {
+    const cashFlows = [...baseCashFlows];
+    if (terminalValue > 0 && valuationDate) {
+      cashFlows.push({ date: valuationDate, amount: terminalValue });
+    }
+
+    return {
+      xirr: calculateXirr(cashFlows),
+      moic:
+        investedCapital > 0 ? (distributions + terminalValue) / investedCapital : null
+    };
+  };
+
+  return {
+    investedCapital,
+    distributions,
+    officialValue: officialMark.value,
+    internalValue: internalMark.value,
+    exitValue: exitMark.value,
+    official: buildView(officialMark.value),
+    internal: buildView(internalMark.value),
+    exit: buildView(exitMark.value)
+  };
+}
+
+function buildCompanyPerformanceMap(investments) {
+  const grouped = new Map();
+
+  investments.forEach((investment) => {
+    const key = companyKey(investment.company);
+    if (!key) {
+      return;
+    }
+
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+    grouped.get(key).push(investment);
+  });
+
+  const performanceMap = new Map();
+  grouped.forEach((updates, key) => {
+    performanceMap.set(key, buildCompanyPerformance(updates));
+  });
+
+  return performanceMap;
+}
+
 function buildDashboardCards(investments) {
-  const uniqueCompanies = new Set(investments.map((investment) => investment.company).filter(Boolean));
-  const openCount = investments.filter(
-    (investment) => !["Passed", "Closed"].includes(investment.status)
+  const uniqueCompanies = Array.from(
+    new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean))
+  );
+  const companySummaries = uniqueCompanies
+    .map((key) => {
+      const updates = investments.filter((investment) => companyKey(investment.company) === key);
+      return {
+        key,
+        latest: updates.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0],
+        performance: buildCompanyPerformance(updates)
+      };
+    })
+    .filter(Boolean);
+  const openCount = companySummaries.filter(
+    (summary) => !["Passed", "Closed"].includes(summary.latest && summary.latest.status)
   ).length;
   const approvedCount = investments.filter((investment) => investment.status === "Approved").length;
-  const totalAmount = investments.reduce((sum, investment) => sum + toNumber(investment.amount), 0);
+  const totalInvestedCapital = companySummaries.reduce(
+    (sum, summary) => sum + summary.performance.investedCapital,
+    0
+  );
+  const officialNav = companySummaries.reduce(
+    (sum, summary) => sum + summary.performance.officialValue,
+    0
+  );
+  const internalNav = companySummaries.reduce(
+    (sum, summary) => sum + summary.performance.internalValue,
+    0
+  );
 
   const cards = [
     { label: "Updates", value: String(investments.length) },
-    { label: "Companies", value: String(uniqueCompanies.size) },
+    { label: "Companies", value: String(companySummaries.length) },
     { label: "Active pipeline", value: String(openCount) },
     { label: "Approved", value: String(approvedCount) },
-    { label: "Reported amount", value: `$${totalAmount.toLocaleString()}` }
+    { label: "Invested capital", value: formatMoney(totalInvestedCapital) },
+    { label: "Official NAV", value: formatMoney(officialNav) },
+    { label: "Internal NAV", value: formatMoney(internalNav) }
   ];
 
   const entityTotals = (configuredEntities.length ? configuredEntities : [])
@@ -252,6 +507,14 @@ function beginEditInvestment(investmentId) {
     : "";
   notesField.value = investment.notes || "";
   deckSummaryField.value = investment.deckSummary || "";
+  form.elements.capitalCallDate.value = investment.capitalCallDate || "";
+  form.elements.capitalCallAmount.value = investment.capitalCallAmount || "";
+  form.elements.distributionDate.value = investment.distributionDate || "";
+  form.elements.distributionAmount.value = investment.distributionAmount || "";
+  form.elements.valuationDate.value = investment.valuationDate || "";
+  form.elements.officialValue.value = investment.officialValue || "";
+  form.elements.internalValue.value = investment.internalValue || "";
+  form.elements.exitValue.value = investment.exitValue || "";
   form.elements.followOnCapitalAmount.value = investment.followOnCapitalAmount || "";
   form.elements.followOnCapitalStatus.value = investment.followOnCapitalStatus || "";
   form.elements.followOnCapitalNotes.value = investment.followOnCapitalNotes || "";
@@ -296,6 +559,7 @@ function renderCompanyPanel() {
     companyPanel.classList.add("hidden");
     companySummary.innerHTML = "";
     companyHighlights.innerHTML = "";
+    companyPerformanceSummary.innerHTML = "";
     companyDeckSummaries.innerHTML = "";
     companyNextSteps.innerHTML = "";
     companyFollowOnCapital.innerHTML = "";
@@ -332,6 +596,8 @@ function renderCompanyPanel() {
       investment.followOnCapitalNotes
   );
   companyPanel.classList.remove("hidden");
+  const performance =
+    companyPerformanceMap.get(companyKey(selectedCompany)) || buildCompanyPerformance(companyUpdates);
   companyPanelTitle.textContent = latest.company || selectedCompany;
   companyPanelCopy.textContent = `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
   companySummary.innerHTML = [
@@ -363,6 +629,27 @@ function renderCompanyPanel() {
       label: "Latest deck summary",
       value: summarizeText(latest.deckSummary, "No deck summary provided yet.")
     }
+  ]
+    .map(
+      (item) => `
+        <div class="highlight-row">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="highlight-value">${escapeHtml(item.value)}</p>
+        </div>
+      `
+    )
+    .join("");
+
+  companyPerformanceSummary.innerHTML = [
+    { label: "Invested capital", value: formatMoney(performance.investedCapital) },
+    { label: "Distributions", value: formatMoney(performance.distributions) },
+    { label: "Official value", value: formatMoney(performance.officialValue) },
+    { label: "Internal value", value: formatMoney(performance.internalValue) },
+    { label: "Official MOIC", value: formatTurns(performance.official.moic) },
+    { label: "Internal MOIC", value: formatTurns(performance.internal.moic) },
+    { label: "Official XIRR", value: formatPercent(performance.official.xirr) },
+    { label: "Internal XIRR", value: formatPercent(performance.internal.xirr) },
+    { label: "Exit XIRR", value: formatPercent(performance.exit.xirr) }
   ]
     .map(
       (item) => `
@@ -432,6 +719,36 @@ function renderCompanyPanel() {
                 : "Amount not specified"
             } • Submitted by: ${escapeHtml(investment.submittedBy || "Unknown")}
           </p>
+          ${
+            investment.capitalCallAmount || investment.distributionAmount
+              ? `<p class="update-meta">Cash activity: ${
+                  investment.capitalCallAmount
+                    ? `Call ${escapeHtml(investment.currency)} ${escapeHtml(investment.capitalCallAmount)} on ${escapeHtml(investment.capitalCallDate || "date not set")}`
+                    : "No capital call"
+                } • ${
+                  investment.distributionAmount
+                    ? `Distribution ${escapeHtml(investment.currency)} ${escapeHtml(investment.distributionAmount)} on ${escapeHtml(investment.distributionDate || "date not set")}`
+                    : "No distribution"
+                }</p>`
+              : ""
+          }
+          ${
+            investment.officialValue || investment.internalValue || investment.exitValue
+              ? `<p class="update-meta">Marks: Official ${
+                  investment.officialValue
+                    ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.officialValue)}`
+                    : "not set"
+                } • Internal ${
+                  investment.internalValue
+                    ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.internalValue)}`
+                    : "not set"
+                } • Exit ${
+                  investment.exitValue
+                    ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.exitValue)}`
+                    : "not set"
+                }</p>`
+              : ""
+          }
           <p class="update-meta">
             Next: ${escapeHtml(investment.nextStep || "No next step provided")}
           </p>
@@ -465,6 +782,8 @@ function renderUpdates(investments) {
 
   updatesList.innerHTML = investments
     .map((investment) => {
+      const performance =
+        companyPerformanceMap.get(companyKey(investment.company)) || buildCompanyPerformance([investment]);
       const amount = investment.amount
         ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.amount)}`
         : "Amount not specified";
@@ -484,6 +803,24 @@ function renderUpdates(investments) {
             Owner: ${escapeHtml(investment.owner || "Not set")} • Submitted by:
             ${escapeHtml(investment.submittedBy || "Unknown")}
           </p>
+          <p class="update-meta">
+            Official XIRR: ${escapeHtml(formatPercent(performance.official.xirr))} • Official MOIC: ${escapeHtml(
+              formatTurns(performance.official.moic)
+            )}
+          </p>
+          ${
+            investment.capitalCallAmount || investment.distributionAmount
+              ? `<p class="update-meta">Cash activity: ${
+                  investment.capitalCallAmount
+                    ? `Call ${escapeHtml(investment.currency)} ${escapeHtml(investment.capitalCallAmount)}`
+                    : "No call"
+                } • ${
+                  investment.distributionAmount
+                    ? `Distribution ${escapeHtml(investment.currency)} ${escapeHtml(investment.distributionAmount)}`
+                    : "No distribution"
+                }</p>`
+              : ""
+          }
           <p class="update-meta">
             Next: ${escapeHtml(investment.nextStep || "Not set")}
           </p>
@@ -514,6 +851,7 @@ function renderUpdates(investments) {
 }
 
 function renderAll() {
+  companyPerformanceMap = buildCompanyPerformanceMap(allInvestments);
   renderCompanySuggestions();
   renderFilterOptions();
   const filteredInvestments = filterInvestments(allInvestments);
@@ -774,6 +1112,14 @@ form.addEventListener("submit", async (event) => {
     recipients,
     notes: formData.get("notes"),
     deckSummary: formData.get("deckSummary"),
+    capitalCallDate: formData.get("capitalCallDate"),
+    capitalCallAmount: formData.get("capitalCallAmount"),
+    distributionDate: formData.get("distributionDate"),
+    distributionAmount: formData.get("distributionAmount"),
+    valuationDate: formData.get("valuationDate"),
+    officialValue: formData.get("officialValue"),
+    internalValue: formData.get("internalValue"),
+    exitValue: formData.get("exitValue"),
     followOnCapitalAmount: formData.get("followOnCapitalAmount"),
     followOnCapitalStatus: formData.get("followOnCapitalStatus"),
     followOnCapitalNotes: formData.get("followOnCapitalNotes")

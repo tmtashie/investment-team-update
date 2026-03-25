@@ -463,6 +463,16 @@ button:disabled {
   gap: 8px;
 }
 
+.subsection-helper {
+  display: grid;
+  align-content: center;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(23, 50, 77, 0.06);
+  border: 1px solid rgba(23, 50, 77, 0.08);
+  min-height: 54px;
+}
+
 .filters-grid {
   display: grid;
   gap: 14px;

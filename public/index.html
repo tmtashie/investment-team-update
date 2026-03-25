@@ -291,6 +291,99 @@
 
             <section class="subsection-card">
               <div class="subsection-copy">
+                <p class="feature-kicker">Capital activity and valuation</p>
+                <h3>Track dated cash flows and current marks</h3>
+                <p class="section-copy">
+                  Add actual contribution dates, distributions, and current values so the app can calculate real XIRR and MOIC over time.
+                </p>
+              </div>
+              <div class="two-up">
+                <label>
+                  Capital call date
+                  <input id="capitalCallDateField" name="capitalCallDate" type="date" />
+                </label>
+
+                <label>
+                  Capital call amount
+                  <input
+                    id="capitalCallAmountField"
+                    name="capitalCallAmount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="250000"
+                  />
+                </label>
+              </div>
+              <div class="two-up">
+                <label>
+                  Distribution date
+                  <input id="distributionDateField" name="distributionDate" type="date" />
+                </label>
+
+                <label>
+                  Distribution amount
+                  <input
+                    id="distributionAmountField"
+                    name="distributionAmount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="100000"
+                  />
+                </label>
+              </div>
+              <div class="two-up">
+                <label>
+                  Valuation date
+                  <input id="valuationDateField" name="valuationDate" type="date" />
+                </label>
+
+                <div class="section-copy subsection-helper">
+                  Use the latest valuation date when you update official, internal, or exit marks.
+                </div>
+              </div>
+              <div class="three-up">
+                <label>
+                  Official value
+                  <input
+                    id="officialValueField"
+                    name="officialValue"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="350000"
+                  />
+                </label>
+
+                <label>
+                  Internal value
+                  <input
+                    id="internalValueField"
+                    name="internalValue"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="500000"
+                  />
+                </label>
+
+                <label>
+                  Exit value
+                  <input
+                    id="exitValueField"
+                    name="exitValue"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="650000"
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section class="subsection-card">
+              <div class="subsection-copy">
                 <p class="feature-kicker">Follow-on capital</p>
                 <h3>Track reserve and participation decisions</h3>
                 <p class="section-copy">
@@ -398,6 +491,10 @@
             <section class="company-detail-card">
               <h3>Snapshot</h3>
               <div id="companyHighlights" class="company-highlights"></div>
+            </section>
+            <section class="company-detail-card">
+              <h3>Performance</h3>
+              <div id="companyPerformanceSummary" class="company-highlights"></div>
             </section>
             <section class="company-detail-card">
               <h3>Deck summaries</h3>
