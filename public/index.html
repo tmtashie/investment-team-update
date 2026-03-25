@@ -154,6 +154,16 @@
         <section class="panel">
           <div class="panel-header panel-header-stack">
             <div>
+              <h2>Entity performance</h2>
+              <p class="section-copy">See invested capital, marks, and performance by family office entity.</p>
+            </div>
+          </div>
+          <div id="entityPerformanceCards" class="dashboard-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header panel-header-stack">
+            <div>
               <h2>New investment update</h2>
               <p class="section-copy">
                 Each submission is saved to your workspace and can trigger an email
@@ -427,6 +437,54 @@
               </div>
             </section>
 
+            <section class="subsection-card">
+              <div class="subsection-copy">
+                <p class="feature-kicker">Documents and decisions</p>
+                <h3>Keep source material and investment decisions together</h3>
+                <p class="section-copy">
+                  Save key links, memo references, investment committee outcomes, and decision notes alongside each update.
+                </p>
+              </div>
+              <label>
+                Document links
+                <textarea
+                  id="documentLinksField"
+                  name="documentLinks"
+                  rows="4"
+                  placeholder="Paste one link per line for decks, memos, data rooms, legal docs, or shared drive folders."
+                ></textarea>
+              </label>
+              <div class="three-up">
+                <label>
+                  Decision date
+                  <input id="decisionDateField" name="decisionDate" type="date" />
+                </label>
+
+                <label>
+                  Decision type
+                  <select id="decisionTypeField" name="decisionType">
+                    <option value="">Select decision</option>
+                    <option value="IC review">IC review</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Passed">Passed</option>
+                    <option value="Watchlist">Watchlist</option>
+                    <option value="Follow-on approved">Follow-on approved</option>
+                    <option value="Follow-on declined">Follow-on declined</option>
+                  </select>
+                </label>
+
+                <label>
+                  Decision summary
+                  <input
+                    id="decisionSummaryField"
+                    name="decisionSummary"
+                    type="text"
+                    placeholder="Approved subject to legal docs and final references"
+                  />
+                </label>
+              </div>
+            </section>
+
             <div class="form-actions">
               <button id="submitButton" type="submit">Save update and send email</button>
               <button id="cancelEditButton" type="button" class="secondary-button hidden">
@@ -497,8 +555,16 @@
               <div id="companyPerformanceSummary" class="company-highlights"></div>
             </section>
             <section class="company-detail-card">
+              <h3>Entity exposure</h3>
+              <div id="companyEntityPerformance" class="company-highlights"></div>
+            </section>
+            <section class="company-detail-card">
               <h3>Deck summaries</h3>
               <div id="companyDeckSummaries" class="company-rich-text"></div>
+            </section>
+            <section class="company-detail-card">
+              <h3>Documents and decisions</h3>
+              <div id="companyDecisionLog" class="company-rich-text"></div>
             </section>
             <section class="company-detail-card">
               <h3>Open next steps</h3>

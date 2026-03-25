@@ -33,6 +33,7 @@ const emailSummaryInput = document.getElementById("emailSummaryInput");
 const summarizeEmailButton = document.getElementById("summarizeEmailButton");
 const emailMessage = document.getElementById("emailMessage");
 const dashboardCards = document.getElementById("dashboardCards");
+const entityPerformanceCards = document.getElementById("entityPerformanceCards");
 const entityFilter = document.getElementById("entityFilter");
 const searchFilter = document.getElementById("searchFilter");
 const statusFilter = document.getElementById("statusFilter");
@@ -45,7 +46,9 @@ const companyPanelCopy = document.getElementById("companyPanelCopy");
 const companySummary = document.getElementById("companySummary");
 const companyHighlights = document.getElementById("companyHighlights");
 const companyPerformanceSummary = document.getElementById("companyPerformanceSummary");
+const companyEntityPerformance = document.getElementById("companyEntityPerformance");
 const companyDeckSummaries = document.getElementById("companyDeckSummaries");
+const companyDecisionLog = document.getElementById("companyDecisionLog");
 const companyNextSteps = document.getElementById("companyNextSteps");
 const companyFollowOnCapital = document.getElementById("companyFollowOnCapital");
 const companyTimeline = document.getElementById("companyTimeline");
@@ -56,6 +59,7 @@ let allInvestments = [];
 let selectedCompany = "";
 let configuredEntities = [];
 let companyPerformanceMap = new Map();
+let entityPerformanceMap = new Map();
 
 function companyKey(value) {
   return String(value || "")
@@ -135,6 +139,9 @@ function filterInvestments(investments) {
       investment.exitValue,
       investment.followOnCapitalStatus,
       investment.followOnCapitalNotes,
+      investment.documentLinks,
+      investment.decisionType,
+      investment.decisionSummary,
       investment.submittedBy
     ]
       .join(" ")
@@ -382,6 +389,20 @@ function buildCompanyPerformanceMap(investments) {
   return performanceMap;
 }
 
+function buildEntityPerformanceMap(investments) {
+  const performanceMap = new Map();
+  const entityList = Array.from(
+    new Set(configuredEntities.concat(investments.map((investment) => investment.entity).filter(Boolean)))
+  ).filter(Boolean);
+
+  entityList.forEach((entity) => {
+    const entityUpdates = investments.filter((investment) => investment.entity === entity);
+    performanceMap.set(entity, buildCompanyPerformance(entityUpdates));
+  });
+
+  return performanceMap;
+}
+
 function buildDashboardCards(investments) {
   const uniqueCompanies = Array.from(
     new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean))
@@ -440,6 +461,24 @@ function renderDashboard(investments) {
         <article class="dashboard-card">
           <p class="dashboard-label">${escapeHtml(card.label)}</p>
           <p class="dashboard-value">${escapeHtml(card.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  const entityCards = Array.from(entityPerformanceMap.entries())
+    .map(([entity, performance]) => ({ entity, performance }))
+    .filter(({ entity }) => !currentFilters().entity || currentFilters().entity === entity);
+
+  entityPerformanceCards.innerHTML = entityCards
+    .map(
+      ({ entity, performance }) => `
+        <article class="dashboard-card entity-performance-card">
+          <p class="dashboard-label">${escapeHtml(entity)}</p>
+          <p class="dashboard-value">${escapeHtml(formatMoney(performance.investedCapital))}</p>
+          <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(performance.officialValue))}</p>
+          <p class="update-meta">Official XIRR: ${escapeHtml(formatPercent(performance.official.xirr))}</p>
+          <p class="update-meta">Official MOIC: ${escapeHtml(formatTurns(performance.official.moic))}</p>
         </article>
       `
     )
@@ -518,6 +557,10 @@ function beginEditInvestment(investmentId) {
   form.elements.followOnCapitalAmount.value = investment.followOnCapitalAmount || "";
   form.elements.followOnCapitalStatus.value = investment.followOnCapitalStatus || "";
   form.elements.followOnCapitalNotes.value = investment.followOnCapitalNotes || "";
+  form.elements.documentLinks.value = investment.documentLinks || "";
+  form.elements.decisionDate.value = investment.decisionDate || "";
+  form.elements.decisionType.value = investment.decisionType || "";
+  form.elements.decisionSummary.value = investment.decisionSummary || "";
   submitButton.textContent = "Save changes";
   cancelEditButton.classList.remove("hidden");
   formMessage.textContent = `Editing ${investment.company}.`;
@@ -560,7 +603,9 @@ function renderCompanyPanel() {
     companySummary.innerHTML = "";
     companyHighlights.innerHTML = "";
     companyPerformanceSummary.innerHTML = "";
+    companyEntityPerformance.innerHTML = "";
     companyDeckSummaries.innerHTML = "";
+    companyDecisionLog.innerHTML = "";
     companyNextSteps.innerHTML = "";
     companyFollowOnCapital.innerHTML = "";
     companyTimeline.innerHTML = "";
@@ -595,6 +640,17 @@ function renderCompanyPanel() {
       investment.followOnCapitalStatus ||
       investment.followOnCapitalNotes
   );
+  const decisionUpdates = companyUpdates.filter(
+    (investment) => investment.documentLinks || investment.decisionDate || investment.decisionType || investment.decisionSummary
+  );
+  const perEntityCompanyPerformance = Array.from(
+    new Set(companyUpdates.map((investment) => investment.entity).filter(Boolean))
+  ).map((entity) => ({
+    entity,
+    performance: buildCompanyPerformance(
+      companyUpdates.filter((investment) => investment.entity === entity)
+    )
+  }));
   companyPanel.classList.remove("hidden");
   const performance =
     companyPerformanceMap.get(companyKey(selectedCompany)) || buildCompanyPerformance(companyUpdates);
@@ -661,6 +717,24 @@ function renderCompanyPanel() {
     )
     .join("");
 
+  companyEntityPerformance.innerHTML = perEntityCompanyPerformance.length
+    ? perEntityCompanyPerformance
+        .map(
+          ({ entity, performance }) => `
+            <div class="highlight-row">
+              <p class="dashboard-label">${escapeHtml(entity)}</p>
+              <p class="highlight-value">Invested ${escapeHtml(formatMoney(performance.investedCapital))} • Official NAV ${escapeHtml(
+                formatMoney(performance.officialValue)
+              )}</p>
+              <p class="update-meta">XIRR ${escapeHtml(formatPercent(performance.official.xirr))} • MOIC ${escapeHtml(
+                formatTurns(performance.official.moic)
+              )}</p>
+            </div>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No entity-level performance yet.</p>';
+
   companyNextSteps.innerHTML = nextSteps.length
     ? `<ul class="company-list">${nextSteps
         .slice(0, 6)
@@ -681,6 +755,26 @@ function renderCompanyPanel() {
         )
         .join("")
     : '<p class="update-meta">No deck summaries saved yet.</p>';
+
+  companyDecisionLog.innerHTML = decisionUpdates.length
+    ? decisionUpdates
+        .slice(0, 6)
+        .map(
+          (investment) => `
+            <article class="timeline-card timeline-card-compact">
+              <p class="dashboard-label">${escapeHtml(investment.decisionDate || investment.createdAt)}</p>
+              <p class="highlight-value">${escapeHtml(investment.decisionType || "Decision not set")}</p>
+              <p class="update-meta">${escapeHtml(investment.decisionSummary || "No decision summary.")}</p>
+              ${
+                investment.documentLinks
+                  ? `<p class="update-meta">${escapeHtml(investment.documentLinks)}</p>`
+                  : ""
+              }
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No linked documents or decisions yet.</p>';
 
   companyFollowOnCapital.innerHTML = followOnUpdates.length
     ? followOnUpdates
@@ -767,6 +861,19 @@ function renderCompanyPanel() {
                 } • ${escapeHtml(investment.followOnCapitalStatus || "Status not set")}</p><p class="update-meta">${escapeHtml(investment.followOnCapitalNotes || "No follow-on notes.")}</p></div>`
               : ""
           }
+          ${
+            investment.decisionDate || investment.decisionType || investment.decisionSummary || investment.documentLinks
+              ? `<div class="update-subsection"><p class="dashboard-label">Decision log</p><p class="update-meta">${
+                  escapeHtml(investment.decisionDate || "No decision date")
+                } • ${escapeHtml(investment.decisionType || "No decision type")}</p><p class="update-meta">${escapeHtml(
+                  investment.decisionSummary || "No decision summary."
+                )}</p>${
+                  investment.documentLinks
+                    ? `<p class="update-meta">${escapeHtml(investment.documentLinks)}</p>`
+                    : ""
+                }</div>`
+              : ""
+          }
         </article>
       `
     )
@@ -839,6 +946,13 @@ function renderUpdates(investments) {
                 } • ${escapeHtml(investment.followOnCapitalStatus || "Status not set")}</p>`
               : ""
           }
+          ${
+            investment.decisionType || investment.decisionSummary
+              ? `<p class="update-meta"><strong>Decision:</strong> ${escapeHtml(
+                  investment.decisionType || "Decision not set"
+                )} • ${escapeHtml(investment.decisionSummary || "No summary")}</p>`
+              : ""
+          }
           <div class="card-actions">
             <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}">View company</button>
             <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>
@@ -852,6 +966,7 @@ function renderUpdates(investments) {
 
 function renderAll() {
   companyPerformanceMap = buildCompanyPerformanceMap(allInvestments);
+  entityPerformanceMap = buildEntityPerformanceMap(allInvestments);
   renderCompanySuggestions();
   renderFilterOptions();
   const filteredInvestments = filterInvestments(allInvestments);
@@ -1122,7 +1237,11 @@ form.addEventListener("submit", async (event) => {
     exitValue: formData.get("exitValue"),
     followOnCapitalAmount: formData.get("followOnCapitalAmount"),
     followOnCapitalStatus: formData.get("followOnCapitalStatus"),
-    followOnCapitalNotes: formData.get("followOnCapitalNotes")
+    followOnCapitalNotes: formData.get("followOnCapitalNotes"),
+    documentLinks: formData.get("documentLinks"),
+    decisionDate: formData.get("decisionDate"),
+    decisionType: formData.get("decisionType"),
+    decisionSummary: formData.get("decisionSummary")
   };
 
   try {

@@ -162,6 +162,10 @@ function normalizeInvestment(entry) {
     followOnCapitalAmount: String(entry.followOnCapitalAmount || "").trim(),
     followOnCapitalStatus: String(entry.followOnCapitalStatus || "").trim(),
     followOnCapitalNotes: String(entry.followOnCapitalNotes || "").trim(),
+    documentLinks: String(entry.documentLinks || "").trim(),
+    decisionDate: String(entry.decisionDate || "").trim(),
+    decisionType: String(entry.decisionType || "").trim(),
+    decisionSummary: String(entry.decisionSummary || "").trim(),
     recipients: Array.isArray(entry.recipients)
       ? entry.recipients.map((value) => String(value).trim()).filter(Boolean)
       : [],
@@ -579,6 +583,10 @@ function buildInvestmentsCsv(investments) {
     "Follow-On Capital Amount",
     "Follow-On Capital Status",
     "Follow-On Capital Notes",
+    "Document Links",
+    "Decision Date",
+    "Decision Type",
+    "Decision Summary",
     "Submitted By",
     "Recipients",
     "Created At"
@@ -607,6 +615,10 @@ function buildInvestmentsCsv(investments) {
       investment.followOnCapitalAmount,
       investment.followOnCapitalStatus,
       investment.followOnCapitalNotes,
+      investment.documentLinks,
+      investment.decisionDate,
+      investment.decisionType,
+      investment.decisionSummary,
       investment.submittedBy,
       Array.isArray(investment.recipients) ? investment.recipients.join(", ") : "",
       investment.createdAt
@@ -642,6 +654,10 @@ function buildInvestmentsWorkbookBuffer(investments) {
     "Follow-On Capital Amount": investment.followOnCapitalAmount,
     "Follow-On Capital Status": investment.followOnCapitalStatus,
     "Follow-On Capital Notes": investment.followOnCapitalNotes,
+    "Document Links": investment.documentLinks,
+    "Decision Date": investment.decisionDate,
+    "Decision Type": investment.decisionType,
+    "Decision Summary": investment.decisionSummary,
     "Submitted By": investment.submittedBy,
     Recipients: Array.isArray(investment.recipients) ? investment.recipients.join(", ") : "",
     "Created At": investment.createdAt
@@ -718,6 +734,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
           followOnCapitalAmount: String(row["Follow-On Capital Amount"] || "").trim(),
           followOnCapitalStatus: String(row["Follow-On Capital Status"] || "").trim(),
           followOnCapitalNotes: String(row["Follow-On Capital Notes"] || "").trim(),
+          documentLinks: String(row["Document Links"] || "").trim(),
+          decisionDate: String(row["Decision Date"] || "").trim(),
+          decisionType: String(row["Decision Type"] || "").trim(),
+          decisionSummary: String(row["Decision Summary"] || "").trim(),
           recipients: splitCsv(row.Recipients || ""),
           submittedBy: sessionUser.email,
           createdAt: parseWorkbookDate(row["Created At"] || row.Date)
@@ -804,6 +824,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
           internalValue: "",
           exitValue: "",
           recipients: [],
+          documentLinks: "",
+          decisionDate: "",
+          decisionType: "",
+          decisionSummary: "",
           submittedBy: sessionUser.email,
           createdAt: parseWorkbookDate(transactionDate)
         },
@@ -952,6 +976,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
             followOnCapitalAmount: "",
             followOnCapitalStatus: "",
             followOnCapitalNotes: "",
+            documentLinks: "",
+            decisionDate: "",
+            decisionType: "",
+            decisionSummary: "",
             recipients: [],
             submittedBy: sessionUser.email,
             createdAt: parseWorkbookDate(dateCommitted)
@@ -1274,6 +1302,10 @@ function buildSummary(entry) {
     : "No follow-on capital amount recorded";
   const followOnStatusLine = entry.followOnCapitalStatus || "No follow-on decision recorded";
   const followOnNotesLine = entry.followOnCapitalNotes || "No follow-on notes provided.";
+  const documentLinksLine = entry.documentLinks || "No documents linked.";
+  const decisionDateLine = entry.decisionDate || "No decision date recorded";
+  const decisionTypeLine = entry.decisionType || "No decision recorded";
+  const decisionSummaryLine = entry.decisionSummary || "No decision summary provided.";
 
   const subject = `${entry.status}: ${companyLine}`;
 
@@ -1295,6 +1327,8 @@ function buildSummary(entry) {
     `Exit value: ${exitValueLine}`,
     `Follow-on capital amount: ${followOnAmountLine}`,
     `Follow-on capital status: ${followOnStatusLine}`,
+    `Decision date: ${decisionDateLine}`,
+    `Decision type: ${decisionTypeLine}`,
     "",
     "Summary",
     noteLine,
@@ -1304,6 +1338,12 @@ function buildSummary(entry) {
     "",
     "Follow-on capital notes",
     followOnNotesLine,
+    "",
+    "Documents",
+    documentLinksLine,
+    "",
+    "Decision summary",
+    decisionSummaryLine,
     "",
     `Submitted at: ${entry.createdAt}`
   ].join("\n");
@@ -1341,6 +1381,8 @@ function buildSummary(entry) {
           <tr><td style="padding: 8px 0; font-weight: bold;">Exit value</td><td>${escapeHtml(exitValueLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on capital</td><td>${escapeHtml(followOnAmountLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on status</td><td>${escapeHtml(followOnStatusLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Decision date</td><td>${escapeHtml(decisionDateLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Decision type</td><td>${escapeHtml(decisionTypeLine)}</td></tr>
         </table>
       </div>
       <div style="padding: 20px 8px 0;">
@@ -1350,6 +1392,10 @@ function buildSummary(entry) {
         <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(deckSummaryLine)}</p>
         <h3 style="margin-bottom: 8px;">Follow-on Capital Notes</h3>
         <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(followOnNotesLine)}</p>
+        <h3 style="margin-bottom: 8px;">Documents</h3>
+        <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(documentLinksLine)}</p>
+        <h3 style="margin-bottom: 8px;">Decision Summary</h3>
+        <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(decisionSummaryLine)}</p>
         <p style="margin-top: 20px; color: #6b7280; font-size: 14px;">Submitted at: ${escapeHtml(entry.createdAt)}</p>
       </div>
     </div>
@@ -1457,6 +1503,10 @@ function validateSubmission(payload, sessionUser) {
     followOnCapitalAmount: payload.followOnCapitalAmount,
     followOnCapitalStatus: payload.followOnCapitalStatus,
     followOnCapitalNotes: payload.followOnCapitalNotes,
+    documentLinks: payload.documentLinks,
+    decisionDate: payload.decisionDate,
+    decisionType: payload.decisionType,
+    decisionSummary: payload.decisionSummary,
     recipients: payload.recipients,
     submittedBy: sessionUser.email,
     createdAt: new Date().toISOString()
@@ -1500,6 +1550,10 @@ function validateInvestmentPatch(payload) {
     followOnCapitalAmount: String(payload.followOnCapitalAmount || "").trim(),
     followOnCapitalStatus: String(payload.followOnCapitalStatus || "").trim(),
     followOnCapitalNotes: String(payload.followOnCapitalNotes || "").trim(),
+    documentLinks: String(payload.documentLinks || "").trim(),
+    decisionDate: String(payload.decisionDate || "").trim(),
+    decisionType: String(payload.decisionType || "").trim(),
+    decisionSummary: String(payload.decisionSummary || "").trim(),
     recipients: Array.isArray(payload.recipients)
       ? payload.recipients.map((value) => String(value).trim()).filter(Boolean)
       : []
