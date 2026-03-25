@@ -37,6 +37,7 @@ const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "investments.json");
+const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const FAMILY_OFFICE_WORKBOOK_FILE = path.join(
   __dirname,
   "Family_Office_Private_Investment_Tracker.xlsx"
@@ -112,6 +113,10 @@ function ensureDataFile() {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+
   if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, "[]\n", "utf8");
   }
@@ -126,6 +131,55 @@ function normalizeCompanyKey(value) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
+}
+
+function normalizeDocuments(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((document) => ({
+      id: String((document && document.id) || makeId()).trim(),
+      name: String((document && document.name) || "").trim(),
+      storedName: String((document && document.storedName) || "").trim(),
+      url: String((document && document.url) || "").trim(),
+      uploadedAt: String((document && document.uploadedAt) || new Date().toISOString()).trim()
+    }))
+    .filter((document) => document.name && document.url);
+}
+
+function safeFilename(filename) {
+  const extension = path.extname(String(filename || "")).toLowerCase();
+  const basename = path
+    .basename(String(filename || ""), extension)
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60);
+
+  return `${basename || "document"}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}${extension}`;
+}
+
+function getContentType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return (
+    {
+      ".pdf": "application/pdf",
+      ".xlsx":
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ".xls": "application/vnd.ms-excel",
+      ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+      ".doc": "application/msword",
+      ".docx":
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".csv": "text/csv; charset=utf-8",
+      ".txt": "text/plain; charset=utf-8"
+    }[ext] || "application/octet-stream"
+  );
 }
 
 function findLatestByCompanyKey(companyKey, investments) {
@@ -159,10 +213,14 @@ function normalizeInvestment(entry) {
     officialValue: String(entry.officialValue || "").trim(),
     internalValue: String(entry.internalValue || "").trim(),
     exitValue: String(entry.exitValue || "").trim(),
+    ownershipPercent: String(entry.ownershipPercent || "").trim(),
+    entityOwnershipPercent: String(entry.entityOwnershipPercent || "").trim(),
+    ownershipNotes: String(entry.ownershipNotes || "").trim(),
     followOnCapitalAmount: String(entry.followOnCapitalAmount || "").trim(),
     followOnCapitalStatus: String(entry.followOnCapitalStatus || "").trim(),
     followOnCapitalNotes: String(entry.followOnCapitalNotes || "").trim(),
     documentLinks: String(entry.documentLinks || "").trim(),
+    documents: normalizeDocuments(entry.documents),
     decisionDate: String(entry.decisionDate || "").trim(),
     decisionType: String(entry.decisionType || "").trim(),
     decisionSummary: String(entry.decisionSummary || "").trim(),
@@ -580,10 +638,14 @@ function buildInvestmentsCsv(investments) {
     "Official Value",
     "Internal Value",
     "Exit Value",
+    "Ownership Percent",
+    "Entity Ownership Percent",
+    "Ownership Notes",
     "Follow-On Capital Amount",
     "Follow-On Capital Status",
     "Follow-On Capital Notes",
     "Document Links",
+    "Uploaded Documents",
     "Decision Date",
     "Decision Type",
     "Decision Summary",
@@ -612,10 +674,14 @@ function buildInvestmentsCsv(investments) {
       investment.officialValue,
       investment.internalValue,
       investment.exitValue,
+      investment.ownershipPercent,
+      investment.entityOwnershipPercent,
+      investment.ownershipNotes,
       investment.followOnCapitalAmount,
       investment.followOnCapitalStatus,
       investment.followOnCapitalNotes,
       investment.documentLinks,
+      investment.documents.map((document) => `${document.name} (${document.url})`).join(" | "),
       investment.decisionDate,
       investment.decisionType,
       investment.decisionSummary,
@@ -651,10 +717,16 @@ function buildInvestmentsWorkbookBuffer(investments) {
     "Official Value": investment.officialValue,
     "Internal Value": investment.internalValue,
     "Exit Value": investment.exitValue,
+    "Ownership Percent": investment.ownershipPercent,
+    "Entity Ownership Percent": investment.entityOwnershipPercent,
+    "Ownership Notes": investment.ownershipNotes,
     "Follow-On Capital Amount": investment.followOnCapitalAmount,
     "Follow-On Capital Status": investment.followOnCapitalStatus,
     "Follow-On Capital Notes": investment.followOnCapitalNotes,
     "Document Links": investment.documentLinks,
+    "Uploaded Documents": investment.documents
+      .map((document) => `${document.name} (${document.url})`)
+      .join(" | "),
     "Decision Date": investment.decisionDate,
     "Decision Type": investment.decisionType,
     "Decision Summary": investment.decisionSummary,
@@ -731,10 +803,14 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
           officialValue: String(row["Official Value"] || "").trim(),
           internalValue: String(row["Internal Value"] || "").trim(),
           exitValue: String(row["Exit Value"] || "").trim(),
+          ownershipPercent: String(row["Ownership Percent"] || "").trim(),
+          entityOwnershipPercent: String(row["Entity Ownership Percent"] || "").trim(),
+          ownershipNotes: String(row["Ownership Notes"] || "").trim(),
           followOnCapitalAmount: String(row["Follow-On Capital Amount"] || "").trim(),
           followOnCapitalStatus: String(row["Follow-On Capital Status"] || "").trim(),
           followOnCapitalNotes: String(row["Follow-On Capital Notes"] || "").trim(),
           documentLinks: String(row["Document Links"] || "").trim(),
+          documents: [],
           decisionDate: String(row["Decision Date"] || "").trim(),
           decisionType: String(row["Decision Type"] || "").trim(),
           decisionSummary: String(row["Decision Summary"] || "").trim(),
@@ -823,8 +899,12 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
           officialValue: "",
           internalValue: "",
           exitValue: "",
+          ownershipPercent: "",
+          entityOwnershipPercent: "",
+          ownershipNotes: "",
           recipients: [],
           documentLinks: "",
+          documents: [],
           decisionDate: "",
           decisionType: "",
           decisionSummary: "",
@@ -973,10 +1053,14 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
             officialValue: currentValuation ? String(currentValuation) : "",
             internalValue: currentValuation ? String(currentValuation) : "",
             exitValue: "",
+            ownershipPercent: "",
+            entityOwnershipPercent: "",
+            ownershipNotes: "",
             followOnCapitalAmount: "",
             followOnCapitalStatus: "",
             followOnCapitalNotes: "",
             documentLinks: "",
+            documents: [],
             decisionDate: "",
             decisionType: "",
             decisionSummary: "",
@@ -1296,6 +1380,13 @@ function buildSummary(entry) {
   const exitValueLine = entry.exitValue
     ? `${entry.currency} ${entry.exitValue}`
     : "No exit value recorded";
+  const ownershipPercentLine = entry.ownershipPercent
+    ? `${entry.ownershipPercent}%`
+    : "No total ownership recorded";
+  const entityOwnershipPercentLine = entry.entityOwnershipPercent
+    ? `${entry.entityOwnershipPercent}%`
+    : "No entity ownership recorded";
+  const ownershipNotesLine = entry.ownershipNotes || "No ownership notes provided.";
   const valuationDateLine = entry.valuationDate || "No valuation date recorded";
   const followOnAmountLine = entry.followOnCapitalAmount
     ? `${entry.currency} ${entry.followOnCapitalAmount}`
@@ -1303,6 +1394,9 @@ function buildSummary(entry) {
   const followOnStatusLine = entry.followOnCapitalStatus || "No follow-on decision recorded";
   const followOnNotesLine = entry.followOnCapitalNotes || "No follow-on notes provided.";
   const documentLinksLine = entry.documentLinks || "No documents linked.";
+  const uploadedDocumentsLine = Array.isArray(entry.documents) && entry.documents.length
+    ? entry.documents.map((document) => `${document.name}: ${document.url}`).join("\n")
+    : "No uploaded documents.";
   const decisionDateLine = entry.decisionDate || "No decision date recorded";
   const decisionTypeLine = entry.decisionType || "No decision recorded";
   const decisionSummaryLine = entry.decisionSummary || "No decision summary provided.";
@@ -1325,6 +1419,8 @@ function buildSummary(entry) {
     `Official value: ${officialValueLine}`,
     `Internal value: ${internalValueLine}`,
     `Exit value: ${exitValueLine}`,
+    `Total ownership: ${ownershipPercentLine}`,
+    `Entity ownership: ${entityOwnershipPercentLine}`,
     `Follow-on capital amount: ${followOnAmountLine}`,
     `Follow-on capital status: ${followOnStatusLine}`,
     `Decision date: ${decisionDateLine}`,
@@ -1341,6 +1437,12 @@ function buildSummary(entry) {
     "",
     "Documents",
     documentLinksLine,
+    "",
+    "Uploaded documents",
+    uploadedDocumentsLine,
+    "",
+    "Ownership notes",
+    ownershipNotesLine,
     "",
     "Decision summary",
     decisionSummaryLine,
@@ -1379,6 +1481,8 @@ function buildSummary(entry) {
           <tr><td style="padding: 8px 0; font-weight: bold;">Official value</td><td>${escapeHtml(officialValueLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Internal value</td><td>${escapeHtml(internalValueLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Exit value</td><td>${escapeHtml(exitValueLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Total ownership</td><td>${escapeHtml(ownershipPercentLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Entity ownership</td><td>${escapeHtml(entityOwnershipPercentLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on capital</td><td>${escapeHtml(followOnAmountLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on status</td><td>${escapeHtml(followOnStatusLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Decision date</td><td>${escapeHtml(decisionDateLine)}</td></tr>
@@ -1394,6 +1498,10 @@ function buildSummary(entry) {
         <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(followOnNotesLine)}</p>
         <h3 style="margin-bottom: 8px;">Documents</h3>
         <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(documentLinksLine)}</p>
+        <h3 style="margin-bottom: 8px;">Uploaded Documents</h3>
+        <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(uploadedDocumentsLine)}</p>
+        <h3 style="margin-bottom: 8px;">Ownership Notes</h3>
+        <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(ownershipNotesLine)}</p>
         <h3 style="margin-bottom: 8px;">Decision Summary</h3>
         <p style="white-space: pre-wrap; margin-top: 0;">${escapeHtml(decisionSummaryLine)}</p>
         <p style="margin-top: 20px; color: #6b7280; font-size: 14px;">Submitted at: ${escapeHtml(entry.createdAt)}</p>
@@ -1500,10 +1608,14 @@ function validateSubmission(payload, sessionUser) {
     officialValue: payload.officialValue,
     internalValue: payload.internalValue,
     exitValue: payload.exitValue,
+    ownershipPercent: payload.ownershipPercent,
+    entityOwnershipPercent: payload.entityOwnershipPercent,
+    ownershipNotes: payload.ownershipNotes,
     followOnCapitalAmount: payload.followOnCapitalAmount,
     followOnCapitalStatus: payload.followOnCapitalStatus,
     followOnCapitalNotes: payload.followOnCapitalNotes,
     documentLinks: payload.documentLinks,
+    documents: payload.documents,
     decisionDate: payload.decisionDate,
     decisionType: payload.decisionType,
     decisionSummary: payload.decisionSummary,
@@ -1547,10 +1659,14 @@ function validateInvestmentPatch(payload) {
     officialValue: String(payload.officialValue || "").trim(),
     internalValue: String(payload.internalValue || "").trim(),
     exitValue: String(payload.exitValue || "").trim(),
+    ownershipPercent: String(payload.ownershipPercent || "").trim(),
+    entityOwnershipPercent: String(payload.entityOwnershipPercent || "").trim(),
+    ownershipNotes: String(payload.ownershipNotes || "").trim(),
     followOnCapitalAmount: String(payload.followOnCapitalAmount || "").trim(),
     followOnCapitalStatus: String(payload.followOnCapitalStatus || "").trim(),
     followOnCapitalNotes: String(payload.followOnCapitalNotes || "").trim(),
     documentLinks: String(payload.documentLinks || "").trim(),
+    documents: normalizeDocuments(payload.documents),
     decisionDate: String(payload.decisionDate || "").trim(),
     decisionType: String(payload.decisionType || "").trim(),
     decisionSummary: String(payload.decisionSummary || "").trim(),
@@ -1782,6 +1898,49 @@ const server = http.createServer(async (request, response) => {
     }
   }
 
+  if (request.method === "POST" && url.pathname === "/api/upload-document") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const filename = String(payload.filename || "").trim();
+      const fileData = String(payload.fileData || "").trim();
+
+      if (!filename) {
+        sendJson(response, 400, { error: "Document filename is required." });
+        return;
+      }
+
+      if (!fileData) {
+        sendJson(response, 400, { error: "Document file data is required." });
+        return;
+      }
+
+      ensureDataFile();
+      const storedName = safeFilename(filename);
+      const filePath = path.join(UPLOADS_DIR, storedName);
+      fs.writeFileSync(filePath, Buffer.from(fileData, "base64"));
+
+      sendJson(response, 201, {
+        document: {
+          id: makeId(),
+          name: filename,
+          storedName,
+          url: `/uploads/${storedName}`,
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: user.email
+        }
+      });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Document upload failed." });
+      return;
+    }
+  }
+
   if (request.method === "POST" && url.pathname === "/api/investments") {
     const user = requireAuth(request, response);
     if (!user) {
@@ -1929,6 +2088,31 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET") {
+    if (url.pathname.startsWith("/uploads/")) {
+      const requestedUpload = path
+        .normalize(url.pathname.replace(/^\/uploads\//, ""))
+        .replace(/^(\.\.[/\\])+/, "");
+      const filePath = path.join(UPLOADS_DIR, requestedUpload);
+
+      if (!filePath.startsWith(UPLOADS_DIR)) {
+        sendText(response, 403, "Forbidden");
+        return;
+      }
+
+      fs.readFile(filePath, (error, data) => {
+        if (error) {
+          sendText(response, 404, "Not found");
+          return;
+        }
+
+        response.writeHead(200, {
+          "Content-Type": getContentType(filePath)
+        });
+        response.end(data);
+      });
+      return;
+    }
+
     const requestedPath = url.pathname === "/" ? "/index.html" : url.pathname;
     const safePath = path
       .normalize(requestedPath)

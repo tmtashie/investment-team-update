@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Investment Team Updates</title>
+    <title>BVB</title>
     <meta name="theme-color" content="#c46836" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
@@ -14,36 +14,58 @@
     <main class="app-shell">
       <section class="hero-card">
         <div class="hero-backdrop"></div>
+        <header class="workspace-header">
+          <div class="brand-lockup">
+            <p class="eyebrow">BVB</p>
+            <p class="brand-subtitle">Private investment office</p>
+          </div>
+          <div class="workspace-header-actions">
+            <button id="menuToggleButton" type="button" class="secondary-button menu-toggle-button">
+              Menu
+            </button>
+            <button id="logoutButton" type="button" class="secondary-button hidden">
+              Sign out
+            </button>
+          </div>
+        </header>
+        <nav id="workspaceMenu" class="workspace-menu hidden" aria-label="Workspace navigation">
+          <button type="button" class="menu-link" data-target="dashboardSection">Dashboard</button>
+          <button type="button" class="menu-link" data-target="entityPerformanceSection">Entity performance</button>
+          <button type="button" class="menu-link" data-target="addInvestmentSection">Add investment</button>
+          <button type="button" class="menu-link" data-target="researchSection">Research using AI</button>
+          <button type="button" class="menu-link" data-target="currentInvestmentsSection">Current investments</button>
+          <button type="button" class="menu-link" data-target="researchLibrarySection">Decks and notes</button>
+          <button type="button" class="menu-link" data-target="exportsSection">Exports and imports</button>
+        </nav>
         <div class="hero-grid">
           <div class="hero-copy-block">
             <div class="hero-topline">
               <p class="eyebrow">Family Office Investment Platform</p>
-              <button id="logoutButton" type="button" class="secondary-button hidden">
-                Sign out
-              </button>
             </div>
-            <h1>One institutional source of truth for private investments.</h1>
+            <h1 class="brand-title">BVB</h1>
+            <p class="hero-thesis">Stewarding assets, growing wealth, and pursuing bold ideas.</p>
             <p class="hero-copy">
-              Track deals, research, follow-on capital decisions, team updates, and export-ready
-              portfolio data from one polished internal workspace.
+              A polished family office operating system for tracking investments, research,
+              valuations, ownership, documents, and follow-on capital across every entity you manage.
             </p>
             <div class="hero-actions">
               <span class="hero-chip">Investment memory</span>
-              <span class="hero-chip">AI research workflow</span>
-              <span class="hero-chip">Portfolio exports</span>
+              <span class="hero-chip">AI research</span>
+              <span class="hero-chip">Valuation discipline</span>
+              <span class="hero-chip">Family office exports</span>
             </div>
             <div class="hero-kpi-row">
               <article class="hero-kpi-card">
                 <span class="hero-kpi-label">Track</span>
-                <strong>Deals, notes, capital</strong>
+                <strong>Deals, entities, cash flows</strong>
               </article>
               <article class="hero-kpi-card">
                 <span class="hero-kpi-label">Review</span>
-                <strong>Decks, emails, follow-ons</strong>
+                <strong>Decks, emails, valuation history</strong>
               </article>
               <article class="hero-kpi-card">
                 <span class="hero-kpi-label">Report</span>
-                <strong>Family office ready exports</strong>
+                <strong>Entity performance and exports</strong>
               </article>
             </div>
           </div>
@@ -53,15 +75,15 @@
             <div class="hero-metric-list">
               <div class="hero-metric">
                 <span class="hero-metric-value">1</span>
-                <span class="hero-metric-copy">capture each investment update as it happens</span>
+                <span class="hero-metric-copy">capture each investment and each entity exposure cleanly</span>
               </div>
               <div class="hero-metric">
                 <span class="hero-metric-value">2</span>
-                <span class="hero-metric-copy">store deck research separately from running notes</span>
+                <span class="hero-metric-copy">separate decks, notes, uploaded files, and decisions</span>
               </div>
               <div class="hero-metric">
                 <span class="hero-metric-value">3</span>
-                <span class="hero-metric-copy">monitor reserve and follow-on capital decisions</span>
+                <span class="hero-metric-copy">monitor ownership, valuations, and follow-on capital</span>
               </div>
             </div>
           </aside>
@@ -76,23 +98,23 @@
       <section class="feature-strip">
         <article class="feature-card">
           <p class="feature-kicker">Capture</p>
-          <h2>Maintain clean investment records</h2>
+          <h2>Maintain a clean investment ledger</h2>
           <p class="section-copy">
-            Record company, entity, owner, status, capital, and next steps from one structured workflow.
+            Record company, entity, owner, ownership, status, capital, and next steps from one disciplined workflow.
           </p>
         </article>
         <article class="feature-card">
           <p class="feature-kicker">Research</p>
-          <h2>Separate deck intelligence from general updates</h2>
+          <h2>Separate deck intelligence from operating notes</h2>
           <p class="section-copy">
-            Use AI to turn decks and email threads into structured internal research without losing operating notes.
+            Use AI to turn decks and email threads into structured research while keeping a distinct running record for each investment.
           </p>
         </article>
         <article class="feature-card">
           <p class="feature-kicker">Decide</p>
-          <h2>Track follow-on capital with context</h2>
+          <h2>Track valuations, documents, and follow-on decisions</h2>
           <p class="section-copy">
-            Keep reserve thinking, follow-on checks, exports, and company history together for better decisions.
+            Keep reserve sizing, valuation history, documents, and exports together for better capital allocation decisions.
           </p>
         </article>
       </section>
@@ -141,7 +163,7 @@
       </section>
 
       <section id="appPanel" class="hidden">
-        <section class="panel">
+        <section id="dashboardSection" class="panel">
           <div class="panel-header panel-header-stack">
             <div>
               <h2>Dashboard</h2>
@@ -151,7 +173,7 @@
           <div id="dashboardCards" class="dashboard-grid"></div>
         </section>
 
-        <section class="panel">
+        <section id="entityPerformanceSection" class="panel">
           <div class="panel-header panel-header-stack">
             <div>
               <h2>Entity performance</h2>
@@ -161,7 +183,7 @@
           <div id="entityPerformanceCards" class="dashboard-grid"></div>
         </section>
 
-        <section class="panel">
+        <section id="addInvestmentSection" class="panel">
           <div class="panel-header panel-header-stack">
             <div>
               <h2>New investment update</h2>
@@ -259,6 +281,14 @@
               ></textarea>
             </label>
 
+            <section id="researchSection" class="subsection-card">
+              <div class="subsection-copy">
+                <p class="feature-kicker">Research using AI</p>
+                <h3>Turn decks and emails into investment research</h3>
+                <p class="section-copy">
+                  Keep AI-produced research in a dedicated section so your operating notes stay clean and comparable over time.
+                </p>
+              </div>
             <div class="deck-tools">
               <label id="deckDropZone" class="deck-drop-zone" for="deckFile">
                 <span class="deck-drop-title">Drop a PDF deck here or tap to choose</span>
@@ -298,6 +328,7 @@
               </button>
             </div>
             <p id="emailMessage" class="form-message" aria-live="polite"></p>
+            </section>
 
             <section class="subsection-card">
               <div class="subsection-copy">
@@ -390,6 +421,42 @@
                   />
                 </label>
               </div>
+              <div class="two-up">
+                <label>
+                  Total ownership %
+                  <input
+                    id="ownershipPercentField"
+                    name="ownershipPercent"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    placeholder="12.5"
+                  />
+                </label>
+
+                <label>
+                  Entity ownership %
+                  <input
+                    id="entityOwnershipPercentField"
+                    name="entityOwnershipPercent"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    placeholder="8.0"
+                  />
+                </label>
+              </div>
+              <label>
+                Ownership notes
+                <textarea
+                  id="ownershipNotesField"
+                  name="ownershipNotes"
+                  rows="3"
+                  placeholder="Use this for split ownership, SPV context, or entity-specific allocation notes."
+                ></textarea>
+              </label>
             </section>
 
             <section class="subsection-card">
@@ -454,6 +521,17 @@
                   placeholder="Paste one link per line for decks, memos, data rooms, legal docs, or shared drive folders."
                 ></textarea>
               </label>
+              <div class="document-tools">
+                <label id="documentDropZone" class="document-drop-zone" for="documentFile">
+                  <span class="deck-drop-title">Drop supporting files here or tap to choose</span>
+                  <span class="deck-drop-subtitle">
+                    Upload decks, memos, legal docs, investment notes, or reference files.
+                  </span>
+                  <input id="documentFile" name="documentFile" type="file" multiple />
+                </label>
+              </div>
+              <p id="documentMessage" class="form-message" aria-live="polite"></p>
+              <div id="uploadedDocumentsList" class="uploaded-documents-list"></div>
               <div class="three-up">
                 <label>
                   Decision date
@@ -559,6 +637,10 @@
               <div id="companyEntityPerformance" class="company-highlights"></div>
             </section>
             <section class="company-detail-card">
+              <h3>Ownership and allocation</h3>
+              <div id="companyOwnershipSummary" class="company-highlights"></div>
+            </section>
+            <section class="company-detail-card">
               <h3>Deck summaries</h3>
               <div id="companyDeckSummaries" class="company-rich-text"></div>
             </section>
@@ -574,17 +656,50 @@
               <h3>Follow-on capital</h3>
               <div id="companyFollowOnCapital" class="company-highlights"></div>
             </section>
+            <section class="company-detail-card">
+              <h3>Valuation history</h3>
+              <div id="companyValuationHistory" class="company-rich-text"></div>
+            </section>
           </div>
           <div id="companyTimeline" class="company-timeline"></div>
         </section>
 
-        <section class="panel">
+        <section id="researchLibrarySection" class="panel">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>Decks and notes review</h2>
+              <p class="section-copy">
+                Scan the latest research, operating notes, uploaded documents, and decision history across the workspace.
+              </p>
+            </div>
+          </div>
+          <div class="company-detail-grid">
+            <section class="company-detail-card">
+              <h3>Latest deck summaries</h3>
+              <div id="researchDeckFeed" class="company-rich-text"></div>
+            </section>
+            <section class="company-detail-card">
+              <h3>Latest notes</h3>
+              <div id="researchNotesFeed" class="company-rich-text"></div>
+            </section>
+            <section class="company-detail-card">
+              <h3>Documents vault</h3>
+              <div id="researchDocumentsFeed" class="company-rich-text"></div>
+            </section>
+            <section class="company-detail-card">
+              <h3>Latest decisions</h3>
+              <div id="researchDecisionFeed" class="company-rich-text"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="currentInvestmentsSection" class="panel">
           <div class="panel-header">
             <div>
               <h2>Recent updates</h2>
               <p class="section-copy">Your team can review the latest submissions here.</p>
             </div>
-            <div class="panel-actions">
+            <div id="exportsSection" class="panel-actions">
               <button id="downloadFamilyOfficeWorkbookButton" type="button" class="secondary-button">
                 Family Office Workbook
               </button>

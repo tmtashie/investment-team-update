@@ -5,6 +5,8 @@ const loginMessage = document.getElementById("loginMessage");
 const loginCopy = document.getElementById("loginCopy");
 const loginButton = document.getElementById("loginButton");
 const logoutButton = document.getElementById("logoutButton");
+const menuToggleButton = document.getElementById("menuToggleButton");
+const workspaceMenu = document.getElementById("workspaceMenu");
 const form = document.getElementById("investmentForm");
 const formMessage = document.getElementById("formMessage");
 const updatesList = document.getElementById("updatesList");
@@ -29,6 +31,10 @@ const deckMessage = document.getElementById("deckMessage");
 const summarizeDeckButton = document.getElementById("summarizeDeckButton");
 const deckDropZone = document.getElementById("deckDropZone");
 const deckFileName = document.getElementById("deckFileName");
+const documentFile = document.getElementById("documentFile");
+const documentDropZone = document.getElementById("documentDropZone");
+const documentMessage = document.getElementById("documentMessage");
+const uploadedDocumentsList = document.getElementById("uploadedDocumentsList");
 const emailSummaryInput = document.getElementById("emailSummaryInput");
 const summarizeEmailButton = document.getElementById("summarizeEmailButton");
 const emailMessage = document.getElementById("emailMessage");
@@ -47,12 +53,18 @@ const companySummary = document.getElementById("companySummary");
 const companyHighlights = document.getElementById("companyHighlights");
 const companyPerformanceSummary = document.getElementById("companyPerformanceSummary");
 const companyEntityPerformance = document.getElementById("companyEntityPerformance");
+const companyOwnershipSummary = document.getElementById("companyOwnershipSummary");
 const companyDeckSummaries = document.getElementById("companyDeckSummaries");
 const companyDecisionLog = document.getElementById("companyDecisionLog");
 const companyNextSteps = document.getElementById("companyNextSteps");
 const companyFollowOnCapital = document.getElementById("companyFollowOnCapital");
+const companyValuationHistory = document.getElementById("companyValuationHistory");
 const companyTimeline = document.getElementById("companyTimeline");
 const closeCompanyPanelButton = document.getElementById("closeCompanyPanelButton");
+const researchDeckFeed = document.getElementById("researchDeckFeed");
+const researchNotesFeed = document.getElementById("researchNotesFeed");
+const researchDocumentsFeed = document.getElementById("researchDocumentsFeed");
+const researchDecisionFeed = document.getElementById("researchDecisionFeed");
 
 let currentUser = null;
 let allInvestments = [];
@@ -60,6 +72,7 @@ let selectedCompany = "";
 let configuredEntities = [];
 let companyPerformanceMap = new Map();
 let entityPerformanceMap = new Map();
+let uploadedDocuments = [];
 
 function companyKey(value) {
   return String(value || "")
@@ -112,6 +125,44 @@ function updateDeckFileLabel(file) {
     : "No file selected yet";
 }
 
+function formatDisplayDate(value) {
+  const parsed = parseDateValue(value, null);
+  if (!parsed) {
+    return "Date not set";
+  }
+
+  return parsed.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function renderUploadedDocuments() {
+  if (!uploadedDocuments.length) {
+    uploadedDocumentsList.innerHTML =
+      '<p class="update-meta">No uploaded documents on this update yet.</p>';
+    return;
+  }
+
+  uploadedDocumentsList.innerHTML = uploadedDocuments
+    .map(
+      (document) => `
+        <article class="uploaded-document-card">
+          <div>
+            <p class="highlight-value">${escapeHtml(document.name)}</p>
+            <p class="update-meta">${escapeHtml(formatDisplayDate(document.uploadedAt))}</p>
+          </div>
+          <div class="uploaded-document-actions">
+            <a class="secondary-button inline-action-button" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">Open</a>
+            <button type="button" class="secondary-button inline-action-button danger-button" data-action="remove-document" data-document-id="${escapeHtml(document.id)}">Remove</button>
+          </div>
+        </article>
+      `
+    )
+    .join("");
+}
+
 function currentFilters() {
   return {
     entity: entityFilter.value,
@@ -137,9 +188,15 @@ function filterInvestments(investments) {
       investment.officialValue,
       investment.internalValue,
       investment.exitValue,
+      investment.ownershipPercent,
+      investment.entityOwnershipPercent,
+      investment.ownershipNotes,
       investment.followOnCapitalStatus,
       investment.followOnCapitalNotes,
       investment.documentLinks,
+      Array.isArray(investment.documents)
+        ? investment.documents.map((document) => document.name).join(" ")
+        : "",
       investment.decisionType,
       investment.decisionSummary,
       investment.submittedBy
@@ -554,10 +611,15 @@ function beginEditInvestment(investmentId) {
   form.elements.officialValue.value = investment.officialValue || "";
   form.elements.internalValue.value = investment.internalValue || "";
   form.elements.exitValue.value = investment.exitValue || "";
+  form.elements.ownershipPercent.value = investment.ownershipPercent || "";
+  form.elements.entityOwnershipPercent.value = investment.entityOwnershipPercent || "";
+  form.elements.ownershipNotes.value = investment.ownershipNotes || "";
   form.elements.followOnCapitalAmount.value = investment.followOnCapitalAmount || "";
   form.elements.followOnCapitalStatus.value = investment.followOnCapitalStatus || "";
   form.elements.followOnCapitalNotes.value = investment.followOnCapitalNotes || "";
   form.elements.documentLinks.value = investment.documentLinks || "";
+  uploadedDocuments = Array.isArray(investment.documents) ? [...investment.documents] : [];
+  renderUploadedDocuments();
   form.elements.decisionDate.value = investment.decisionDate || "";
   form.elements.decisionType.value = investment.decisionType || "";
   form.elements.decisionSummary.value = investment.decisionSummary || "";
@@ -576,6 +638,9 @@ function resetFormToCreateMode() {
   emailMessage.textContent = "";
   deckMessage.textContent = "";
   deckSummaryField.value = "";
+  uploadedDocuments = [];
+  renderUploadedDocuments();
+  documentMessage.textContent = "";
 }
 
 async function deleteInvestmentById(investmentId) {
@@ -604,10 +669,12 @@ function renderCompanyPanel() {
     companyHighlights.innerHTML = "";
     companyPerformanceSummary.innerHTML = "";
     companyEntityPerformance.innerHTML = "";
+    companyOwnershipSummary.innerHTML = "";
     companyDeckSummaries.innerHTML = "";
     companyDecisionLog.innerHTML = "";
     companyNextSteps.innerHTML = "";
     companyFollowOnCapital.innerHTML = "";
+    companyValuationHistory.innerHTML = "";
     companyTimeline.innerHTML = "";
     return;
   }
@@ -642,6 +709,14 @@ function renderCompanyPanel() {
   );
   const decisionUpdates = companyUpdates.filter(
     (investment) => investment.documentLinks || investment.decisionDate || investment.decisionType || investment.decisionSummary
+  );
+  const valuationUpdates = companyUpdates.filter(
+    (investment) =>
+      investment.valuationDate || investment.officialValue || investment.internalValue || investment.exitValue
+  );
+  const ownershipUpdates = companyUpdates.filter(
+    (investment) =>
+      investment.ownershipPercent || investment.entityOwnershipPercent || investment.ownershipNotes
   );
   const perEntityCompanyPerformance = Array.from(
     new Set(companyUpdates.map((investment) => investment.entity).filter(Boolean))
@@ -735,6 +810,25 @@ function renderCompanyPanel() {
         .join("")
     : '<p class="update-meta">No entity-level performance yet.</p>';
 
+  companyOwnershipSummary.innerHTML = ownershipUpdates.length
+    ? ownershipUpdates
+        .slice(0, 6)
+        .map(
+          (investment) => `
+            <div class="highlight-row">
+              <p class="dashboard-label">${escapeHtml(investment.entity || "Entity not set")}</p>
+              <p class="highlight-value">Total ${escapeHtml(investment.ownershipPercent || "Not set")}${
+                investment.ownershipPercent ? "%" : ""
+              } • Entity ${escapeHtml(investment.entityOwnershipPercent || "Not set")}${
+                investment.entityOwnershipPercent ? "%" : ""
+              }</p>
+              <p class="update-meta">${escapeHtml(investment.ownershipNotes || "No ownership notes.")}</p>
+            </div>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No ownership allocation notes yet.</p>';
+
   companyNextSteps.innerHTML = nextSteps.length
     ? `<ul class="company-list">${nextSteps
         .slice(0, 6)
@@ -770,6 +864,16 @@ function renderCompanyPanel() {
                   ? `<p class="update-meta">${escapeHtml(investment.documentLinks)}</p>`
                   : ""
               }
+              ${
+                Array.isArray(investment.documents) && investment.documents.length
+                  ? `<div class="document-pill-row">${investment.documents
+                      .map(
+                        (document) =>
+                          `<a class="document-pill" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>`
+                      )
+                      .join("")}</div>`
+                  : ""
+              }
             </article>
           `
         )
@@ -794,6 +898,28 @@ function renderCompanyPanel() {
         )
         .join("")
     : '<p class="update-meta">No follow-on capital entries yet.</p>';
+
+  companyValuationHistory.innerHTML = valuationUpdates.length
+    ? valuationUpdates
+        .map(
+          (investment) => `
+            <article class="timeline-card timeline-card-compact">
+              <p class="dashboard-label">${escapeHtml(
+                investment.valuationDate || investment.createdAt
+              )}</p>
+              <p class="highlight-value">Official ${escapeHtml(
+                investment.officialValue ? `${investment.currency} ${investment.officialValue}` : "not set"
+              )}</p>
+              <p class="update-meta">Internal ${escapeHtml(
+                investment.internalValue ? `${investment.currency} ${investment.internalValue}` : "not set"
+              )} • Exit ${escapeHtml(
+                investment.exitValue ? `${investment.currency} ${investment.exitValue}` : "not set"
+              )}</p>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No valuation history yet.</p>';
 
   companyTimeline.innerHTML = companyUpdates
     .map(
@@ -843,6 +969,15 @@ function renderCompanyPanel() {
                 }</p>`
               : ""
           }
+          ${
+            investment.ownershipPercent || investment.entityOwnershipPercent || investment.ownershipNotes
+              ? `<p class="update-meta">Ownership: Total ${
+                  escapeHtml(investment.ownershipPercent || "Not set")
+                }${investment.ownershipPercent ? "%" : ""} • Entity ${escapeHtml(
+                  investment.entityOwnershipPercent || "Not set"
+                )}${investment.entityOwnershipPercent ? "%" : ""}</p>`
+              : ""
+          }
           <p class="update-meta">
             Next: ${escapeHtml(investment.nextStep || "No next step provided")}
           </p>
@@ -870,6 +1005,15 @@ function renderCompanyPanel() {
                 )}</p>${
                   investment.documentLinks
                     ? `<p class="update-meta">${escapeHtml(investment.documentLinks)}</p>`
+                    : ""
+                }${
+                  Array.isArray(investment.documents) && investment.documents.length
+                    ? `<div class="document-pill-row">${investment.documents
+                        .map(
+                          (document) =>
+                            `<a class="document-pill" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>`
+                        )
+                        .join("")}</div>`
                     : ""
                 }</div>`
               : ""
@@ -953,6 +1097,17 @@ function renderUpdates(investments) {
                 )} • ${escapeHtml(investment.decisionSummary || "No summary")}</p>`
               : ""
           }
+          ${
+            Array.isArray(investment.documents) && investment.documents.length
+              ? `<div class="document-pill-row">${investment.documents
+                  .slice(0, 3)
+                  .map(
+                    (document) =>
+                      `<a class="document-pill" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>`
+                  )
+                  .join("")}</div>`
+              : ""
+          }
           <div class="card-actions">
             <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}">View company</button>
             <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>
@@ -964,6 +1119,77 @@ function renderUpdates(investments) {
     .join("");
 }
 
+function renderResearchLibrary(investments) {
+  const latestDecks = investments.filter((investment) => investment.deckSummary).slice(0, 6);
+  const latestNotes = investments.filter((investment) => investment.notes).slice(0, 6);
+  const latestDocuments = investments
+    .filter((investment) => Array.isArray(investment.documents) && investment.documents.length)
+    .slice(0, 6);
+  const latestDecisions = investments
+    .filter((investment) => investment.decisionType || investment.decisionSummary)
+    .slice(0, 6);
+
+  researchDeckFeed.innerHTML = latestDecks.length
+    ? latestDecks
+        .map(
+          (investment) => `
+            <article class="timeline-card timeline-card-compact">
+              <p class="dashboard-label">${escapeHtml(investment.company)} • ${escapeHtml(formatDisplayDate(investment.createdAt))}</p>
+              <p class="highlight-value">${escapeHtml(summarizeText(investment.deckSummary, ""))}</p>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No deck summaries yet.</p>';
+
+  researchNotesFeed.innerHTML = latestNotes.length
+    ? latestNotes
+        .map(
+          (investment) => `
+            <article class="timeline-card timeline-card-compact">
+              <p class="dashboard-label">${escapeHtml(investment.company)} • ${escapeHtml(investment.status || "Update")}</p>
+              <p class="highlight-value">${escapeHtml(summarizeText(investment.notes, "No notes"))}</p>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No note entries yet.</p>';
+
+  researchDocumentsFeed.innerHTML = latestDocuments.length
+    ? latestDocuments
+        .map(
+          (investment) => `
+            <article class="timeline-card timeline-card-compact">
+              <p class="dashboard-label">${escapeHtml(investment.company)}</p>
+              <div class="document-pill-row">${investment.documents
+                .map(
+                  (document) =>
+                    `<a class="document-pill" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>`
+                )
+                .join("")}</div>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No uploaded documents yet.</p>';
+
+  researchDecisionFeed.innerHTML = latestDecisions.length
+    ? latestDecisions
+        .map(
+          (investment) => `
+            <article class="timeline-card timeline-card-compact">
+              <p class="dashboard-label">${escapeHtml(investment.company)} • ${escapeHtml(
+                investment.decisionDate || investment.createdAt
+              )}</p>
+              <p class="highlight-value">${escapeHtml(investment.decisionType || "Decision not set")}</p>
+              <p class="update-meta">${escapeHtml(investment.decisionSummary || "No decision summary.")}</p>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No decisions recorded yet.</p>';
+}
+
 function renderAll() {
   companyPerformanceMap = buildCompanyPerformanceMap(allInvestments);
   entityPerformanceMap = buildEntityPerformanceMap(allInvestments);
@@ -971,6 +1197,7 @@ function renderAll() {
   renderFilterOptions();
   const filteredInvestments = filterInvestments(allInvestments);
   renderDashboard(filteredInvestments);
+  renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
   renderCompanyPanel();
 }
@@ -1022,6 +1249,34 @@ function readFileAsBase64(file) {
   });
 }
 
+async function uploadSupportingDocuments(files) {
+  if (!files || !files.length) {
+    return;
+  }
+
+  documentMessage.textContent = `Uploading ${files.length} document${files.length === 1 ? "" : "s"}...`;
+  const uploaded = [];
+
+  for (const file of Array.from(files)) {
+    const fileData = await readFileAsBase64(file);
+    const result = await fetchJson("/api/upload-document", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        filename: file.name,
+        fileData
+      })
+    });
+    uploaded.push(result.document);
+  }
+
+  uploadedDocuments = uploadedDocuments.concat(uploaded);
+  renderUploadedDocuments();
+  documentMessage.textContent = `Uploaded ${uploaded.length} document${uploaded.length === 1 ? "" : "s"}.`;
+}
+
 deckFile.addEventListener("change", () => {
   updateDeckFileLabel(selectedDeckFile());
 });
@@ -1051,6 +1306,64 @@ deckDropZone.addEventListener("drop", (event) => {
   transfer.items.add(transferredFile);
   deckFile.files = transfer.files;
   updateDeckFileLabel(transferredFile);
+});
+
+["dragenter", "dragover"].forEach((eventName) => {
+  documentDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    documentDropZone.classList.add("deck-drop-zone-active");
+  });
+});
+
+["dragleave", "drop"].forEach((eventName) => {
+  documentDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    documentDropZone.classList.remove("deck-drop-zone-active");
+  });
+});
+
+documentDropZone.addEventListener("drop", async (event) => {
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (!files || !files.length) {
+    return;
+  }
+
+  try {
+    await uploadSupportingDocuments(files);
+  } catch (error) {
+    documentMessage.textContent = error.message;
+  }
+});
+
+documentFile.addEventListener("change", async () => {
+  const files = documentFile.files;
+  if (!files || !files.length) {
+    return;
+  }
+
+  try {
+    await uploadSupportingDocuments(files);
+    documentFile.value = "";
+  } catch (error) {
+    documentMessage.textContent = error.message;
+  }
+});
+
+menuToggleButton.addEventListener("click", () => {
+  workspaceMenu.classList.toggle("hidden");
+});
+
+workspaceMenu.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-target]");
+  if (!target) {
+    return;
+  }
+
+  const section = document.getElementById(target.dataset.target);
+  if (section) {
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  workspaceMenu.classList.add("hidden");
 });
 
 async function loadUpdates() {
@@ -1235,10 +1548,14 @@ form.addEventListener("submit", async (event) => {
     officialValue: formData.get("officialValue"),
     internalValue: formData.get("internalValue"),
     exitValue: formData.get("exitValue"),
+    ownershipPercent: formData.get("ownershipPercent"),
+    entityOwnershipPercent: formData.get("entityOwnershipPercent"),
+    ownershipNotes: formData.get("ownershipNotes"),
     followOnCapitalAmount: formData.get("followOnCapitalAmount"),
     followOnCapitalStatus: formData.get("followOnCapitalStatus"),
     followOnCapitalNotes: formData.get("followOnCapitalNotes"),
     documentLinks: formData.get("documentLinks"),
+    documents: uploadedDocuments,
     decisionDate: formData.get("decisionDate"),
     decisionType: formData.get("decisionType"),
     decisionSummary: formData.get("decisionSummary")
@@ -1339,6 +1656,17 @@ cancelEditButton.addEventListener("click", () => {
   element.addEventListener("change", renderAll);
 });
 
+uploadedDocumentsList.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-action='remove-document']");
+  if (!action) {
+    return;
+  }
+
+  const documentId = action.dataset.documentId;
+  uploadedDocuments = uploadedDocuments.filter((document) => document.id !== documentId);
+  renderUploadedDocuments();
+});
+
 closeCompanyPanelButton.addEventListener("click", () => {
   selectedCompany = "";
   renderCompanyPanel();
@@ -1379,3 +1707,5 @@ Promise.all([loadConfig(), loadUpdates()]).catch((error) => {
 
   loginMessage.textContent = error.message;
 });
+
+renderUploadedDocuments();

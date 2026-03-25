@@ -628,6 +628,147 @@ button:disabled {
   filter: none;
 }
 
+.app-shell {
+  width: min(100%, 1180px);
+}
+
+.workspace-header {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.brand-lockup {
+  display: grid;
+  gap: 4px;
+}
+
+.brand-subtitle {
+  margin: 0;
+  color: rgba(246, 248, 251, 0.74);
+  font-size: 0.92rem;
+}
+
+.workspace-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.menu-toggle-button {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f6f8fb;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.workspace-menu {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.menu-link {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f6f8fb;
+  box-shadow: none;
+  padding: 12px 14px;
+}
+
+.brand-title {
+  max-width: none;
+  font-size: clamp(3.4rem, 8vw, 6rem);
+  letter-spacing: 0.02em;
+}
+
+.hero-thesis {
+  margin: 0;
+  color: rgba(246, 248, 251, 0.94);
+  font-size: clamp(1.05rem, 2vw, 1.4rem);
+  font-weight: 600;
+  max-width: 28rem;
+}
+
+.document-tools {
+  display: grid;
+  gap: 12px;
+}
+
+.document-drop-zone {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed rgba(23, 50, 77, 0.24);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.84);
+  cursor: pointer;
+}
+
+.document-drop-zone input[type="file"] {
+  display: none;
+}
+
+.uploaded-documents-list {
+  display: grid;
+  gap: 10px;
+}
+
+.uploaded-document-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.uploaded-document-actions,
+.document-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inline-action-button {
+  padding: 10px 12px;
+}
+
+a.secondary-button.inline-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.document-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  text-decoration: none;
+  background: rgba(23, 50, 77, 0.08);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.document-pill:hover {
+  background: rgba(23, 50, 77, 0.14);
+}
+
 .hidden {
   display: none !important;
 }
@@ -644,7 +785,7 @@ button:disabled {
 
   .hero-grid,
   .login-panel-shell {
-    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr);
+    grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
     align-items: start;
   }
 
@@ -680,5 +821,21 @@ button:disabled {
 
   .company-detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  .workspace-header {
+    align-items: start;
+  }
+
+  .workspace-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .uploaded-document-card {
+    align-items: start;
+    flex-direction: column;
   }
 }
