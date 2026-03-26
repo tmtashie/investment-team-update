@@ -198,10 +198,145 @@ function findLatestByCompanyKey(companyKey, investments) {
   return investments.find((investment) => investment.companyKey === companyKey) || null;
 }
 
+function normalizeStructuredRow(row, fallback = {}) {
+  return {
+    date: String(row.date || fallback.date || "").trim(),
+    type: String(row.type || fallback.type || "").trim(),
+    title: String(row.title || fallback.title || "").trim(),
+    amount: String(row.amount || fallback.amount || "").trim(),
+    officialValue: String(row.officialValue || fallback.officialValue || "").trim(),
+    internalValue: String(row.internalValue || fallback.internalValue || "").trim(),
+    exitValue: String(row.exitValue || fallback.exitValue || "").trim(),
+    totalPercent: String(row.totalPercent || fallback.totalPercent || "").trim(),
+    entityPercent: String(row.entityPercent || fallback.entityPercent || "").trim(),
+    notes: String(row.notes || fallback.notes || "").trim(),
+    summary: String(row.summary || fallback.summary || "").trim(),
+    sourceUpdateId: String(row.sourceUpdateId || fallback.sourceUpdateId || "").trim()
+  };
+}
+
+function normalizeStructuredRows(rows, fallbackRows = []) {
+  if (Array.isArray(rows) && rows.length) {
+    return rows
+      .map((row) => normalizeStructuredRow(row))
+      .filter((row) => Object.values(row).some(Boolean));
+  }
+
+  return fallbackRows
+    .map((row) => normalizeStructuredRow(row))
+    .filter((row) => Object.values(row).some(Boolean));
+}
+
 function normalizeInvestment(entry) {
   const entity = String(entry.entity || "").trim();
+  const investmentId = entry.id || makeId();
+  const createdAt = String(entry.createdAt || new Date().toISOString());
+  const notes = String(entry.notes || "").trim();
+  const deckSummary = String(entry.deckSummary || "").trim();
+  const capitalCallDate = String(entry.capitalCallDate || "").trim();
+  const capitalCallAmount = String(entry.capitalCallAmount || "").trim();
+  const distributionDate = String(entry.distributionDate || "").trim();
+  const distributionAmount = String(entry.distributionAmount || "").trim();
+  const valuationDate = String(entry.valuationDate || "").trim();
+  const officialValue = String(entry.officialValue || "").trim();
+  const internalValue = String(entry.internalValue || "").trim();
+  const exitValue = String(entry.exitValue || "").trim();
+  const ownershipPercent = String(entry.ownershipPercent || "").trim();
+  const entityOwnershipPercent = String(entry.entityOwnershipPercent || "").trim();
+  const ownershipNotes = String(entry.ownershipNotes || "").trim();
+  const followOnCapitalAmount = String(entry.followOnCapitalAmount || "").trim();
+  const followOnCapitalStatus = String(entry.followOnCapitalStatus || "").trim();
+  const followOnCapitalNotes = String(entry.followOnCapitalNotes || "").trim();
+  const decisionDate = String(entry.decisionDate || "").trim();
+  const decisionType = String(entry.decisionType || "").trim();
+  const decisionSummary = String(entry.decisionSummary || "").trim();
+  const fallbackCapitalActivity = [];
+  const fallbackResearchEntries = [];
+  const fallbackValuationHistory = [];
+  const fallbackOwnershipHistory = [];
+  const fallbackFollowOnHistory = [];
+  const fallbackDecisionLog = [];
+
+  if (capitalCallAmount || capitalCallDate) {
+    fallbackCapitalActivity.push({
+      date: capitalCallDate || createdAt,
+      type: "Capital Call",
+      amount: capitalCallAmount,
+      notes: "Captured from investment update",
+      sourceUpdateId: investmentId
+    });
+  }
+
+  if (distributionAmount || distributionDate) {
+    fallbackCapitalActivity.push({
+      date: distributionDate || createdAt,
+      type: "Distribution",
+      amount: distributionAmount,
+      notes: "Captured from investment update",
+      sourceUpdateId: investmentId
+    });
+  }
+
+  if (notes) {
+    fallbackResearchEntries.push({
+      date: createdAt,
+      type: "Operating Note",
+      summary: notes,
+      sourceUpdateId: investmentId
+    });
+  }
+
+  if (deckSummary) {
+    fallbackResearchEntries.push({
+      date: createdAt,
+      type: "Deck Summary",
+      summary: deckSummary,
+      sourceUpdateId: investmentId
+    });
+  }
+
+  if (officialValue || internalValue || exitValue || valuationDate) {
+    fallbackValuationHistory.push({
+      date: valuationDate || createdAt,
+      officialValue,
+      internalValue,
+      exitValue,
+      notes: "Captured from investment update",
+      sourceUpdateId: investmentId
+    });
+  }
+
+  if (ownershipPercent || entityOwnershipPercent || ownershipNotes) {
+    fallbackOwnershipHistory.push({
+      date: createdAt,
+      totalPercent: ownershipPercent,
+      entityPercent: entityOwnershipPercent,
+      notes: ownershipNotes,
+      sourceUpdateId: investmentId
+    });
+  }
+
+  if (followOnCapitalAmount || followOnCapitalStatus || followOnCapitalNotes) {
+    fallbackFollowOnHistory.push({
+      date: createdAt,
+      amount: followOnCapitalAmount,
+      type: followOnCapitalStatus,
+      notes: followOnCapitalNotes,
+      sourceUpdateId: investmentId
+    });
+  }
+
+  if (decisionDate || decisionType || decisionSummary) {
+    fallbackDecisionLog.push({
+      date: decisionDate || createdAt,
+      type: decisionType,
+      summary: decisionSummary,
+      sourceUpdateId: investmentId
+    });
+  }
+
   return {
-    id: entry.id || makeId(),
+    id: investmentId,
     company: String(entry.company || "").trim(),
     companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
     entity,
@@ -211,32 +346,38 @@ function normalizeInvestment(entry) {
     status: String(entry.status || "").trim(),
     owner: String(entry.owner || "").trim(),
     nextStep: String(entry.nextStep || "").trim(),
-    notes: String(entry.notes || "").trim(),
-    deckSummary: String(entry.deckSummary || "").trim(),
-    capitalCallDate: String(entry.capitalCallDate || "").trim(),
-    capitalCallAmount: String(entry.capitalCallAmount || "").trim(),
-    distributionDate: String(entry.distributionDate || "").trim(),
-    distributionAmount: String(entry.distributionAmount || "").trim(),
-    valuationDate: String(entry.valuationDate || "").trim(),
-    officialValue: String(entry.officialValue || "").trim(),
-    internalValue: String(entry.internalValue || "").trim(),
-    exitValue: String(entry.exitValue || "").trim(),
-    ownershipPercent: String(entry.ownershipPercent || "").trim(),
-    entityOwnershipPercent: String(entry.entityOwnershipPercent || "").trim(),
-    ownershipNotes: String(entry.ownershipNotes || "").trim(),
-    followOnCapitalAmount: String(entry.followOnCapitalAmount || "").trim(),
-    followOnCapitalStatus: String(entry.followOnCapitalStatus || "").trim(),
-    followOnCapitalNotes: String(entry.followOnCapitalNotes || "").trim(),
+    notes,
+    deckSummary,
+    capitalCallDate,
+    capitalCallAmount,
+    distributionDate,
+    distributionAmount,
+    valuationDate,
+    officialValue,
+    internalValue,
+    exitValue,
+    ownershipPercent,
+    entityOwnershipPercent,
+    ownershipNotes,
+    followOnCapitalAmount,
+    followOnCapitalStatus,
+    followOnCapitalNotes,
     documentLinks: String(entry.documentLinks || "").trim(),
     documents: normalizeDocuments(entry.documents),
-    decisionDate: String(entry.decisionDate || "").trim(),
-    decisionType: String(entry.decisionType || "").trim(),
-    decisionSummary: String(entry.decisionSummary || "").trim(),
+    decisionDate,
+    decisionType,
+    decisionSummary,
+    researchEntries: normalizeStructuredRows(entry.researchEntries, fallbackResearchEntries),
+    capitalActivity: normalizeStructuredRows(entry.capitalActivity, fallbackCapitalActivity),
+    valuationHistory: normalizeStructuredRows(entry.valuationHistory, fallbackValuationHistory),
+    ownershipHistory: normalizeStructuredRows(entry.ownershipHistory, fallbackOwnershipHistory),
+    followOnHistory: normalizeStructuredRows(entry.followOnHistory, fallbackFollowOnHistory),
+    decisionLog: normalizeStructuredRows(entry.decisionLog, fallbackDecisionLog),
     recipients: Array.isArray(entry.recipients)
       ? entry.recipients.map((value) => String(value).trim()).filter(Boolean)
       : [],
     submittedBy: String(entry.submittedBy || "").trim(),
-    createdAt: String(entry.createdAt || new Date().toISOString())
+    createdAt
   };
 }
 
@@ -412,6 +553,126 @@ function deleteInvestment(id) {
 
   writeInvestments(remaining);
   return true;
+}
+
+function sortStructuredRows(rows) {
+  return [...rows].sort((left, right) => {
+    const rightTime = new Date(right.date || 0).getTime();
+    const leftTime = new Date(left.date || 0).getTime();
+    return rightTime - leftTime;
+  });
+}
+
+function buildCompanyRecords(investments, tasks = []) {
+  const grouped = new Map();
+
+  investments.forEach((investment) => {
+    if (!investment.companyKey) {
+      return;
+    }
+
+    if (!grouped.has(investment.companyKey)) {
+      grouped.set(investment.companyKey, []);
+    }
+
+    grouped.get(investment.companyKey).push(investment);
+  });
+
+  return Array.from(grouped.entries())
+    .map(([key, companyInvestments]) => {
+      const updates = [...companyInvestments].sort(
+        (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+      );
+      const latest = updates[0];
+      const companyTasks = tasks
+        .filter((task) => task.companyKey === key)
+        .sort(
+          (left, right) =>
+            new Date(left.dueDate || left.createdAt || 0).getTime() -
+            new Date(right.dueDate || right.createdAt || 0).getTime()
+        );
+      const documents = updates
+        .flatMap((investment) =>
+          (investment.documents || []).map((document) => ({
+            ...document,
+            company: investment.company,
+            entity: investment.entity,
+            sourceUpdateId: investment.id
+          }))
+        )
+        .sort(
+          (left, right) =>
+            new Date(right.uploadedAt || right.createdAt || 0).getTime() -
+            new Date(left.uploadedAt || left.createdAt || 0).getTime()
+        );
+
+      return {
+        company: latest.company,
+        companyKey: key,
+        profile: {
+          entity: latest.entity,
+          stage: latest.stage,
+          status: latest.status,
+          owner: latest.owner,
+          nextStep: latest.nextStep,
+          currency: latest.currency
+        },
+        updates,
+        researchEntries: sortStructuredRows(updates.flatMap((investment) => investment.researchEntries || [])),
+        capitalActivities: sortStructuredRows(
+          updates.flatMap((investment) =>
+            (investment.capitalActivity || []).map((activity) => ({
+              ...activity,
+              entity: investment.entity,
+              currency: investment.currency,
+              sourceUpdateId: investment.id
+            }))
+          )
+        ),
+        valuationHistory: sortStructuredRows(
+          updates.flatMap((investment) =>
+            (investment.valuationHistory || []).map((valuation) => ({
+              ...valuation,
+              entity: investment.entity,
+              currency: investment.currency,
+              sourceUpdateId: investment.id
+            }))
+          )
+        ),
+        ownershipHistory: sortStructuredRows(
+          updates.flatMap((investment) =>
+            (investment.ownershipHistory || []).map((ownership) => ({
+              ...ownership,
+              entity: investment.entity,
+              sourceUpdateId: investment.id
+            }))
+          )
+        ),
+        followOnHistory: sortStructuredRows(
+          updates.flatMap((investment) =>
+            (investment.followOnHistory || []).map((followOn) => ({
+              ...followOn,
+              entity: investment.entity,
+              currency: investment.currency,
+              sourceUpdateId: investment.id
+            }))
+          )
+        ),
+        decisionLog: sortStructuredRows(
+          updates.flatMap((investment) =>
+            (investment.decisionLog || []).map((decision) => ({
+              ...decision,
+              entity: investment.entity,
+              sourceUpdateId: investment.id
+            }))
+          )
+        ),
+        documents,
+        tasks: companyTasks,
+        entities: Array.from(new Set(updates.map((investment) => investment.entity).filter(Boolean)))
+      };
+    })
+    .sort((left, right) => left.company.localeCompare(right.company));
 }
 
 function signSession(payload) {
@@ -1968,7 +2229,13 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    sendJson(response, 200, { investments: readInvestments(), user });
+    const investments = readInvestments();
+    const tasks = readTasks();
+    sendJson(response, 200, {
+      investments,
+      companies: buildCompanyRecords(investments, tasks),
+      user
+    });
     return;
   }
 

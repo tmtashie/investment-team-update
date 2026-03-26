@@ -76,6 +76,7 @@ const researchDecisionFeed = document.getElementById("researchDecisionFeed");
 
 let currentUser = null;
 let allInvestments = [];
+let allCompanies = [];
 let selectedCompany = "";
 let configuredEntities = [];
 let companyPerformanceMap = new Map();
@@ -193,6 +194,11 @@ function currentFilters() {
     stage: stageFilter.value,
     owner: ownerFilter.value
   };
+}
+
+function findCompanyRecord(company) {
+  const key = companyKey(company);
+  return allCompanies.find((record) => record.companyKey === key) || null;
 }
 
 function filterInvestments(investments) {
@@ -483,18 +489,21 @@ function buildEntityPerformanceMap(investments) {
 }
 
 function buildDashboardCards(investments) {
-  const uniqueCompanies = Array.from(
-    new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean))
-  );
-  const companySummaries = uniqueCompanies
-    .map((key) => {
-      const updates = investments.filter((investment) => companyKey(investment.company) === key);
-      return {
-        key,
-        latest: updates.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0],
-        performance: buildCompanyPerformance(updates)
-      };
-    })
+  const companySummaries = (allCompanies.length
+    ? allCompanies.map((company) => ({
+        key: company.companyKey,
+        latest: company.updates[0],
+        performance: buildCompanyPerformance(company.updates)
+      }))
+    : Array.from(new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean)))
+        .map((key) => {
+          const updates = investments.filter((investment) => companyKey(investment.company) === key);
+          return {
+            key,
+            latest: updates.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0],
+            performance: buildCompanyPerformance(updates)
+          };
+        }))
     .filter(Boolean);
   const openCount = companySummaries.filter(
     (summary) => !["Passed", "Closed"].includes(summary.latest && summary.latest.status)
@@ -588,7 +597,11 @@ function renderFilterOptions() {
 
 function renderCompanySuggestions() {
   const companies = Array.from(
-    new Set(allInvestments.map((item) => item.company).filter(Boolean))
+    new Set(
+      (allCompanies.length ? allCompanies.map((item) => item.company) : allInvestments.map((item) => item.company)).filter(
+        Boolean
+      )
+    )
   ).sort((left, right) => left.localeCompare(right));
 
   companySuggestions.innerHTML = companies
@@ -749,9 +762,12 @@ function renderCompanyPanel() {
     return;
   }
 
-  const companyUpdates = allInvestments
-    .filter((investment) => companyKey(investment.company) === companyKey(selectedCompany))
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const companyRecord = findCompanyRecord(selectedCompany);
+  const companyUpdates = companyRecord
+    ? [...companyRecord.updates]
+    : allInvestments
+        .filter((investment) => companyKey(investment.company) === companyKey(selectedCompany))
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   if (!companyUpdates.length) {
     companyPanel.classList.add("hidden");
@@ -770,27 +786,51 @@ function renderCompanyPanel() {
   const nextSteps = Array.from(
     new Set(companyUpdates.map((investment) => investment.nextStep).filter(Boolean))
   );
-  const deckSummaries = companyUpdates.filter((investment) => investment.deckSummary);
-  const followOnUpdates = companyUpdates.filter(
-    (investment) =>
-      investment.followOnCapitalAmount ||
-      investment.followOnCapitalStatus ||
-      investment.followOnCapitalNotes
-  );
-  const decisionUpdates = companyUpdates.filter(
-    (investment) => investment.documentLinks || investment.decisionDate || investment.decisionType || investment.decisionSummary
-  );
-  const relatedTasks = allTasks
-    .filter((task) => companyKey(task.company) === companyKey(selectedCompany))
-    .sort((left, right) => new Date(left.dueDate || left.createdAt) - new Date(right.dueDate || right.createdAt));
-  const valuationUpdates = companyUpdates.filter(
-    (investment) =>
-      investment.valuationDate || investment.officialValue || investment.internalValue || investment.exitValue
-  );
-  const ownershipUpdates = companyUpdates.filter(
-    (investment) =>
-      investment.ownershipPercent || investment.entityOwnershipPercent || investment.ownershipNotes
-  );
+  const deckSummaries = companyRecord
+    ? companyRecord.researchEntries.filter((entry) => entry.type === "Deck Summary")
+    : companyUpdates.filter((investment) => investment.deckSummary);
+  const followOnUpdates = companyRecord
+    ? companyRecord.followOnHistory
+    : companyUpdates.filter(
+        (investment) =>
+          investment.followOnCapitalAmount ||
+          investment.followOnCapitalStatus ||
+          investment.followOnCapitalNotes
+      );
+  const decisionUpdates = companyRecord
+    ? companyRecord.decisionLog
+    : companyUpdates.filter(
+        (investment) =>
+          investment.documentLinks ||
+          investment.decisionDate ||
+          investment.decisionType ||
+          investment.decisionSummary
+      );
+  const relatedTasks = companyRecord
+    ? companyRecord.tasks
+    : allTasks
+        .filter((task) => companyKey(task.company) === companyKey(selectedCompany))
+        .sort(
+          (left, right) =>
+            new Date(left.dueDate || left.createdAt) - new Date(right.dueDate || right.createdAt)
+        );
+  const valuationUpdates = companyRecord
+    ? companyRecord.valuationHistory
+    : companyUpdates.filter(
+        (investment) =>
+          investment.valuationDate ||
+          investment.officialValue ||
+          investment.internalValue ||
+          investment.exitValue
+      );
+  const ownershipUpdates = companyRecord
+    ? companyRecord.ownershipHistory
+    : companyUpdates.filter(
+        (investment) =>
+          investment.ownershipPercent ||
+          investment.entityOwnershipPercent ||
+          investment.ownershipNotes
+      );
   const perEntityCompanyPerformance = Array.from(
     new Set(companyUpdates.map((investment) => investment.entity).filter(Boolean))
   ).map((entity) => ({
@@ -803,7 +843,9 @@ function renderCompanyPanel() {
   const performance =
     companyPerformanceMap.get(companyKey(selectedCompany)) || buildCompanyPerformance(companyUpdates);
   companyPanelTitle.textContent = latest.company || selectedCompany;
-  companyPanelCopy.textContent = `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
+  companyPanelCopy.textContent = companyRecord
+    ? `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} organized into structured research, capital, valuation, decision, and document records.`
+    : `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
   companySummary.innerHTML = [
     { label: "Latest status", value: latest.status || "Not set" },
     { label: "Latest entity", value: latest.entity || "Not set" },
@@ -890,12 +932,12 @@ function renderCompanyPanel() {
           (investment) => `
             <div class="highlight-row">
               <p class="dashboard-label">${escapeHtml(investment.entity || "Entity not set")}</p>
-              <p class="highlight-value">Total ${escapeHtml(investment.ownershipPercent || "Not set")}${
-                investment.ownershipPercent ? "%" : ""
-              } • Entity ${escapeHtml(investment.entityOwnershipPercent || "Not set")}${
-                investment.entityOwnershipPercent ? "%" : ""
+              <p class="highlight-value">Total ${escapeHtml(investment.totalPercent || investment.ownershipPercent || "Not set")}${
+                investment.totalPercent || investment.ownershipPercent ? "%" : ""
+              } • Entity ${escapeHtml(investment.entityPercent || investment.entityOwnershipPercent || "Not set")}${
+                investment.entityPercent || investment.entityOwnershipPercent ? "%" : ""
               }</p>
-              <p class="update-meta">${escapeHtml(investment.ownershipNotes || "No ownership notes.")}</p>
+              <p class="update-meta">${escapeHtml(investment.notes || investment.ownershipNotes || "No ownership notes.")}</p>
             </div>
           `
         )
@@ -929,8 +971,8 @@ function renderCompanyPanel() {
         .map(
           (investment) => `
             <article class="timeline-card timeline-card-compact">
-              <p class="dashboard-label">${escapeHtml(investment.createdAt)}</p>
-              <p class="highlight-value">${escapeHtml(investment.deckSummary)}</p>
+              <p class="dashboard-label">${escapeHtml(investment.date || investment.createdAt)}</p>
+              <p class="highlight-value">${escapeHtml(investment.summary || investment.deckSummary)}</p>
             </article>
           `
         )
@@ -943,17 +985,16 @@ function renderCompanyPanel() {
         .map(
           (investment) => `
             <article class="timeline-card timeline-card-compact">
-              <p class="dashboard-label">${escapeHtml(investment.decisionDate || investment.createdAt)}</p>
-              <p class="highlight-value">${escapeHtml(investment.decisionType || "Decision not set")}</p>
-              <p class="update-meta">${escapeHtml(investment.decisionSummary || "No decision summary.")}</p>
+              <p class="dashboard-label">${escapeHtml(investment.date || investment.decisionDate || investment.createdAt)}</p>
+              <p class="highlight-value">${escapeHtml(investment.type || investment.decisionType || "Decision not set")}</p>
+              <p class="update-meta">${escapeHtml(investment.summary || investment.decisionSummary || "No decision summary.")}</p>
               ${
                 investment.documentLinks
                   ? `<p class="update-meta">${escapeHtml(investment.documentLinks)}</p>`
                   : ""
               }
-              ${
-                Array.isArray(investment.documents) && investment.documents.length
-                  ? `<div class="document-pill-row">${investment.documents
+              ${companyRecord && Array.isArray(companyRecord.documents) && companyRecord.documents.length
+                  ? `<div class="document-pill-row">${companyRecord.documents
                       .map(
                         (document) =>
                           `<a class="document-pill" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>`
@@ -973,13 +1014,13 @@ function renderCompanyPanel() {
         .map(
           (investment) => `
             <div class="highlight-row">
-              <p class="dashboard-label">${escapeHtml(investment.createdAt)}</p>
+              <p class="dashboard-label">${escapeHtml(investment.date || investment.createdAt)}</p>
               <p class="highlight-value">${
-                investment.followOnCapitalAmount
-                  ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.followOnCapitalAmount)}`
+                investment.amount || investment.followOnCapitalAmount
+                  ? `${escapeHtml(investment.currency || latest.currency)} ${escapeHtml(investment.amount || investment.followOnCapitalAmount)}`
                   : "Amount not set"
-              } • ${escapeHtml(investment.followOnCapitalStatus || "Status not set")}</p>
-              <p class="update-meta">${escapeHtml(investment.followOnCapitalNotes || "No follow-on notes.")}</p>
+              } • ${escapeHtml(investment.type || investment.followOnCapitalStatus || "Status not set")}</p>
+              <p class="update-meta">${escapeHtml(investment.notes || investment.followOnCapitalNotes || "No follow-on notes.")}</p>
             </div>
           `
         )
@@ -992,15 +1033,15 @@ function renderCompanyPanel() {
           (investment) => `
             <article class="timeline-card timeline-card-compact">
               <p class="dashboard-label">${escapeHtml(
-                investment.valuationDate || investment.createdAt
+                investment.date || investment.valuationDate || investment.createdAt
               )}</p>
               <p class="highlight-value">Official ${escapeHtml(
-                investment.officialValue ? `${investment.currency} ${investment.officialValue}` : "not set"
+                investment.officialValue ? `${investment.currency || latest.currency} ${investment.officialValue}` : "not set"
               )}</p>
               <p class="update-meta">Internal ${escapeHtml(
-                investment.internalValue ? `${investment.currency} ${investment.internalValue}` : "not set"
+                investment.internalValue ? `${investment.currency || latest.currency} ${investment.internalValue}` : "not set"
               )} • Exit ${escapeHtml(
-                investment.exitValue ? `${investment.currency} ${investment.exitValue}` : "not set"
+                investment.exitValue ? `${investment.currency || latest.currency} ${investment.exitValue}` : "not set"
               )}</p>
             </article>
           `
@@ -1523,6 +1564,7 @@ async function loadUpdates() {
   try {
     const data = await fetchJson("/api/investments");
     allInvestments = data.investments;
+    allCompanies = data.companies || [];
     renderAll();
     setSignedInState(data.user || currentUser);
   } catch (error) {
