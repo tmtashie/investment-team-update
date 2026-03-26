@@ -268,6 +268,10 @@ function normalizeInvestment(entry) {
   const followOnCapitalAmount = String(entry.followOnCapitalAmount || "").trim();
   const followOnCapitalStatus = String(entry.followOnCapitalStatus || "").trim();
   const followOnCapitalNotes = String(entry.followOnCapitalNotes || "").trim();
+  const contactName = String(entry.contactName || "").trim();
+  const contactPosition = String(entry.contactPosition || "").trim();
+  const contactEmail = String(entry.contactEmail || "").trim();
+  const contactPhone = String(entry.contactPhone || "").trim();
   const decisionDate = String(entry.decisionDate || "").trim();
   const decisionType = String(entry.decisionType || "").trim();
   const decisionSummary = String(entry.decisionSummary || "").trim();
@@ -383,6 +387,10 @@ function normalizeInvestment(entry) {
     followOnCapitalAmount,
     followOnCapitalStatus,
     followOnCapitalNotes,
+    contactName,
+    contactPosition,
+    contactEmail,
+    contactPhone,
     documentLinks: String(entry.documentLinks || "").trim(),
     documents: normalizeDocuments(entry.documents),
     decisionDate,
@@ -1084,6 +1092,10 @@ function buildInvestmentsCsv(investments) {
     "Follow-On Capital Amount",
     "Follow-On Capital Status",
     "Follow-On Capital Notes",
+    "Contact Name",
+    "Contact Position",
+    "Contact Email",
+    "Contact Phone",
     "Document Links",
     "Uploaded Documents",
     "Decision Date",
@@ -1120,6 +1132,10 @@ function buildInvestmentsCsv(investments) {
       investment.followOnCapitalAmount,
       investment.followOnCapitalStatus,
       investment.followOnCapitalNotes,
+      investment.contactName,
+      investment.contactPosition,
+      investment.contactEmail,
+      investment.contactPhone,
       investment.documentLinks,
       investment.documents.map((document) => `${document.name} (${document.url})`).join(" | "),
       investment.decisionDate,
@@ -1163,6 +1179,10 @@ function buildInvestmentsWorkbookBuffer(investments) {
     "Follow-On Capital Amount": investment.followOnCapitalAmount,
     "Follow-On Capital Status": investment.followOnCapitalStatus,
     "Follow-On Capital Notes": investment.followOnCapitalNotes,
+    "Contact Name": investment.contactName,
+    "Contact Position": investment.contactPosition,
+    "Contact Email": investment.contactEmail,
+    "Contact Phone": investment.contactPhone,
     "Document Links": investment.documentLinks,
     "Uploaded Documents": investment.documents
       .map((document) => `${document.name} (${document.url})`)
@@ -1249,6 +1269,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
           followOnCapitalAmount: String(row["Follow-On Capital Amount"] || "").trim(),
           followOnCapitalStatus: String(row["Follow-On Capital Status"] || "").trim(),
           followOnCapitalNotes: String(row["Follow-On Capital Notes"] || "").trim(),
+          contactName: String(row["Contact Name"] || "").trim(),
+          contactPosition: String(row["Contact Position"] || "").trim(),
+          contactEmail: String(row["Contact Email"] || "").trim(),
+          contactPhone: String(row["Contact Phone"] || "").trim(),
           documentLinks: String(row["Document Links"] || "").trim(),
           documents: [],
           decisionDate: String(row["Decision Date"] || "").trim(),
@@ -1343,6 +1367,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
           entityOwnershipPercent: "",
           ownershipNotes: "",
           recipients: [],
+          contactName: "",
+          contactPosition: "",
+          contactEmail: "",
+          contactPhone: "",
           documentLinks: "",
           documents: [],
           decisionDate: "",
@@ -1504,6 +1532,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
             followOnCapitalAmount: "",
             followOnCapitalStatus: "",
             followOnCapitalNotes: "",
+            contactName: "",
+            contactPosition: "",
+            contactEmail: "",
+            contactPhone: "",
             documentLinks: "",
             documents: [],
             decisionDate: "",
@@ -1838,6 +1870,10 @@ function buildSummary(entry) {
     : "No follow-on capital amount recorded";
   const followOnStatusLine = entry.followOnCapitalStatus || "No follow-on decision recorded";
   const followOnNotesLine = entry.followOnCapitalNotes || "No follow-on notes provided.";
+  const contactNameLine = entry.contactName || "No contact name provided.";
+  const contactPositionLine = entry.contactPosition || "No position provided.";
+  const contactEmailLine = entry.contactEmail || "No email provided.";
+  const contactPhoneLine = entry.contactPhone || "No phone provided.";
   const documentLinksLine = entry.documentLinks || "No documents linked.";
   const uploadedDocumentsLine = Array.isArray(entry.documents) && entry.documents.length
     ? entry.documents.map((document) => `${document.name}: ${document.url}`).join("\n")
@@ -1868,6 +1904,10 @@ function buildSummary(entry) {
     `Entity ownership: ${entityOwnershipPercentLine}`,
     `Follow-on capital amount: ${followOnAmountLine}`,
     `Follow-on capital status: ${followOnStatusLine}`,
+    `Contact name: ${contactNameLine}`,
+    `Contact position: ${contactPositionLine}`,
+    `Contact email: ${contactEmailLine}`,
+    `Contact phone: ${contactPhoneLine}`,
     `Decision date: ${decisionDateLine}`,
     `Decision type: ${decisionTypeLine}`,
     "",
@@ -1930,6 +1970,10 @@ function buildSummary(entry) {
           <tr><td style="padding: 8px 0; font-weight: bold;">Entity ownership</td><td>${escapeHtml(entityOwnershipPercentLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on capital</td><td>${escapeHtml(followOnAmountLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Follow-on status</td><td>${escapeHtml(followOnStatusLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Contact name</td><td>${escapeHtml(contactNameLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Contact position</td><td>${escapeHtml(contactPositionLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Contact email</td><td>${escapeHtml(contactEmailLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Contact phone</td><td>${escapeHtml(contactPhoneLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Decision date</td><td>${escapeHtml(decisionDateLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Decision type</td><td>${escapeHtml(decisionTypeLine)}</td></tr>
         </table>
@@ -2101,6 +2145,10 @@ function validateSubmission(payload, sessionUser) {
     followOnCapitalAmount: payload.followOnCapitalAmount,
     followOnCapitalStatus: payload.followOnCapitalStatus,
     followOnCapitalNotes: payload.followOnCapitalNotes,
+    contactName: payload.contactName,
+    contactPosition: payload.contactPosition,
+    contactEmail: payload.contactEmail,
+    contactPhone: payload.contactPhone,
     documentLinks: payload.documentLinks,
     documents: payload.documents,
     decisionDate: payload.decisionDate,
@@ -2152,6 +2200,10 @@ function validateInvestmentPatch(payload) {
     followOnCapitalAmount: String(payload.followOnCapitalAmount || "").trim(),
     followOnCapitalStatus: String(payload.followOnCapitalStatus || "").trim(),
     followOnCapitalNotes: String(payload.followOnCapitalNotes || "").trim(),
+    contactName: String(payload.contactName || "").trim(),
+    contactPosition: String(payload.contactPosition || "").trim(),
+    contactEmail: String(payload.contactEmail || "").trim(),
+    contactPhone: String(payload.contactPhone || "").trim(),
     documentLinks: String(payload.documentLinks || "").trim(),
     documents: normalizeDocuments(payload.documents),
     decisionDate: String(payload.decisionDate || "").trim(),

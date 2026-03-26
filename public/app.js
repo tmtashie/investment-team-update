@@ -55,6 +55,7 @@ const companyPanelTitle = document.getElementById("companyPanelTitle");
 const companyPanelCopy = document.getElementById("companyPanelCopy");
 const companySummary = document.getElementById("companySummary");
 const companyHighlights = document.getElementById("companyHighlights");
+const companyContactInfo = document.getElementById("companyContactInfo");
 const companyPerformanceSummary = document.getElementById("companyPerformanceSummary");
 const companyEntityPerformance = document.getElementById("companyEntityPerformance");
 const companyOwnershipSummary = document.getElementById("companyOwnershipSummary");
@@ -224,6 +225,10 @@ function filterInvestments(investments) {
       investment.ownershipNotes,
       investment.followOnCapitalStatus,
       investment.followOnCapitalNotes,
+      investment.contactName,
+      investment.contactPosition,
+      investment.contactEmail,
+      investment.contactPhone,
       investment.documentLinks,
       Array.isArray(investment.documents)
         ? investment.documents.map((document) => document.name).join(" ")
@@ -636,6 +641,10 @@ function beginEditInvestment(investmentId) {
   form.elements.status.value = investment.status || "";
   form.elements.owner.value = investment.owner || "";
   form.elements.nextStep.value = investment.nextStep || "";
+  form.elements.contactName.value = investment.contactName || "";
+  form.elements.contactPosition.value = investment.contactPosition || "";
+  form.elements.contactEmail.value = investment.contactEmail || "";
+  form.elements.contactPhone.value = investment.contactPhone || "";
   form.elements.recipients.value = Array.isArray(investment.recipients)
     ? investment.recipients.join(", ")
     : "";
@@ -752,6 +761,7 @@ function renderCompanyPanel() {
     companyPanel.classList.add("hidden");
     companySummary.innerHTML = "";
     companyHighlights.innerHTML = "";
+    companyContactInfo.innerHTML = "";
     companyPerformanceSummary.innerHTML = "";
     companyEntityPerformance.innerHTML = "";
     companyOwnershipSummary.innerHTML = "";
@@ -881,6 +891,22 @@ function renderCompanyPanel() {
       label: "Latest deck summary",
       value: summarizeText(latest.deckSummary, "No deck summary provided yet.")
     }
+  ]
+    .map(
+      (item) => `
+        <div class="highlight-row">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="highlight-value">${escapeHtml(item.value)}</p>
+        </div>
+      `
+    )
+    .join("");
+
+  companyContactInfo.innerHTML = [
+    { label: "Name", value: latest.contactName || "Not set" },
+    { label: "Position", value: latest.contactPosition || "Not set" },
+    { label: "Email", value: latest.contactEmail || "Not set" },
+    { label: "Phone", value: latest.contactPhone || "Not set" }
   ]
     .map(
       (item) => `
@@ -1870,6 +1896,10 @@ form.addEventListener("submit", async (event) => {
     status: formData.get("status"),
     owner: formData.get("owner"),
     nextStep: formData.get("nextStep"),
+    contactName: formData.get("contactName"),
+    contactPosition: formData.get("contactPosition"),
+    contactEmail: formData.get("contactEmail"),
+    contactPhone: formData.get("contactPhone"),
     recipients,
     notes: formData.get("notes"),
     deckSummary: formData.get("deckSummary"),
