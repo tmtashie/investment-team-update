@@ -36,6 +36,9 @@ const documentFile = document.getElementById("documentFile");
 const documentDropZone = document.getElementById("documentDropZone");
 const documentMessage = document.getElementById("documentMessage");
 const uploadedDocumentsList = document.getElementById("uploadedDocumentsList");
+const companyDocumentFile = document.getElementById("companyDocumentFile");
+const companyDocumentDropZone = document.getElementById("companyDocumentDropZone");
+const companyDocumentMessage = document.getElementById("companyDocumentMessage");
 const emailSummaryInput = document.getElementById("emailSummaryInput");
 const summarizeEmailButton = document.getElementById("summarizeEmailButton");
 const emailMessage = document.getElementById("emailMessage");
@@ -759,6 +762,7 @@ function renderCompanyPanel() {
     companyFollowOnCapital.innerHTML = "";
     companyValuationHistory.innerHTML = "";
     companyTimeline.innerHTML = "";
+    companyDocumentMessage.textContent = "";
     return;
   }
 
@@ -773,6 +777,8 @@ function renderCompanyPanel() {
     companyPanel.classList.add("hidden");
     return;
   }
+
+  companyDocumentMessage.textContent = "";
 
   const latest = companyUpdates[0];
   const earliest = companyUpdates[companyUpdates.length - 1];
@@ -997,7 +1003,9 @@ function renderCompanyPanel() {
                   ? `<div class="document-pill-row">${companyRecord.documents
                       .map(
                         (document) =>
-                          `<a class="document-pill" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>`
+                          document.source === "company-vault" && canEditWorkspace()
+                            ? `<span class="document-pill document-pill-with-action"><a class="document-pill-link" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a><button type="button" class="document-pill-remove" data-action="delete-company-document" data-document-id="${escapeHtml(document.id)}">Remove</button></span>`
+                            : `<a class="document-pill" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>`
                       )
                       .join("")}</div>`
                   : ""
@@ -1471,6 +1479,51 @@ async function uploadSupportingDocuments(files) {
   documentMessage.textContent = `Uploaded ${uploaded.length} document${uploaded.length === 1 ? "" : "s"}.`;
 }
 
+async function uploadCompanyDocuments(files) {
+  if (!selectedCompany || !files || !files.length) {
+    return;
+  }
+
+  const companyRecord = findCompanyRecord(selectedCompany);
+  const entity = (companyRecord && companyRecord.profile && companyRecord.profile.entity) || "";
+  companyDocumentMessage.textContent = `Uploading ${files.length} investment file${files.length === 1 ? "" : "s"}...`;
+
+  for (const file of Array.from(files)) {
+    const fileData = await readFileAsBase64(file);
+    await fetchJson("/api/company-documents", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        company: selectedCompany,
+        entity,
+        filename: file.name,
+        fileData
+      })
+    });
+  }
+
+  companyDocumentMessage.textContent = `Uploaded ${files.length} investment file${files.length === 1 ? "" : "s"}.`;
+  await loadUpdates();
+}
+
+async function deleteCompanyDocumentById(documentId) {
+  if (!window.confirm("Delete this investment file?")) {
+    return;
+  }
+
+  companyDocumentMessage.textContent = "Deleting investment file...";
+
+  try {
+    await fetchJson(`/api/company-documents/${documentId}`, { method: "DELETE" });
+    companyDocumentMessage.textContent = "Investment file deleted.";
+    await loadUpdates();
+  } catch (error) {
+    companyDocumentMessage.textContent = error.message;
+  }
+}
+
 deckFile.addEventListener("change", () => {
   updateDeckFileLabel(selectedDeckFile());
 });
@@ -1540,6 +1593,47 @@ documentFile.addEventListener("change", async () => {
     documentFile.value = "";
   } catch (error) {
     documentMessage.textContent = error.message;
+  }
+});
+
+["dragenter", "dragover"].forEach((eventName) => {
+  companyDocumentDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    companyDocumentDropZone.classList.add("deck-drop-zone-active");
+  });
+});
+
+["dragleave", "drop"].forEach((eventName) => {
+  companyDocumentDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    companyDocumentDropZone.classList.remove("deck-drop-zone-active");
+  });
+});
+
+companyDocumentDropZone.addEventListener("drop", async (event) => {
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (!files || !files.length) {
+    return;
+  }
+
+  try {
+    await uploadCompanyDocuments(files);
+  } catch (error) {
+    companyDocumentMessage.textContent = error.message;
+  }
+});
+
+companyDocumentFile.addEventListener("change", async () => {
+  const files = companyDocumentFile.files;
+  if (!files || !files.length) {
+    return;
+  }
+
+  try {
+    await uploadCompanyDocuments(files);
+    companyDocumentFile.value = "";
+  } catch (error) {
+    companyDocumentMessage.textContent = error.message;
   }
 });
 
@@ -1914,6 +2008,15 @@ uploadedDocumentsList.addEventListener("click", (event) => {
 closeCompanyPanelButton.addEventListener("click", () => {
   selectedCompany = "";
   renderCompanyPanel();
+});
+
+companyDecisionLog.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-action='delete-company-document']");
+  if (!target) {
+    return;
+  }
+
+  deleteCompanyDocumentById(target.dataset.documentId);
 });
 
 updatesList.addEventListener("click", (event) => {

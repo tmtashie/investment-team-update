@@ -769,6 +769,39 @@ a.secondary-button.inline-action-button {
   background: rgba(23, 50, 77, 0.14);
 }
 
+.company-vault-tools {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.document-pill-with-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
+  border-radius: 999px;
+  background: rgba(23, 50, 77, 0.08);
+}
+
+.document-pill-link {
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.document-pill-remove {
+  border: none;
+  background: rgba(196, 104, 54, 0.14);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .hidden {
   display: none !important;
 }

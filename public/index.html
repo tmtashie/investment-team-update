@@ -728,7 +728,17 @@
               <div id="companyDeckSummaries" class="company-rich-text"></div>
             </section>
             <section class="company-detail-card">
-              <h3>Documents and decisions</h3>
+              <h3>Investment vault and decisions</h3>
+              <div class="company-vault-tools">
+                <label id="companyDocumentDropZone" class="document-drop-zone" for="companyDocumentFile">
+                  <span class="deck-drop-title">Drop multiple files for this investment or tap to choose</span>
+                  <span class="deck-drop-subtitle">
+                    Keep decks, memos, legal docs, and reference files attached to the investment itself.
+                  </span>
+                  <input id="companyDocumentFile" name="companyDocumentFile" type="file" multiple />
+                </label>
+                <p id="companyDocumentMessage" class="form-message" aria-live="polite"></p>
+              </div>
               <div id="companyDecisionLog" class="company-rich-text"></div>
             </section>
             <section class="company-detail-card">

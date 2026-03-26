@@ -38,6 +38,7 @@ const DATA_DIR = process.env.DATA_DIR
   : path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "investments.json");
 const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
+const COMPANY_DOCUMENTS_FILE = path.join(DATA_DIR, "company-documents.json");
 const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const FAMILY_OFFICE_WORKBOOK_FILE = path.join(
   __dirname,
@@ -128,6 +129,10 @@ function ensureDataFile() {
   if (!fs.existsSync(TASKS_FILE)) {
     fs.writeFileSync(TASKS_FILE, "[]\n", "utf8");
   }
+
+  if (!fs.existsSync(COMPANY_DOCUMENTS_FILE)) {
+    fs.writeFileSync(COMPANY_DOCUMENTS_FILE, "[]\n", "utf8");
+  }
 }
 
 function makeId() {
@@ -155,6 +160,22 @@ function normalizeDocuments(value) {
       uploadedAt: String((document && document.uploadedAt) || new Date().toISOString()).trim()
     }))
     .filter((document) => document.name && document.url);
+}
+
+function normalizeCompanyDocument(entry) {
+  return {
+    id: String((entry && entry.id) || makeId()).trim(),
+    company: String((entry && entry.company) || "").trim(),
+    companyKey: normalizeCompanyKey((entry && entry.companyKey) || (entry && entry.company) || ""),
+    entity: String((entry && entry.entity) || "").trim(),
+    name: String((entry && entry.name) || "").trim(),
+    storedName: String((entry && entry.storedName) || "").trim(),
+    url: String((entry && entry.url) || "").trim(),
+    uploadedAt: String((entry && entry.uploadedAt) || new Date().toISOString()).trim(),
+    uploadedBy: String((entry && entry.uploadedBy) || "").trim(),
+    source: String((entry && entry.source) || "company-vault").trim(),
+    notes: String((entry && entry.notes) || "").trim()
+  };
 }
 
 function safeFilename(filename) {
@@ -452,6 +473,52 @@ function readTasks() {
   }
 }
 
+function writeCompanyDocuments(documents) {
+  ensureDataFile();
+  fs.writeFileSync(COMPANY_DOCUMENTS_FILE, JSON.stringify(documents, null, 2) + "\n", "utf8");
+}
+
+function readCompanyDocuments() {
+  ensureDataFile();
+  try {
+    const raw = fs.readFileSync(COMPANY_DOCUMENTS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const normalized = parsed.map(normalizeCompanyDocument);
+    const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
+    if (changed) {
+      writeCompanyDocuments(normalized);
+    }
+
+    return normalized;
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveCompanyDocument(entry) {
+  const documents = readCompanyDocuments();
+  const normalized = normalizeCompanyDocument(entry);
+  documents.unshift(normalized);
+  writeCompanyDocuments(documents);
+  return normalized;
+}
+
+function deleteCompanyDocument(id) {
+  const documents = readCompanyDocuments();
+  const match = documents.find((document) => document.id === id);
+  if (!match) {
+    return null;
+  }
+
+  const remaining = documents.filter((document) => document.id !== id);
+  writeCompanyDocuments(remaining);
+  return match;
+}
+
 function saveTask(entry) {
   const tasks = readTasks();
   const normalized = normalizeTask(entry);
@@ -563,7 +630,7 @@ function sortStructuredRows(rows) {
   });
 }
 
-function buildCompanyRecords(investments, tasks = []) {
+function buildCompanyRecords(investments, tasks = [], companyDocuments = []) {
   const grouped = new Map();
 
   investments.forEach((investment) => {
@@ -591,20 +658,27 @@ function buildCompanyRecords(investments, tasks = []) {
             new Date(left.dueDate || left.createdAt || 0).getTime() -
             new Date(right.dueDate || right.createdAt || 0).getTime()
         );
-      const documents = updates
+      const updateDocuments = updates
         .flatMap((investment) =>
           (investment.documents || []).map((document) => ({
             ...document,
             company: investment.company,
             entity: investment.entity,
-            sourceUpdateId: investment.id
+            sourceUpdateId: investment.id,
+            source: "update"
           }))
         )
-        .sort(
-          (left, right) =>
-            new Date(right.uploadedAt || right.createdAt || 0).getTime() -
-            new Date(left.uploadedAt || left.createdAt || 0).getTime()
-        );
+      const vaultDocuments = companyDocuments
+        .filter((document) => document.companyKey === key)
+        .map((document) => ({
+          ...document,
+          source: document.source || "company-vault"
+        }));
+      const documents = [...vaultDocuments, ...updateDocuments].sort(
+        (left, right) =>
+          new Date(right.uploadedAt || right.createdAt || 0).getTime() -
+          new Date(left.uploadedAt || left.createdAt || 0).getTime()
+      );
 
       return {
         company: latest.company,
@@ -2230,13 +2304,14 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investments = readInvestments();
-    const tasks = readTasks();
-    sendJson(response, 200, {
-      investments,
-      companies: buildCompanyRecords(investments, tasks),
-      user
-    });
-    return;
+      const tasks = readTasks();
+      const companyDocuments = readCompanyDocuments();
+      sendJson(response, 200, {
+        investments,
+        companies: buildCompanyRecords(investments, tasks, companyDocuments),
+        user
+      });
+      return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/tasks") {
@@ -2385,6 +2460,87 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 500, { error: error.message || "Document upload failed." });
       return;
     }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/company-documents") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const company = String(payload.company || "").trim();
+      const entity = String(payload.entity || "").trim();
+      const filename = String(payload.filename || "").trim();
+      const fileData = String(payload.fileData || "").trim();
+
+      if (!company) {
+        sendJson(response, 400, { error: "Company is required for investment files." });
+        return;
+      }
+
+      if (!filename) {
+        sendJson(response, 400, { error: "Document filename is required." });
+        return;
+      }
+
+      if (!fileData) {
+        sendJson(response, 400, { error: "Document file data is required." });
+        return;
+      }
+
+      ensureDataFile();
+      const storedName = safeFilename(filename);
+      const filePath = path.join(UPLOADS_DIR, storedName);
+      fs.writeFileSync(filePath, Buffer.from(fileData, "base64"));
+
+      const document = saveCompanyDocument({
+        company,
+        entity,
+        name: filename,
+        storedName,
+        url: `/uploads/${storedName}`,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: user.email,
+        source: "company-vault"
+      });
+
+      sendJson(response, 201, { document });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Investment file upload failed." });
+      return;
+    }
+  }
+
+  if (request.method === "DELETE" && url.pathname.startsWith("/api/company-documents/")) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const documentId = url.pathname.split("/").pop();
+    const deleted = deleteCompanyDocument(documentId);
+
+    if (!deleted) {
+      sendJson(response, 404, { error: "Investment file not found." });
+      return;
+    }
+
+    if (deleted.storedName) {
+      const filePath = path.join(UPLOADS_DIR, deleted.storedName);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (error) {
+          console.warn("Could not remove uploaded company document:", error.message);
+        }
+      }
+    }
+
+    sendJson(response, 200, { message: "Investment file deleted." });
+    return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/investments") {
