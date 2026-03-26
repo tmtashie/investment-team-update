@@ -37,6 +37,7 @@ const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "investments.json");
+const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
 const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const FAMILY_OFFICE_WORKBOOK_FILE = path.join(
   __dirname,
@@ -79,13 +80,15 @@ function normalizeEntityName(value) {
 
 function parseTeamUsers(value) {
   return splitCsv(value).reduce((users, entry) => {
-    const separatorIndex = entry.indexOf(":");
-    if (separatorIndex === -1) {
+    const parts = entry.split(":").map((part) => part.trim());
+    if (parts.length < 2) {
       return users;
     }
 
-    const email = entry.slice(0, separatorIndex).trim().toLowerCase();
-    const password = entry.slice(separatorIndex + 1).trim();
+    const [emailRaw, passwordRaw, roleRaw] = parts;
+    const email = emailRaw.toLowerCase();
+    const password = passwordRaw;
+    const role = roleRaw === "viewer" ? "viewer" : "editor";
 
     if (!email || !password) {
       return users;
@@ -93,7 +96,8 @@ function parseTeamUsers(value) {
 
     users[email] = {
       email,
-      password
+      password,
+      role
     };
     return users;
   }, {});
@@ -119,6 +123,10 @@ function ensureDataFile() {
 
   if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, "[]\n", "utf8");
+  }
+
+  if (!fs.existsSync(TASKS_FILE)) {
+    fs.writeFileSync(TASKS_FILE, "[]\n", "utf8");
   }
 }
 
@@ -232,6 +240,25 @@ function normalizeInvestment(entry) {
   };
 }
 
+function normalizeTask(entry) {
+  return {
+    id: entry.id || makeId(),
+    company: String(entry.company || "").trim(),
+    companyKey: normalizeCompanyKey(entry.company),
+    entity: String(entry.entity || "").trim(),
+    title: String(entry.title || "").trim(),
+    description: String(entry.description || "").trim(),
+    dueDate: String(entry.dueDate || "").trim(),
+    status: String(entry.status || "Open").trim() || "Open",
+    priority: String(entry.priority || "Medium").trim() || "Medium",
+    assignee: String(entry.assignee || "").trim(),
+    category: String(entry.category || "").trim(),
+    createdBy: String(entry.createdBy || "").trim(),
+    createdAt: String(entry.createdAt || new Date().toISOString()),
+    completedAt: String(entry.completedAt || "").trim()
+  };
+}
+
 function writeInvestments(investments) {
   ensureDataFile();
   fs.writeFileSync(DATA_FILE, JSON.stringify(investments, null, 2) + "\n", "utf8");
@@ -256,6 +283,79 @@ function readInvestments() {
   } catch (error) {
     return [];
   }
+}
+
+function writeTasks(tasks) {
+  ensureDataFile();
+  fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2) + "\n", "utf8");
+}
+
+function readTasks() {
+  ensureDataFile();
+  try {
+    const raw = fs.readFileSync(TASKS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const normalized = parsed.map(normalizeTask);
+    const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
+    if (changed) {
+      writeTasks(normalized);
+    }
+
+    return normalized;
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveTask(entry) {
+  const tasks = readTasks();
+  const normalized = normalizeTask(entry);
+  tasks.unshift(normalized);
+  writeTasks(tasks);
+  return normalized;
+}
+
+function updateTask(id, updates) {
+  const tasks = readTasks();
+  const index = tasks.findIndex((task) => task.id === id);
+
+  if (index === -1) {
+    return null;
+  }
+
+  const merged = normalizeTask({
+    ...tasks[index],
+    ...updates,
+    id: tasks[index].id,
+    createdAt: tasks[index].createdAt,
+    createdBy: tasks[index].createdBy,
+    completedAt:
+      updates.status === "Completed" && !tasks[index].completedAt
+        ? new Date().toISOString()
+        : updates.status && updates.status !== "Completed"
+          ? ""
+          : tasks[index].completedAt
+  });
+
+  tasks[index] = merged;
+  writeTasks(tasks);
+  return merged;
+}
+
+function deleteTask(id) {
+  const tasks = readTasks();
+  const remaining = tasks.filter((task) => task.id !== id);
+
+  if (remaining.length === tasks.length) {
+    return false;
+  }
+
+  writeTasks(remaining);
+  return true;
 }
 
 function saveInvestment(entry) {
@@ -397,8 +497,13 @@ function getSessionUser(request) {
 
   return {
     email: session.email,
-    name: session.name || session.email
+    name: session.name || session.email,
+    role: session.role || "editor"
   };
+}
+
+function canEdit(user) {
+  return user && user.role !== "viewer";
 }
 
 function sendJson(response, statusCode, payload, headers = {}) {
@@ -741,7 +846,7 @@ function buildInvestmentsWorkbookBuffer(investments) {
   return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
 }
 
-function importWorkbookIntoInvestments(buffer, sessionUser) {
+function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
   const XLSX = require("xlsx");
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const investments = readInvestments();
@@ -961,7 +1066,12 @@ function importWorkbookIntoInvestments(buffer, sessionUser) {
 
       usedSheets.push(sheetName);
       const inferredEntity = normalizeEntityName(
-        inferEntityFromContext(sheetName, workbook.Props && workbook.Props.Title, workbook.SheetNames.join(" "))
+        inferEntityFromContext(
+          sourceName,
+          sheetName,
+          workbook.Props && workbook.Props.Title,
+          workbook.SheetNames.join(" ")
+        )
       );
 
       rows.slice(headerRowIndex + 1).forEach((row, offset) => {
@@ -1570,7 +1680,7 @@ function validateLogin(payload) {
       return { error: "Incorrect password." };
     }
 
-    return { value: email };
+    return { value: email, role: teamUser.role || "editor" };
   }
 
   if (!sharedPassword) {
@@ -1585,7 +1695,49 @@ function validateLogin(payload) {
     return { error: "Incorrect password." };
   }
 
-  return { value: email };
+  return { value: email, role: "editor" };
+}
+
+function validateTaskSubmission(payload, sessionUser) {
+  const clean = normalizeTask({
+    company: payload.company,
+    entity: payload.entity,
+    title: payload.title,
+    description: payload.description,
+    dueDate: payload.dueDate,
+    status: payload.status,
+    priority: payload.priority,
+    assignee: payload.assignee,
+    category: payload.category,
+    createdBy: sessionUser.email,
+    createdAt: new Date().toISOString()
+  });
+
+  if (!clean.title) {
+    return { error: "Task title is required." };
+  }
+
+  return { value: clean };
+}
+
+function validateTaskPatch(payload) {
+  const clean = {
+    company: String(payload.company || "").trim(),
+    entity: String(payload.entity || "").trim(),
+    title: String(payload.title || "").trim(),
+    description: String(payload.description || "").trim(),
+    dueDate: String(payload.dueDate || "").trim(),
+    status: String(payload.status || "Open").trim() || "Open",
+    priority: String(payload.priority || "Medium").trim() || "Medium",
+    assignee: String(payload.assignee || "").trim(),
+    category: String(payload.category || "").trim()
+  };
+
+  if (!clean.title) {
+    return { error: "Task title is required." };
+  }
+
+  return { value: clean };
 }
 
 function validateSubmission(payload, sessionUser) {
@@ -1700,6 +1852,20 @@ function requireAuth(request, response) {
   return user;
 }
 
+function requireEditor(request, response) {
+  const user = requireAuth(request, response);
+  if (!user) {
+    return null;
+  }
+
+  if (!canEdit(user)) {
+    sendJson(response, 403, { error: "Your account has view-only access." });
+    return null;
+  }
+
+  return user;
+}
+
 process.on("uncaughtException", (error) => {
   console.error("Uncaught exception:", error);
 });
@@ -1738,6 +1904,7 @@ const server = http.createServer(async (request, response) => {
       ),
       authMode: Object.keys(TEAM_USERS).length > 0 ? "individual" : "shared",
       teamUserCount: Object.keys(TEAM_USERS).length,
+      canEdit: canEdit(user),
       user
     });
     return;
@@ -1757,6 +1924,7 @@ const server = http.createServer(async (request, response) => {
       const sessionValue = signSession({
         email: validation.value,
         name: validation.value,
+        role: validation.role || "editor",
         expiresAt
       });
 
@@ -1767,7 +1935,8 @@ const server = http.createServer(async (request, response) => {
           message: "Signed in.",
           user: {
             email: validation.value,
-            name: validation.value
+            name: validation.value,
+            role: validation.role || "editor"
           }
         },
         {
@@ -1800,6 +1969,16 @@ const server = http.createServer(async (request, response) => {
     }
 
     sendJson(response, 200, { investments: readInvestments(), user });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/tasks") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    sendJson(response, 200, { tasks: readTasks(), user });
     return;
   }
 
@@ -1863,7 +2042,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/import-workbook") {
-    const user = requireAuth(request, response);
+    const user = requireEditor(request, response);
     if (!user) {
       return;
     }
@@ -1886,7 +2065,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       const buffer = Buffer.from(fileData, "base64");
-      const result = importWorkbookIntoInvestments(buffer, user);
+      const result = importWorkbookIntoInvestments(buffer, user, filename);
       sendJson(response, 200, {
         message: `Imported ${result.importedCount} update${result.importedCount === 1 ? "" : "s"} from workbook.`,
         ...result
@@ -1899,7 +2078,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/upload-document") {
-    const user = requireAuth(request, response);
+    const user = requireEditor(request, response);
     if (!user) {
       return;
     }
@@ -1942,7 +2121,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/investments") {
-    const user = requireAuth(request, response);
+    const user = requireEditor(request, response);
     if (!user) {
       return;
     }
@@ -1982,7 +2161,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "PATCH" && url.pathname.startsWith("/api/investments/")) {
-    const user = requireAuth(request, response);
+    const user = requireEditor(request, response);
     if (!user) {
       return;
     }
@@ -2012,7 +2191,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "DELETE" && url.pathname.startsWith("/api/investments/")) {
-    const user = requireAuth(request, response);
+    const user = requireEditor(request, response);
     if (!user) {
       return;
     }
@@ -2085,6 +2264,78 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 500, { error: error.message || "Email summarization failed." });
       return;
     }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/tasks") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const validation = validateTaskSubmission(payload, user);
+
+      if (validation.error) {
+        sendJson(response, 400, { error: validation.error });
+        return;
+      }
+
+      const task = saveTask(validation.value);
+      sendJson(response, 201, { task });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Task creation failed." });
+      return;
+    }
+  }
+
+  if (request.method === "PATCH" && url.pathname.startsWith("/api/tasks/")) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const taskId = url.pathname.split("/").pop();
+      const payload = await parseRequestBody(request);
+      const validation = validateTaskPatch(payload);
+
+      if (validation.error) {
+        sendJson(response, 400, { error: validation.error });
+        return;
+      }
+
+      const updated = updateTask(taskId, validation.value);
+      if (!updated) {
+        sendJson(response, 404, { error: "Task not found." });
+        return;
+      }
+
+      sendJson(response, 200, { task: updated });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Task update failed." });
+      return;
+    }
+  }
+
+  if (request.method === "DELETE" && url.pathname.startsWith("/api/tasks/")) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const taskId = url.pathname.split("/").pop();
+    const deleted = deleteTask(taskId);
+
+    if (!deleted) {
+      sendJson(response, 404, { error: "Task not found." });
+      return;
+    }
+
+    sendJson(response, 200, { message: "Task deleted." });
+    return;
   }
 
   if (request.method === "GET") {

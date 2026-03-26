@@ -13,6 +13,7 @@ const updatesList = document.getElementById("updatesList");
 const authStatus = document.getElementById("authStatus");
 const emailStatus = document.getElementById("emailStatus");
 const recipientStatus = document.getElementById("recipientStatus");
+const roleNotice = document.getElementById("roleNotice");
 const refreshButton = document.getElementById("refreshButton");
 const submitButton = document.getElementById("submitButton");
 const downloadCsvButton = document.getElementById("downloadCsvButton");
@@ -61,6 +62,13 @@ const companyFollowOnCapital = document.getElementById("companyFollowOnCapital")
 const companyValuationHistory = document.getElementById("companyValuationHistory");
 const companyTimeline = document.getElementById("companyTimeline");
 const closeCompanyPanelButton = document.getElementById("closeCompanyPanelButton");
+const taskForm = document.getElementById("taskForm");
+const taskMessage = document.getElementById("taskMessage");
+const saveTaskButton = document.getElementById("saveTaskButton");
+const cancelTaskEditButton = document.getElementById("cancelTaskEditButton");
+const editingTaskId = document.getElementById("editingTaskId");
+const tasksList = document.getElementById("tasksList");
+const companyTasks = document.getElementById("companyTasks");
 const researchDeckFeed = document.getElementById("researchDeckFeed");
 const researchNotesFeed = document.getElementById("researchNotesFeed");
 const researchDocumentsFeed = document.getElementById("researchDocumentsFeed");
@@ -73,6 +81,7 @@ let configuredEntities = [];
 let companyPerformanceMap = new Map();
 let entityPerformanceMap = new Map();
 let uploadedDocuments = [];
+let allTasks = [];
 
 function companyKey(value) {
   return String(value || "")
@@ -111,8 +120,12 @@ function setSignedInState(user) {
   appPanel.classList.toggle("hidden", !isSignedIn);
   logoutButton.classList.toggle("hidden", !isSignedIn);
   authStatus.textContent = isSignedIn
-    ? `Signed in as ${user.email}`
+    ? `Signed in as ${user.email}${user.role ? ` • ${user.role}` : ""}`
     : "Please sign in to view updates";
+}
+
+function canEditWorkspace() {
+  return !currentUser || currentUser.role !== "viewer";
 }
 
 function selectedDeckFile() {
@@ -161,6 +174,15 @@ function renderUploadedDocuments() {
       `
     )
     .join("");
+}
+
+function renderRoleState() {
+  const editable = canEditWorkspace();
+  form.classList.toggle("hidden", !editable);
+  taskForm.classList.toggle("hidden", !editable);
+  roleNotice.textContent = editable
+    ? "Editors can add investments, tasks, documents, and research."
+    : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
 }
 
 function currentFilters() {
@@ -643,6 +665,53 @@ function resetFormToCreateMode() {
   documentMessage.textContent = "";
 }
 
+function beginEditTask(taskId) {
+  const task = allTasks.find((item) => item.id === taskId);
+  if (!task) {
+    return;
+  }
+
+  editingTaskId.value = task.id;
+  taskForm.elements.title.value = task.title || "";
+  taskForm.elements.company.value = task.company || "";
+  taskForm.elements.entity.value = task.entity || "";
+  taskForm.elements.dueDate.value = task.dueDate || "";
+  taskForm.elements.priority.value = task.priority || "Medium";
+  taskForm.elements.category.value = task.category || "";
+  taskForm.elements.assignee.value = task.assignee || "";
+  taskForm.elements.status.value = task.status || "Open";
+  taskForm.elements.description.value = task.description || "";
+  saveTaskButton.textContent = "Save task changes";
+  cancelTaskEditButton.classList.remove("hidden");
+  taskMessage.textContent = `Editing task: ${task.title}`;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function resetTaskForm() {
+  taskForm.reset();
+  editingTaskId.value = "";
+  saveTaskButton.textContent = "Save task";
+  cancelTaskEditButton.classList.add("hidden");
+}
+
+async function deleteTaskById(taskId) {
+  if (!window.confirm("Delete this task?")) {
+    return;
+  }
+
+  taskMessage.textContent = "Deleting task...";
+  try {
+    await fetchJson(`/api/tasks/${taskId}`, { method: "DELETE" });
+    if (editingTaskId.value === taskId) {
+      resetTaskForm();
+    }
+    await loadTasks();
+    taskMessage.textContent = "Task deleted.";
+  } catch (error) {
+    taskMessage.textContent = error.message;
+  }
+}
+
 async function deleteInvestmentById(investmentId) {
   if (!window.confirm("Delete this investment update?")) {
     return;
@@ -673,6 +742,7 @@ function renderCompanyPanel() {
     companyDeckSummaries.innerHTML = "";
     companyDecisionLog.innerHTML = "";
     companyNextSteps.innerHTML = "";
+    companyTasks.innerHTML = "";
     companyFollowOnCapital.innerHTML = "";
     companyValuationHistory.innerHTML = "";
     companyTimeline.innerHTML = "";
@@ -710,6 +780,9 @@ function renderCompanyPanel() {
   const decisionUpdates = companyUpdates.filter(
     (investment) => investment.documentLinks || investment.decisionDate || investment.decisionType || investment.decisionSummary
   );
+  const relatedTasks = allTasks
+    .filter((task) => companyKey(task.company) === companyKey(selectedCompany))
+    .sort((left, right) => new Date(left.dueDate || left.createdAt) - new Date(right.dueDate || right.createdAt));
   const valuationUpdates = companyUpdates.filter(
     (investment) =>
       investment.valuationDate || investment.officialValue || investment.internalValue || investment.exitValue
@@ -835,6 +908,20 @@ function renderCompanyPanel() {
         .map((nextStep) => `<li>${escapeHtml(nextStep)}</li>`)
         .join("")}</ul>`
     : '<p class="update-meta">No next steps recorded yet.</p>';
+
+  companyTasks.innerHTML = relatedTasks.length
+    ? relatedTasks
+        .map(
+          (task) => `
+            <article class="timeline-card timeline-card-compact">
+              <p class="dashboard-label">${escapeHtml(task.title)}</p>
+              <p class="update-meta">${escapeHtml(task.status)} • Due ${escapeHtml(task.dueDate || "not set")} • ${escapeHtml(task.assignee || "Unassigned")}</p>
+              <p class="highlight-value">${escapeHtml(task.description || "No task details.")}</p>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No company tasks yet.</p>';
 
   companyDeckSummaries.innerHTML = deckSummaries.length
     ? deckSummaries
@@ -1119,6 +1206,50 @@ function renderUpdates(investments) {
     .join("");
 }
 
+function renderTasks() {
+  const filteredTasks = allTasks.filter((task) => {
+    const filters = currentFilters();
+    const matchesEntity = !filters.entity || task.entity === filters.entity;
+    const matchesSearch =
+      !filters.search ||
+      [task.title, task.company, task.description, task.assignee, task.category]
+        .join(" ")
+        .toLowerCase()
+        .includes(filters.search);
+    const matchesOwner = !filters.owner || task.assignee === filters.owner;
+    return matchesEntity && matchesSearch && matchesOwner;
+  });
+
+  if (!filteredTasks.length) {
+    tasksList.innerHTML = '<p class="update-meta">No tasks yet.</p>';
+    return;
+  }
+
+  tasksList.innerHTML = filteredTasks
+    .map(
+      (task) => `
+        <article class="update-card">
+          <div class="update-head">
+            <h3>${escapeHtml(task.title)}</h3>
+            <span class="status-chip">${escapeHtml(task.status)}</span>
+          </div>
+          <p class="update-meta">${escapeHtml(task.company || "General")} • ${escapeHtml(task.entity || "No entity")} • ${escapeHtml(task.priority)}</p>
+          <p class="update-meta">Due ${escapeHtml(task.dueDate || "not set")} • Assignee: ${escapeHtml(task.assignee || "Not set")} • Category: ${escapeHtml(task.category || "General")}</p>
+          <p class="update-notes">${escapeHtml(task.description || "No task details.")}</p>
+          ${
+            canEditWorkspace()
+              ? `<div class="card-actions">
+                  <button class="secondary-button card-action-button" type="button" data-action="edit-task" data-task-id="${escapeHtml(task.id)}">Edit</button>
+                  <button class="secondary-button card-action-button danger-button" type="button" data-action="delete-task" data-task-id="${escapeHtml(task.id)}">Delete</button>
+                </div>`
+              : ""
+          }
+        </article>
+      `
+    )
+    .join("");
+}
+
 function renderResearchLibrary(investments) {
   const latestDecks = investments.filter((investment) => investment.deckSummary).slice(0, 6);
   const latestNotes = investments.filter((investment) => investment.notes).slice(0, 6);
@@ -1193,12 +1324,14 @@ function renderResearchLibrary(investments) {
 function renderAll() {
   companyPerformanceMap = buildCompanyPerformanceMap(allInvestments);
   entityPerformanceMap = buildEntityPerformanceMap(allInvestments);
+  renderRoleState();
   renderCompanySuggestions();
   renderFilterOptions();
   const filteredInvestments = filterInvestments(allInvestments);
   renderDashboard(filteredInvestments);
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
+  renderTasks();
   renderCompanyPanel();
 }
 
@@ -1217,7 +1350,7 @@ async function loadConfig() {
 
   loginCopy.textContent =
     config.authMode === "individual"
-      ? `Use your email and your personal workspace password to sign in. ${config.teamUserCount} team login${config.teamUserCount === 1 ? "" : "s"} configured.`
+      ? `Use your email and your personal workspace password to sign in. ${config.teamUserCount} team login${config.teamUserCount === 1 ? "" : "s"} configured. Add :viewer to a TEAM_USERS entry for view-only access.`
       : "Use your email and the shared workspace password to unlock updates.";
 
   if (!config.aiConfigured) {
@@ -1233,6 +1366,26 @@ async function loadConfig() {
   if (!config.authConfigured) {
     loginMessage.textContent =
       "The server still needs SESSION_SECRET plus TEAM_PASSWORD or TEAM_USERS in Render.";
+  }
+
+  roleNotice.textContent = config.canEdit
+    ? "Editors can add investments, tasks, documents, and research."
+    : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
+}
+
+async function loadTasks() {
+  try {
+    const data = await fetchJson("/api/tasks");
+    allTasks = data.tasks || [];
+    renderAll();
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      tasksList.innerHTML = "";
+      return;
+    }
+
+    throw error;
   }
 }
 
@@ -1382,6 +1535,50 @@ async function loadUpdates() {
     throw error;
   }
 }
+
+taskForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  taskMessage.textContent = "Saving task...";
+  saveTaskButton.disabled = true;
+
+  const formData = new FormData(taskForm);
+  const payload = {
+    title: formData.get("title"),
+    company: formData.get("company"),
+    entity: formData.get("entity"),
+    dueDate: formData.get("dueDate"),
+    priority: formData.get("priority"),
+    category: formData.get("category"),
+    assignee: formData.get("assignee"),
+    status: formData.get("status"),
+    description: formData.get("description")
+  };
+
+  try {
+    const editingId = editingTaskId.value;
+    await fetchJson(editingId ? `/api/tasks/${editingId}` : "/api/tasks", {
+      method: editingId ? "PATCH" : "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    taskMessage.textContent = editingId ? "Task updated." : "Task saved.";
+    resetTaskForm();
+    await loadTasks();
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      taskMessage.textContent = "Your session expired. Please sign in again.";
+      return;
+    }
+
+    taskMessage.textContent = error.message;
+  } finally {
+    saveTaskButton.disabled = false;
+  }
+});
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1594,7 +1791,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 refreshButton.addEventListener("click", () => {
-  loadUpdates().catch((error) => {
+  Promise.all([loadUpdates(), loadTasks()]).catch((error) => {
     formMessage.textContent = error.message;
   });
 });
@@ -1651,6 +1848,11 @@ cancelEditButton.addEventListener("click", () => {
   formMessage.textContent = "Edit canceled.";
 });
 
+cancelTaskEditButton.addEventListener("click", () => {
+  resetTaskForm();
+  taskMessage.textContent = "Task edit canceled.";
+});
+
 [entityFilter, searchFilter, statusFilter, stageFilter, ownerFilter].forEach((element) => {
   element.addEventListener("input", renderAll);
   element.addEventListener("change", renderAll);
@@ -1699,7 +1901,26 @@ updatesList.addEventListener("click", (event) => {
   }
 });
 
-Promise.all([loadConfig(), loadUpdates()]).catch((error) => {
+tasksList.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-action]");
+  if (!target) {
+    return;
+  }
+
+  const action = target.dataset.action;
+  const taskId = target.dataset.taskId || "";
+
+  if (action === "edit-task" && taskId) {
+    beginEditTask(taskId);
+    return;
+  }
+
+  if (action === "delete-task" && taskId) {
+    deleteTaskById(taskId);
+  }
+});
+
+Promise.all([loadConfig(), loadUpdates(), loadTasks()]).catch((error) => {
   if (error.status === 401) {
     setSignedInState(null);
     return;

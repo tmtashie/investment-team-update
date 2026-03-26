@@ -183,6 +183,89 @@
           <div id="entityPerformanceCards" class="dashboard-grid"></div>
         </section>
 
+        <section id="tasksSection" class="panel">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>Tasks and reminders</h2>
+              <p class="section-copy">Track follow-ups, valuation reviews, and internal deadlines across the portfolio.</p>
+            </div>
+          </div>
+          <p id="roleNotice" class="form-message" aria-live="polite"></p>
+          <form id="taskForm" class="investment-form">
+            <input id="editingTaskId" name="editingTaskId" type="hidden" />
+            <div class="two-up">
+              <label>
+                Task title
+                <input id="taskTitleField" name="title" type="text" placeholder="Schedule valuation review call" />
+              </label>
+              <label>
+                Company
+                <input id="taskCompanyField" name="company" type="text" placeholder="Company or leave blank for general task" list="companySuggestions" />
+              </label>
+            </div>
+            <div class="four-up">
+              <label>
+                Entity
+                <select id="taskEntityField" name="entity">
+                  <option value="">Select entity</option>
+                  <option value="Beaman Ventures">Beaman Ventures</option>
+                  <option value="Lee Beaman">Lee Beaman</option>
+                  <option value="Katherine Trust">Katherine Trust</option>
+                  <option value="Natalie Trust">Natalie Trust</option>
+                </select>
+              </label>
+              <label>
+                Due date
+                <input id="taskDueDateField" name="dueDate" type="date" />
+              </label>
+              <label>
+                Priority
+                <select id="taskPriorityField" name="priority">
+                  <option value="Low">Low</option>
+                  <option value="Medium" selected>Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </label>
+              <label>
+                Category
+                <select id="taskCategoryField" name="category">
+                  <option value="">Select category</option>
+                  <option value="Follow-up">Follow-up</option>
+                  <option value="Valuation">Valuation</option>
+                  <option value="Research">Research</option>
+                  <option value="Documents">Documents</option>
+                  <option value="Decision">Decision</option>
+                </select>
+              </label>
+            </div>
+            <div class="two-up">
+              <label>
+                Assignee
+                <input id="taskAssigneeField" name="assignee" type="text" placeholder="Owner or teammate" />
+              </label>
+              <label>
+                Status
+                <select id="taskStatusField" name="status">
+                  <option value="Open">Open</option>
+                  <option value="In progress">In progress</option>
+                  <option value="Blocked">Blocked</option>
+                  <option value="Completed">Completed</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              Task details
+              <textarea id="taskDescriptionField" name="description" rows="3" placeholder="Describe the next action, dependency, or reminder."></textarea>
+            </label>
+            <div class="form-actions">
+              <button id="saveTaskButton" type="submit">Save task</button>
+              <button id="cancelTaskEditButton" type="button" class="secondary-button hidden">Cancel task edit</button>
+            </div>
+            <p id="taskMessage" class="form-message" aria-live="polite"></p>
+          </form>
+          <div id="tasksList" class="updates-list"></div>
+        </section>
+
         <section id="addInvestmentSection" class="panel">
           <div class="panel-header panel-header-stack">
             <div>
@@ -651,6 +734,10 @@
             <section class="company-detail-card">
               <h3>Open next steps</h3>
               <div id="companyNextSteps" class="company-next-steps"></div>
+            </section>
+            <section class="company-detail-card">
+              <h3>Tasks and reminders</h3>
+              <div id="companyTasks" class="company-rich-text"></div>
             </section>
             <section class="company-detail-card">
               <h3>Follow-on capital</h3>
