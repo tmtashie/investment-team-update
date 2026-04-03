@@ -8,6 +8,7 @@ const logoutButton = document.getElementById("logoutButton");
 const menuToggleButton = document.getElementById("menuToggleButton");
 const workspaceMenu = document.getElementById("workspaceMenu");
 const form = document.getElementById("investmentForm");
+const loadCompanyDetailsButton = document.getElementById("loadCompanyDetailsButton");
 const formMessage = document.getElementById("formMessage");
 const updatesList = document.getElementById("updatesList");
 const authStatus = document.getElementById("authStatus");
@@ -34,6 +35,8 @@ const deckMessage = document.getElementById("deckMessage");
 const summarizeDeckButton = document.getElementById("summarizeDeckButton");
 const deckDropZone = document.getElementById("deckDropZone");
 const deckFileName = document.getElementById("deckFileName");
+const capitalActivityList = document.getElementById("capitalActivityList");
+const addCapitalActivityButton = document.getElementById("addCapitalActivityButton");
 const documentFile = document.getElementById("documentFile");
 const documentDropZone = document.getElementById("documentDropZone");
 const documentMessage = document.getElementById("documentMessage");
@@ -46,6 +49,12 @@ const summarizeEmailButton = document.getElementById("summarizeEmailButton");
 const emailMessage = document.getElementById("emailMessage");
 const dashboardCards = document.getElementById("dashboardCards");
 const entityPerformanceCards = document.getElementById("entityPerformanceCards");
+const entityDetailSection = document.getElementById("entityDetailSection");
+const entityDetailTitle = document.getElementById("entityDetailTitle");
+const entityDetailCopy = document.getElementById("entityDetailCopy");
+const entityDetailSummary = document.getElementById("entityDetailSummary");
+const entityDetailInvestments = document.getElementById("entityDetailInvestments");
+const closeEntityDetailButton = document.getElementById("closeEntityDetailButton");
 const entityFilter = document.getElementById("entityFilter");
 const searchFilter = document.getElementById("searchFilter");
 const statusFilter = document.getElementById("statusFilter");
@@ -92,6 +101,7 @@ let entityPerformanceMap = new Map();
 let uploadedDocuments = [];
 let allTasks = [];
 let activeWorkspaceView = "home";
+let selectedEntity = "";
 
 function companyKey(value) {
   return String(value || "")
@@ -149,6 +159,12 @@ function showWorkspaceView(viewName) {
         return;
       }
     }
+    if (section.id === "entityDetailSection" && activeWorkspaceView === "entity") {
+      if (!selectedEntity) {
+        section.classList.add("hidden");
+        return;
+      }
+    }
     section.classList.toggle("hidden", !matchesView);
   });
 
@@ -169,6 +185,116 @@ function updateDeckFileLabel(file) {
   deckFileName.textContent = file
     ? `Selected: ${file.name}`
     : "No file selected yet";
+}
+
+function normalizeCapitalActivityRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      date: String((row && row.date) || "").trim(),
+      type: String((row && row.type) || "").trim(),
+      amount: String((row && row.amount) || "").trim(),
+      notes: String((row && row.notes) || "").trim()
+    }))
+    .filter((row) => row.date || row.type || row.amount || row.notes);
+}
+
+function buildLegacyCapitalActivityRows(investment) {
+  const rows = [];
+
+  if (investment.capitalCallDate || investment.capitalCallAmount) {
+    rows.push({
+      date: investment.capitalCallDate || "",
+      type: "Capital Call",
+      amount: investment.capitalCallAmount || "",
+      notes: ""
+    });
+  }
+
+  if (investment.distributionDate || investment.distributionAmount) {
+    rows.push({
+      date: investment.distributionDate || "",
+      type: "Distribution",
+      amount: investment.distributionAmount || "",
+      notes: ""
+    });
+  }
+
+  return rows;
+}
+
+function renderCapitalActivityRows(rows = []) {
+  const normalizedRows = normalizeCapitalActivityRows(rows);
+  const rowsToRender = normalizedRows.length ? normalizedRows : [{ date: "", type: "Capital Call", amount: "", notes: "" }];
+
+  capitalActivityList.innerHTML = rowsToRender
+    .map(
+      (row, index) => `
+        <article class="capital-activity-row" data-index="${index}">
+          <div class="capital-activity-grid">
+            <label>
+              Date
+              <input type="date" data-capital-field="date" value="${escapeHtml(row.date)}" />
+            </label>
+            <label>
+              Type
+              <select data-capital-field="type">
+                <option value="Capital Call" ${row.type === "Capital Call" ? "selected" : ""}>Capital Call</option>
+                <option value="Distribution" ${row.type === "Distribution" ? "selected" : ""}>Distribution</option>
+                <option value="Dividend" ${row.type === "Dividend" ? "selected" : ""}>Dividend</option>
+                <option value="Return of Capital" ${row.type === "Return of Capital" ? "selected" : ""}>Return of Capital</option>
+                <option value="Partial Exit" ${row.type === "Partial Exit" ? "selected" : ""}>Partial Exit</option>
+                <option value="Fee" ${row.type === "Fee" ? "selected" : ""}>Fee</option>
+              </select>
+            </label>
+            <label>
+              Amount
+              <input type="number" min="0" step="0.01" data-capital-field="amount" value="${escapeHtml(row.amount)}" placeholder="250000" />
+            </label>
+          </div>
+          <div class="capital-activity-row-footer">
+            <label>
+              Notes
+              <input type="text" data-capital-field="notes" value="${escapeHtml(row.notes)}" placeholder="Optional note about this cash flow" />
+            </label>
+            <button type="button" class="secondary-button inline-action-button danger-button" data-action="remove-capital-activity" data-index="${index}">
+              Remove
+            </button>
+          </div>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function collectCapitalActivityRows() {
+  return Array.from(capitalActivityList.querySelectorAll(".capital-activity-row"))
+    .map((row) => ({
+      date: row.querySelector('[data-capital-field="date"]')?.value || "",
+      type: row.querySelector('[data-capital-field="type"]')?.value || "",
+      amount: row.querySelector('[data-capital-field="amount"]')?.value || "",
+      notes: row.querySelector('[data-capital-field="notes"]')?.value || ""
+    }))
+    .filter((row) => row.date || row.type || row.amount || row.notes);
+}
+
+function summarizeCapitalActivity(investment) {
+  const rows = normalizeCapitalActivityRows(
+    investment.capitalActivity && investment.capitalActivity.length
+      ? investment.capitalActivity
+      : buildLegacyCapitalActivityRows(investment)
+  );
+
+  if (!rows.length) {
+    return "";
+  }
+
+  return rows
+    .slice(0, 3)
+    .map((row) => {
+      const amount = row.amount ? `${investment.currency || "USD"} ${row.amount}` : "Amount not set";
+      return `${row.type || "Activity"} ${amount}${row.date ? ` on ${row.date}` : ""}`;
+    })
+    .join(" • ");
 }
 
 function formatDisplayDate(value) {
@@ -231,6 +357,60 @@ function currentFilters() {
 function findCompanyRecord(company) {
   const key = companyKey(company);
   return allCompanies.find((record) => record.companyKey === key) || null;
+}
+
+function hydrateFormFromCompanyRecord(company) {
+  const companyRecord = findCompanyRecord(company);
+  if (!companyRecord || !companyRecord.updates || !companyRecord.updates.length) {
+    return false;
+  }
+
+  const latest = companyRecord.updates[0];
+  const assignIfBlank = (fieldName, value) => {
+    const field = form.elements[fieldName];
+    if (!field || field.value || !value) {
+      return;
+    }
+    field.value = value;
+  };
+
+  assignIfBlank("entity", latest.entity || "");
+  assignIfBlank("currency", latest.currency || "USD");
+  assignIfBlank("stage", latest.stage || "");
+  assignIfBlank("status", latest.status || "");
+  assignIfBlank("owner", latest.owner || "");
+  assignIfBlank("nextStep", latest.nextStep || "");
+  assignIfBlank("contactName", latest.contactName || "");
+  assignIfBlank("contactPosition", latest.contactPosition || "");
+  assignIfBlank("contactEmail", latest.contactEmail || "");
+  assignIfBlank("contactPhone", latest.contactPhone || "");
+  assignIfBlank("ownershipPercent", latest.ownershipPercent || "");
+  assignIfBlank("entityOwnershipPercent", latest.entityOwnershipPercent || "");
+  assignIfBlank("ownershipNotes", latest.ownershipNotes || "");
+  assignIfBlank("followOnCapitalAmount", latest.followOnCapitalAmount || "");
+  assignIfBlank("followOnCapitalStatus", latest.followOnCapitalStatus || "");
+  assignIfBlank("followOnCapitalNotes", latest.followOnCapitalNotes || "");
+
+  if (!notesField.value && latest.notes) {
+    notesField.value = latest.notes;
+  }
+
+  if (!deckSummaryField.value && latest.deckSummary) {
+    deckSummaryField.value = latest.deckSummary;
+  }
+
+  if (!editingInvestmentId.value && !collectCapitalActivityRows().length) {
+    const activityRows = normalizeCapitalActivityRows(
+      latest.capitalActivity && latest.capitalActivity.length
+        ? latest.capitalActivity
+        : buildLegacyCapitalActivityRows(latest)
+    );
+    if (activityRows.length) {
+      renderCapitalActivityRows(activityRows);
+    }
+  }
+
+  return true;
 }
 
 function filterInvestments(investments) {
@@ -426,14 +606,29 @@ function pickLatestNumericValue(updates, fieldName) {
 }
 
 function buildCompanyPerformance(updates) {
-  const investedCapital = updates.reduce(
-    (sum, update) => sum + toNumber(update.capitalCallAmount),
-    0
-  );
-  const distributions = updates.reduce(
-    (sum, update) => sum + toNumber(update.distributionAmount),
-    0
-  );
+  const normalizedActivities = updates.flatMap((update) => {
+    const activityRows = normalizeCapitalActivityRows(
+      update.capitalActivity && update.capitalActivity.length
+        ? update.capitalActivity
+        : buildLegacyCapitalActivityRows(update)
+    );
+
+    return activityRows.map((activity) => ({
+      ...activity,
+      fallbackDate: parseDateValue(update.createdAt, null)
+    }));
+  });
+
+  const investedCapital = normalizedActivities.reduce((sum, activity) => {
+    const type = String(activity.type || "").toLowerCase();
+    const amount = toNumber(activity.amount);
+    return type.includes("capital call") || type.includes("fee") ? sum + amount : sum;
+  }, 0);
+  const distributions = normalizedActivities.reduce((sum, activity) => {
+    const type = String(activity.type || "").toLowerCase();
+    const amount = toNumber(activity.amount);
+    return !type.includes("capital call") && !type.includes("fee") ? sum + amount : sum;
+  }, 0);
   const officialMark = pickLatestNumericValue(updates, "officialValue");
   const internalMark = pickLatestNumericValue(updates, "internalValue");
   const exitMark = pickLatestNumericValue(updates, "exitValue");
@@ -441,25 +636,21 @@ function buildCompanyPerformance(updates) {
     officialMark.date || internalMark.date || exitMark.date || new Date();
 
   const baseCashFlows = [];
-  updates.forEach((update) => {
-    const capitalCallAmount = toNumber(update.capitalCallAmount);
-    const distributionAmount = toNumber(update.distributionAmount);
-    const capitalCallDate = parseDateValue(
-      update.capitalCallDate,
-      parseDateValue(update.createdAt, null)
-    );
-    const distributionDate = parseDateValue(
-      update.distributionDate,
-      parseDateValue(update.createdAt, null)
-    );
+  normalizedActivities.forEach((activity) => {
+    const amount = toNumber(activity.amount);
+    const date = parseDateValue(activity.date, activity.fallbackDate);
+    const type = String(activity.type || "").toLowerCase();
 
-    if (capitalCallAmount > 0 && capitalCallDate) {
-      baseCashFlows.push({ date: capitalCallDate, amount: -capitalCallAmount });
+    if (!amount || !date) {
+      return;
     }
 
-    if (distributionAmount > 0 && distributionDate) {
-      baseCashFlows.push({ date: distributionDate, amount: distributionAmount });
+    if (type.includes("capital call") || type.includes("fee")) {
+      baseCashFlows.push({ date, amount: -amount });
+      return;
     }
+
+    baseCashFlows.push({ date, amount });
   });
 
   const buildView = (terminalValue) => {
@@ -597,7 +788,7 @@ function renderDashboard(investments) {
   entityPerformanceCards.innerHTML = entityCards
     .map(
       ({ entity, performance }) => `
-        <article class="dashboard-card entity-performance-card">
+        <article class="dashboard-card entity-performance-card" data-entity="${escapeHtml(entity)}">
           <p class="dashboard-label">${escapeHtml(entity)}</p>
           <p class="dashboard-value">${escapeHtml(formatMoney(performance.investedCapital))}</p>
           <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(performance.officialValue))}</p>
@@ -607,6 +798,67 @@ function renderDashboard(investments) {
       `
     )
     .join("");
+}
+
+function renderEntityDetail() {
+  if (!selectedEntity) {
+    entityDetailSection.classList.add("hidden");
+    entityDetailSummary.innerHTML = "";
+    entityDetailInvestments.innerHTML = "";
+    entityDetailTitle.textContent = "Entity detail";
+    entityDetailCopy.textContent = "";
+    return;
+  }
+
+  const investments = allInvestments.filter((investment) => investment.entity === selectedEntity);
+  const performance = entityPerformanceMap.get(selectedEntity) || buildCompanyPerformance(investments);
+
+  entityDetailSection.classList.remove("hidden");
+  entityDetailTitle.textContent = selectedEntity;
+  entityDetailCopy.textContent = `${investments.length} investment update${investments.length === 1 ? "" : "s"} tracked under this entity.`;
+  entityDetailSummary.innerHTML = [
+    { label: "Invested capital", value: formatMoney(performance.investedCapital) },
+    { label: "Distributions", value: formatMoney(performance.distributions) },
+    { label: "Official NAV", value: formatMoney(performance.officialValue) },
+    { label: "Official XIRR", value: formatPercent(performance.official.xirr) },
+    { label: "Official MOIC", value: formatTurns(performance.official.moic) },
+    { label: "Current investments", value: String(investments.length) }
+  ]
+    .map(
+      (item) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="dashboard-value">${escapeHtml(item.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  entityDetailInvestments.innerHTML = investments.length
+    ? investments
+        .map((investment) => {
+          const companyPerformance =
+            companyPerformanceMap.get(companyKey(investment.company)) || buildCompanyPerformance([investment]);
+          return `
+            <article class="update-card">
+              <div class="update-head">
+                <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}">
+                  ${escapeHtml(investment.company)}
+                </button>
+                <span class="status-chip">${escapeHtml(investment.status || "Update")}</span>
+              </div>
+              <p class="update-meta">${escapeHtml(investment.stage || "Stage not set")} • Owner: ${escapeHtml(investment.owner || "Not set")}</p>
+              <p class="update-meta">Official NAV ${escapeHtml(formatMoney(companyPerformance.officialValue))} • XIRR ${escapeHtml(formatPercent(companyPerformance.official.xirr))}</p>
+              <p class="update-notes">${escapeHtml(summarizeText(investment.notes, "No notes provided."))}</p>
+              <div class="card-actions">
+                <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}">View company</button>
+                <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="update-meta">No investments are assigned to this entity yet.</p>';
 }
 
 function renderFilterOptions() {
@@ -678,10 +930,13 @@ function beginEditInvestment(investmentId) {
     : "";
   notesField.value = investment.notes || "";
   deckSummaryField.value = investment.deckSummary || "";
-  form.elements.capitalCallDate.value = investment.capitalCallDate || "";
-  form.elements.capitalCallAmount.value = investment.capitalCallAmount || "";
-  form.elements.distributionDate.value = investment.distributionDate || "";
-  form.elements.distributionAmount.value = investment.distributionAmount || "";
+  renderCapitalActivityRows(
+    normalizeCapitalActivityRows(
+      investment.capitalActivity && investment.capitalActivity.length
+        ? investment.capitalActivity
+        : buildLegacyCapitalActivityRows(investment)
+    )
+  );
   form.elements.valuationDate.value = investment.valuationDate || "";
   form.elements.officialValue.value = investment.officialValue || "";
   form.elements.internalValue.value = investment.internalValue || "";
@@ -701,6 +956,7 @@ function beginEditInvestment(investmentId) {
   submitButton.textContent = "Save changes";
   cancelEditButton.classList.remove("hidden");
   formMessage.textContent = `Editing ${investment.company}.`;
+  showWorkspaceView("capture");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -716,6 +972,7 @@ function resetFormToCreateMode() {
   uploadedDocuments = [];
   renderUploadedDocuments();
   documentMessage.textContent = "";
+  renderCapitalActivityRows([]);
 }
 
 function beginEditTask(taskId) {
@@ -1130,16 +1387,8 @@ function renderCompanyPanel() {
             } • Submitted by: ${escapeHtml(investment.submittedBy || "Unknown")}
           </p>
           ${
-            investment.capitalCallAmount || investment.distributionAmount
-              ? `<p class="update-meta">Cash activity: ${
-                  investment.capitalCallAmount
-                    ? `Call ${escapeHtml(investment.currency)} ${escapeHtml(investment.capitalCallAmount)} on ${escapeHtml(investment.capitalCallDate || "date not set")}`
-                    : "No capital call"
-                } • ${
-                  investment.distributionAmount
-                    ? `Distribution ${escapeHtml(investment.currency)} ${escapeHtml(investment.distributionAmount)} on ${escapeHtml(investment.distributionDate || "date not set")}`
-                    : "No distribution"
-                }</p>`
+            summarizeCapitalActivity(investment)
+              ? `<p class="update-meta">Cash activity: ${escapeHtml(summarizeCapitalActivity(investment))}</p>`
               : ""
           }
           ${
@@ -1250,16 +1499,8 @@ function renderUpdates(investments) {
             )}
           </p>
           ${
-            investment.capitalCallAmount || investment.distributionAmount
-              ? `<p class="update-meta">Cash activity: ${
-                  investment.capitalCallAmount
-                    ? `Call ${escapeHtml(investment.currency)} ${escapeHtml(investment.capitalCallAmount)}`
-                    : "No call"
-                } • ${
-                  investment.distributionAmount
-                    ? `Distribution ${escapeHtml(investment.currency)} ${escapeHtml(investment.distributionAmount)}`
-                    : "No distribution"
-                }</p>`
+            summarizeCapitalActivity(investment)
+              ? `<p class="update-meta">Cash activity: ${escapeHtml(summarizeCapitalActivity(investment))}</p>`
               : ""
           }
           <p class="update-meta">
@@ -1436,6 +1677,7 @@ function renderAll() {
   renderUpdates(filteredInvestments);
   renderTasks();
   renderCompanyPanel();
+  renderEntityDetail();
 }
 
 async function loadConfig() {
@@ -1929,10 +2171,7 @@ form.addEventListener("submit", async (event) => {
     recipients,
     notes: formData.get("notes"),
     deckSummary: formData.get("deckSummary"),
-    capitalCallDate: formData.get("capitalCallDate"),
-    capitalCallAmount: formData.get("capitalCallAmount"),
-    distributionDate: formData.get("distributionDate"),
-    distributionAmount: formData.get("distributionAmount"),
+    capitalActivity: collectCapitalActivityRows(),
     valuationDate: formData.get("valuationDate"),
     officialValue: formData.get("officialValue"),
     internalValue: formData.get("internalValue"),
@@ -1986,6 +2225,49 @@ refreshButton.addEventListener("click", () => {
   Promise.all([loadUpdates(), loadTasks()]).catch((error) => {
     formMessage.textContent = error.message;
   });
+});
+
+addCapitalActivityButton.addEventListener("click", () => {
+  const rows = collectCapitalActivityRows();
+  rows.push({ date: "", type: "Capital Call", amount: "", notes: "" });
+  renderCapitalActivityRows(rows);
+});
+
+capitalActivityList.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-action='remove-capital-activity']");
+  if (!target) {
+    return;
+  }
+
+  const index = Number(target.dataset.index);
+  const rows = collectCapitalActivityRows().filter((_, rowIndex) => rowIndex !== index);
+  renderCapitalActivityRows(rows);
+});
+
+loadCompanyDetailsButton.addEventListener("click", () => {
+  const company = String(form.elements.company.value || "").trim();
+  if (!company) {
+    formMessage.textContent = "Enter a company name first, then load the latest saved details.";
+    return;
+  }
+
+  const hydrated = hydrateFormFromCompanyRecord(company);
+  formMessage.textContent = hydrated
+    ? `Loaded the latest saved details for ${company}.`
+    : "No saved company record was found to load.";
+});
+
+form.elements.company.addEventListener("change", () => {
+  if (editingInvestmentId.value) {
+    return;
+  }
+
+  const company = String(form.elements.company.value || "").trim();
+  if (!company) {
+    return;
+  }
+
+  hydrateFormFromCompanyRecord(company);
 });
 
 downloadCsvButton.addEventListener("click", () => {
@@ -2109,6 +2391,24 @@ closeCompanyPanelButton.addEventListener("click", () => {
   showWorkspaceView("portfolio");
 });
 
+closeEntityDetailButton.addEventListener("click", () => {
+  selectedEntity = "";
+  renderEntityDetail();
+  showWorkspaceView("home");
+});
+
+entityPerformanceCards.addEventListener("click", (event) => {
+  const card = event.target.closest("[data-entity]");
+  if (!card) {
+    return;
+  }
+
+  selectedEntity = card.dataset.entity || "";
+  renderEntityDetail();
+  showWorkspaceView("entity");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
 companyDecisionLog.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action='delete-company-document']");
   if (!target) {
@@ -2175,3 +2475,4 @@ Promise.all([loadConfig(), loadUpdates(), loadTasks()]).catch((error) => {
 });
 
 renderUploadedDocuments();
+renderCapitalActivityRows([]);

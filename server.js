@@ -462,6 +462,21 @@ function normalizeInvestment(entry) {
     });
   }
 
+  const normalizedCapitalActivity = normalizeStructuredRows(
+    entry.capitalActivity,
+    fallbackCapitalActivity
+  );
+  const latestCapitalCall = normalizedCapitalActivity.find((activity) =>
+    String(activity.type || "")
+      .toLowerCase()
+      .includes("capital call")
+  );
+  const latestDistribution = normalizedCapitalActivity.find((activity) =>
+    String(activity.type || "")
+      .toLowerCase()
+      .includes("distribution")
+  );
+
   return {
     id: investmentId,
     company: String(entry.company || "").trim(),
@@ -475,10 +490,10 @@ function normalizeInvestment(entry) {
     nextStep: String(entry.nextStep || "").trim(),
     notes,
     deckSummary,
-    capitalCallDate,
-    capitalCallAmount,
-    distributionDate,
-    distributionAmount,
+    capitalCallDate: capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
+    capitalCallAmount: capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
+    distributionDate: distributionDate || (latestDistribution ? latestDistribution.date : ""),
+    distributionAmount: distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
     valuationDate,
     officialValue,
     internalValue,
@@ -499,7 +514,7 @@ function normalizeInvestment(entry) {
     decisionType,
     decisionSummary,
     researchEntries: normalizeStructuredRows(entry.researchEntries, fallbackResearchEntries),
-    capitalActivity: normalizeStructuredRows(entry.capitalActivity, fallbackCapitalActivity),
+    capitalActivity: normalizedCapitalActivity,
     valuationHistory: normalizeStructuredRows(entry.valuationHistory, fallbackValuationHistory),
     ownershipHistory: normalizeStructuredRows(entry.ownershipHistory, fallbackOwnershipHistory),
     followOnHistory: normalizeStructuredRows(entry.followOnHistory, fallbackFollowOnHistory),
@@ -2223,6 +2238,7 @@ function validateSubmission(payload, sessionUser) {
     nextStep: payload.nextStep,
     notes: payload.notes,
     deckSummary: payload.deckSummary,
+    capitalActivity: payload.capitalActivity,
     capitalCallDate: payload.capitalCallDate,
     capitalCallAmount: payload.capitalCallAmount,
     distributionDate: payload.distributionDate,
@@ -2278,6 +2294,7 @@ function validateInvestmentPatch(payload) {
     nextStep: String(payload.nextStep || "").trim(),
     notes: String(payload.notes || "").trim(),
     deckSummary: String(payload.deckSummary || "").trim(),
+    capitalActivity: normalizeStructuredRows(payload.capitalActivity),
     capitalCallDate: String(payload.capitalCallDate || "").trim(),
     capitalCallAmount: String(payload.capitalCallAmount || "").trim(),
     distributionDate: String(payload.distributionDate || "").trim(),

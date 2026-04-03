@@ -120,6 +120,20 @@
           <div id="entityPerformanceCards" class="dashboard-grid"></div>
         </section>
 
+        <section id="entityDetailSection" class="panel workspace-view hidden" data-view="entity">
+          <div class="panel-header">
+            <div>
+              <h2 id="entityDetailTitle">Entity detail</h2>
+              <p id="entityDetailCopy" class="section-copy"></p>
+            </div>
+            <button id="closeEntityDetailButton" type="button" class="secondary-button">
+              Back to home
+            </button>
+          </div>
+          <div id="entityDetailSummary" class="dashboard-grid"></div>
+          <div id="entityDetailInvestments" class="updates-list"></div>
+        </section>
+
         <section id="tasksSection" class="panel workspace-view hidden" data-view="tasks">
           <div class="panel-header panel-header-stack">
             <div>
@@ -220,6 +234,11 @@
               <input name="company" type="text" placeholder="Northwind Ventures" list="companySuggestions" required />
             </label>
             <datalist id="companySuggestions"></datalist>
+            <div class="inline-form-actions">
+              <button id="loadCompanyDetailsButton" type="button" class="secondary-button">
+                Load latest company details
+              </button>
+            </div>
             <p class="section-copy form-help">
               Pick an existing company name to add a new update to that investment history.
             </p>
@@ -387,41 +406,17 @@
                   Add actual contribution dates, distributions, and current values so the app can calculate real XIRR and MOIC over time.
                 </p>
               </div>
-              <div class="two-up">
-                <label>
-                  Capital call date
-                  <input id="capitalCallDateField" name="capitalCallDate" type="date" />
-                </label>
-
-                <label>
-                  Capital call amount
-                  <input
-                    id="capitalCallAmountField"
-                    name="capitalCallAmount"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="250000"
-                  />
-                </label>
+              <div class="subsection-copy">
+                <h4>Capital activity</h4>
+                <p class="section-copy">
+                  Add multiple capital calls and distributions for funds, follow-ons, and partial realizations.
+                </p>
               </div>
-              <div class="two-up">
-                <label>
-                  Distribution date
-                  <input id="distributionDateField" name="distributionDate" type="date" />
-                </label>
-
-                <label>
-                  Distribution amount
-                  <input
-                    id="distributionAmountField"
-                    name="distributionAmount"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="100000"
-                  />
-                </label>
+              <div id="capitalActivityList" class="capital-activity-list"></div>
+              <div class="inline-form-actions">
+                <button id="addCapitalActivityButton" type="button" class="secondary-button">
+                  Add capital activity
+                </button>
               </div>
               <div class="two-up">
                 <label>

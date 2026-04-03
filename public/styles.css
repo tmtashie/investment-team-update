@@ -460,6 +460,12 @@ button:disabled {
   gap: 10px;
 }
 
+.inline-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .email-tools {
   display: flex;
   flex-wrap: wrap;
@@ -473,6 +479,31 @@ button:disabled {
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(239, 245, 252, 0.72) 0%, rgba(255, 252, 248, 0.92) 100%);
   border: 1px solid rgba(23, 50, 77, 0.12);
+}
+
+.capital-activity-list {
+  display: grid;
+  gap: 12px;
+}
+
+.capital-activity-row {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(23, 50, 77, 0.1);
+}
+
+.capital-activity-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.capital-activity-row-footer {
+  display: grid;
+  gap: 12px;
+  align-items: end;
 }
 
 .subsection-copy {
@@ -519,6 +550,17 @@ button:disabled {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid var(--border);
+}
+
+.entity-performance-card {
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.entity-performance-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(186, 104, 55, 0.28);
+  box-shadow: var(--shadow-soft);
 }
 
 .timeline-card-compact {
@@ -877,6 +919,14 @@ a.secondary-button.inline-action-button {
   .deck-tools {
     grid-template-columns: 1fr auto;
     align-items: end;
+  }
+
+  .capital-activity-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .capital-activity-row-footer {
+    grid-template-columns: 1fr auto;
   }
 
   .dashboard-grid,
