@@ -39,6 +39,8 @@ const DATA_DIR = process.env.DATA_DIR
 const DATA_FILE = path.join(DATA_DIR, "investments.json");
 const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
 const COMPANY_DOCUMENTS_FILE = path.join(DATA_DIR, "company-documents.json");
+const METADATA_FILE = path.join(DATA_DIR, "metadata.json");
+const BACKUPS_DIR = path.join(DATA_DIR, "backups");
 const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const FAMILY_OFFICE_WORKBOOK_FILE = path.join(
   __dirname,
@@ -50,6 +52,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-before-productio
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_BODY_SIZE_BYTES = 20 * 1024 * 1024;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const DATA_SCHEMA_VERSION = 2;
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
@@ -122,6 +125,10 @@ function ensureDataFile() {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
 
+  if (!fs.existsSync(BACKUPS_DIR)) {
+    fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+  }
+
   if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, "[]\n", "utf8");
   }
@@ -133,10 +140,105 @@ function ensureDataFile() {
   if (!fs.existsSync(COMPANY_DOCUMENTS_FILE)) {
     fs.writeFileSync(COMPANY_DOCUMENTS_FILE, "[]\n", "utf8");
   }
+
+  if (!fs.existsSync(METADATA_FILE)) {
+    fs.writeFileSync(
+      METADATA_FILE,
+      JSON.stringify(
+        {
+          schemaVersion: DATA_SCHEMA_VERSION,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+  }
 }
 
 function makeId() {
   return crypto.randomUUID();
+}
+
+function readJsonFile(filePath, fallback) {
+  ensureDataFile();
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function writeJsonFile(filePath, value) {
+  ensureDataFile();
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + "\n", "utf8");
+}
+
+function readMetadata() {
+  const metadata = readJsonFile(METADATA_FILE, {});
+  return {
+    schemaVersion:
+      Number.isFinite(Number(metadata.schemaVersion)) && Number(metadata.schemaVersion) > 0
+        ? Number(metadata.schemaVersion)
+        : DATA_SCHEMA_VERSION,
+    createdAt: String(metadata.createdAt || new Date().toISOString()),
+    updatedAt: String(metadata.updatedAt || new Date().toISOString()),
+    lastMigrationAt: String(metadata.lastMigrationAt || "").trim(),
+    lastBackupAt: String(metadata.lastBackupAt || "").trim(),
+    lastBackupReason: String(metadata.lastBackupReason || "").trim()
+  };
+}
+
+function writeMetadata(partial) {
+  const current = readMetadata();
+  writeJsonFile(METADATA_FILE, {
+    ...current,
+    ...partial,
+    schemaVersion: DATA_SCHEMA_VERSION,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function createBackupSnapshot(reason = "manual") {
+  ensureDataFile();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backup = {
+    schemaVersion: DATA_SCHEMA_VERSION,
+    reason,
+    createdAt: new Date().toISOString(),
+    metadata: readMetadata(),
+    investments: readJsonFile(DATA_FILE, []),
+    tasks: readJsonFile(TASKS_FILE, []),
+    companyDocuments: readJsonFile(COMPANY_DOCUMENTS_FILE, [])
+  };
+  const fileName = `bvb-backup-${timestamp}-${String(reason)
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40) || "snapshot"}.json`;
+  const filePath = path.join(BACKUPS_DIR, fileName);
+  fs.writeFileSync(filePath, JSON.stringify(backup, null, 2) + "\n", "utf8");
+  writeMetadata({
+    lastBackupAt: backup.createdAt,
+    lastBackupReason: reason
+  });
+  return { fileName, filePath, backup };
+}
+
+function restoreFromBackupPayload(payload) {
+  const investments = Array.isArray(payload.investments) ? payload.investments : [];
+  const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
+  const companyDocuments = Array.isArray(payload.companyDocuments) ? payload.companyDocuments : [];
+  writeJsonFile(DATA_FILE, investments);
+  writeJsonFile(TASKS_FILE, tasks);
+  writeJsonFile(COMPANY_DOCUMENTS_FILE, companyDocuments);
+  writeMetadata({
+    schemaVersion: DATA_SCHEMA_VERSION,
+    lastMigrationAt: new Date().toISOString()
+  });
 }
 
 function normalizeCompanyKey(value) {
@@ -430,85 +532,68 @@ function normalizeTask(entry) {
 }
 
 function writeInvestments(investments) {
-  ensureDataFile();
-  fs.writeFileSync(DATA_FILE, JSON.stringify(investments, null, 2) + "\n", "utf8");
+  writeJsonFile(DATA_FILE, investments);
 }
 
 function readInvestments() {
-  ensureDataFile();
-  try {
-    const raw = fs.readFileSync(DATA_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    const normalized = parsed.map(normalizeInvestment);
-    const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
-    if (changed) {
-      writeInvestments(normalized);
-    }
-
-    return normalized;
-  } catch (error) {
+  const parsed = readJsonFile(DATA_FILE, []);
+  if (!Array.isArray(parsed)) {
     return [];
   }
+
+  const normalized = parsed.map(normalizeInvestment);
+  const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
+  if (changed) {
+    writeInvestments(normalized);
+    writeMetadata({ lastMigrationAt: new Date().toISOString() });
+  }
+
+  return normalized;
 }
 
 function writeTasks(tasks) {
-  ensureDataFile();
-  fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2) + "\n", "utf8");
+  writeJsonFile(TASKS_FILE, tasks);
 }
 
 function readTasks() {
-  ensureDataFile();
-  try {
-    const raw = fs.readFileSync(TASKS_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    const normalized = parsed.map(normalizeTask);
-    const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
-    if (changed) {
-      writeTasks(normalized);
-    }
-
-    return normalized;
-  } catch (error) {
+  const parsed = readJsonFile(TASKS_FILE, []);
+  if (!Array.isArray(parsed)) {
     return [];
   }
+
+  const normalized = parsed.map(normalizeTask);
+  const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
+  if (changed) {
+    writeTasks(normalized);
+    writeMetadata({ lastMigrationAt: new Date().toISOString() });
+  }
+
+  return normalized;
 }
 
 function writeCompanyDocuments(documents) {
-  ensureDataFile();
-  fs.writeFileSync(COMPANY_DOCUMENTS_FILE, JSON.stringify(documents, null, 2) + "\n", "utf8");
+  writeJsonFile(COMPANY_DOCUMENTS_FILE, documents);
 }
 
 function readCompanyDocuments() {
-  ensureDataFile();
-  try {
-    const raw = fs.readFileSync(COMPANY_DOCUMENTS_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    const normalized = parsed.map(normalizeCompanyDocument);
-    const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
-    if (changed) {
-      writeCompanyDocuments(normalized);
-    }
-
-    return normalized;
-  } catch (error) {
+  const parsed = readJsonFile(COMPANY_DOCUMENTS_FILE, []);
+  if (!Array.isArray(parsed)) {
     return [];
   }
+
+  const normalized = parsed.map(normalizeCompanyDocument);
+  const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
+  if (changed) {
+    writeCompanyDocuments(normalized);
+    writeMetadata({ lastMigrationAt: new Date().toISOString() });
+  }
+
+  return normalized;
 }
 
 function saveCompanyDocument(entry) {
   const documents = readCompanyDocuments();
+  createBackupSnapshot("before-company-document-create");
   const normalized = normalizeCompanyDocument(entry);
   documents.unshift(normalized);
   writeCompanyDocuments(documents);
@@ -523,12 +608,14 @@ function deleteCompanyDocument(id) {
   }
 
   const remaining = documents.filter((document) => document.id !== id);
+  createBackupSnapshot("before-company-document-delete");
   writeCompanyDocuments(remaining);
   return match;
 }
 
 function saveTask(entry) {
   const tasks = readTasks();
+  createBackupSnapshot("before-task-create");
   const normalized = normalizeTask(entry);
   tasks.unshift(normalized);
   writeTasks(tasks);
@@ -543,6 +630,7 @@ function updateTask(id, updates) {
     return null;
   }
 
+  createBackupSnapshot("before-task-update");
   const merged = normalizeTask({
     ...tasks[index],
     ...updates,
@@ -570,12 +658,14 @@ function deleteTask(id) {
     return false;
   }
 
+  createBackupSnapshot("before-task-delete");
   writeTasks(remaining);
   return true;
 }
 
 function saveInvestment(entry) {
   const investments = readInvestments();
+  createBackupSnapshot("before-investment-create");
   const normalizedEntry = normalizeInvestment(entry);
   const latestMatch = findLatestByCompanyKey(normalizedEntry.companyKey, investments);
 
@@ -595,6 +685,7 @@ function updateInvestment(id, updates) {
     return null;
   }
 
+  createBackupSnapshot("before-investment-update");
   const merged = normalizeInvestment({
     ...investments[index],
     ...updates,
@@ -626,6 +717,7 @@ function deleteInvestment(id) {
     return false;
   }
 
+  createBackupSnapshot("before-investment-delete");
   writeInvestments(remaining);
   return true;
 }
@@ -2280,6 +2372,7 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET" && url.pathname === "/api/config") {
     const user = getSessionUser(request);
+    const metadata = readMetadata();
     sendJson(response, 200, {
       defaultRecipients: DEFAULT_RECIPIENTS,
       emailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL),
@@ -2291,6 +2384,8 @@ const server = http.createServer(async (request, response) => {
       ),
       authMode: Object.keys(TEAM_USERS).length > 0 ? "individual" : "shared",
       teamUserCount: Object.keys(TEAM_USERS).length,
+      schemaVersion: metadata.schemaVersion,
+      lastBackupAt: metadata.lastBackupAt,
       canEdit: canEdit(user),
       user
     });
@@ -2356,14 +2451,14 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investments = readInvestments();
-      const tasks = readTasks();
-      const companyDocuments = readCompanyDocuments();
-      sendJson(response, 200, {
-        investments,
-        companies: buildCompanyRecords(investments, tasks, companyDocuments),
-        user
-      });
-      return;
+    const tasks = readTasks();
+    const companyDocuments = readCompanyDocuments();
+    sendJson(response, 200, {
+      investments,
+      companies: buildCompanyRecords(investments, tasks, companyDocuments),
+      user
+    });
+    return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/tasks") {
@@ -2410,6 +2505,21 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 500, { error: error.message || "Excel export failed." });
       return;
     }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/backup-export") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    const { fileName, backup } = createBackupSnapshot("manual-export");
+    response.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${fileName}"`
+    });
+    response.end(JSON.stringify(backup, null, 2));
+    return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/family-office-workbook.xlsx") {
@@ -2459,6 +2569,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       const buffer = Buffer.from(fileData, "base64");
+      createBackupSnapshot("before-workbook-import");
       const result = importWorkbookIntoInvestments(buffer, user, filename);
       sendJson(response, 200, {
         message: `Imported ${result.importedCount} update${result.importedCount === 1 ? "" : "s"} from workbook.`,
@@ -2467,6 +2578,33 @@ const server = http.createServer(async (request, response) => {
       return;
     } catch (error) {
       sendJson(response, 500, { error: error.message || "Workbook import failed." });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/restore-backup") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const backup = payload && payload.backup;
+
+      if (!backup || typeof backup !== "object") {
+        sendJson(response, 400, { error: "Backup payload is required." });
+        return;
+      }
+
+      createBackupSnapshot("before-restore");
+      restoreFromBackupPayload(backup);
+      sendJson(response, 200, {
+        message: "Backup restored. Your current data was backed up first."
+      });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Backup restore failed." });
       return;
     }
   }

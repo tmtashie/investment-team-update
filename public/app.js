@@ -18,10 +18,12 @@ const refreshButton = document.getElementById("refreshButton");
 const submitButton = document.getElementById("submitButton");
 const downloadCsvButton = document.getElementById("downloadCsvButton");
 const downloadExcelButton = document.getElementById("downloadExcelButton");
+const downloadBackupButton = document.getElementById("downloadBackupButton");
 const downloadFamilyOfficeWorkbookButton = document.getElementById(
   "downloadFamilyOfficeWorkbookButton"
 );
 const importWorkbookFile = document.getElementById("importWorkbookFile");
+const restoreBackupFile = document.getElementById("restoreBackupFile");
 const importWorkbookMessage = document.getElementById("importWorkbookMessage");
 const cancelEditButton = document.getElementById("cancelEditButton");
 const editingInvestmentId = document.getElementById("editingInvestmentId");
@@ -1974,6 +1976,10 @@ downloadFamilyOfficeWorkbookButton.addEventListener("click", () => {
   window.location.href = "/api/family-office-workbook.xlsx";
 });
 
+downloadBackupButton.addEventListener("click", () => {
+  window.location.href = "/api/backup-export";
+});
+
 importWorkbookFile.addEventListener("change", async () => {
   const selectedFile = importWorkbookFile.files && importWorkbookFile.files[0];
   if (!selectedFile) {
@@ -1998,6 +2004,44 @@ importWorkbookFile.addEventListener("change", async () => {
     importWorkbookMessage.textContent = `${result.message} Sheets used: ${result.sheets.join(", ")}.`;
     importWorkbookFile.value = "";
     await loadUpdates();
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      importWorkbookMessage.textContent = "Your session expired. Please sign in again.";
+      return;
+    }
+
+    importWorkbookMessage.textContent = error.message;
+  }
+});
+
+restoreBackupFile.addEventListener("change", async () => {
+  const selectedFile = restoreBackupFile.files && restoreBackupFile.files[0];
+  if (!selectedFile) {
+    return;
+  }
+
+  if (!window.confirm("Restore this backup? This will replace the current app data, but a fresh backup will be created first.")) {
+    restoreBackupFile.value = "";
+    return;
+  }
+
+  importWorkbookMessage.textContent = "Reading backup and restoring data...";
+
+  try {
+    const rawText = await selectedFile.text();
+    const payload = JSON.parse(rawText);
+    const result = await fetchJson("/api/restore-backup", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ backup: payload })
+    });
+
+    importWorkbookMessage.textContent = result.message;
+    restoreBackupFile.value = "";
+    await Promise.all([loadUpdates(), loadTasks()]);
   } catch (error) {
     if (error.status === 401) {
       setSignedInState(null);
