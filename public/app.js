@@ -79,6 +79,8 @@ const researchDeckFeed = document.getElementById("researchDeckFeed");
 const researchNotesFeed = document.getElementById("researchNotesFeed");
 const researchDocumentsFeed = document.getElementById("researchDocumentsFeed");
 const researchDecisionFeed = document.getElementById("researchDecisionFeed");
+const workspaceViews = Array.from(document.querySelectorAll(".workspace-view"));
+const workspaceMenuLinks = Array.from(document.querySelectorAll(".menu-link[data-view]"));
 
 let currentUser = null;
 let allInvestments = [];
@@ -89,6 +91,7 @@ let companyPerformanceMap = new Map();
 let entityPerformanceMap = new Map();
 let uploadedDocuments = [];
 let allTasks = [];
+let activeWorkspaceView = "home";
 
 function companyKey(value) {
   return String(value || "")
@@ -129,6 +132,29 @@ function setSignedInState(user) {
   authStatus.textContent = isSignedIn
     ? `Signed in as ${user.email}${user.role ? ` • ${user.role}` : ""}`
     : "Please sign in to view updates";
+
+  if (isSignedIn) {
+    showWorkspaceView(activeWorkspaceView);
+  }
+}
+
+function showWorkspaceView(viewName) {
+  activeWorkspaceView = viewName || "home";
+
+  workspaceViews.forEach((section) => {
+    const matchesView = section.dataset.view === activeWorkspaceView;
+    if (section.id === "companyPanel" && activeWorkspaceView === "portfolio") {
+      if (!selectedCompany) {
+        section.classList.add("hidden");
+        return;
+      }
+    }
+    section.classList.toggle("hidden", !matchesView);
+  });
+
+  workspaceMenuLinks.forEach((link) => {
+    link.classList.toggle("is-active", link.dataset.view === activeWorkspaceView);
+  });
 }
 
 function canEditWorkspace() {
@@ -1670,15 +1696,13 @@ menuToggleButton.addEventListener("click", () => {
 });
 
 workspaceMenu.addEventListener("click", (event) => {
-  const target = event.target.closest("[data-target]");
+  const target = event.target.closest("[data-view]");
   if (!target) {
     return;
   }
 
-  const section = document.getElementById(target.dataset.target);
-  if (section) {
-    section.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+  showWorkspaceView(target.dataset.view);
+  window.scrollTo({ top: 0, behavior: "smooth" });
   workspaceMenu.classList.add("hidden");
 });
 
@@ -2082,6 +2106,7 @@ uploadedDocumentsList.addEventListener("click", (event) => {
 closeCompanyPanelButton.addEventListener("click", () => {
   selectedCompany = "";
   renderCompanyPanel();
+  showWorkspaceView("portfolio");
 });
 
 companyDecisionLog.addEventListener("click", (event) => {
@@ -2106,7 +2131,8 @@ updatesList.addEventListener("click", (event) => {
   if (company && (!action || action === "view-company")) {
     selectedCompany = company;
     renderCompanyPanel();
-    companyPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
 
