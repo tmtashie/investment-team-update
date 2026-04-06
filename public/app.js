@@ -553,7 +553,11 @@ function filterInvestments(investments) {
 }
 
 function toNumber(value) {
-  const amount = Number(value);
+  const cleaned = String(value ?? "")
+    .trim()
+    .replace(/[$,\s]/g, "")
+    .replace(/[^\d.-]/g, "");
+  const amount = Number(cleaned);
   return Number.isFinite(amount) ? amount : 0;
 }
 
