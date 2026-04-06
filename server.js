@@ -1308,6 +1308,251 @@ function buildInvestmentsWorkbookBuffer(investments) {
   return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
 }
 
+function formatWorkbookDate(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return text;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizePercentageForWorkbook(value) {
+  const amount = parseNumericValue(value);
+  if (!amount) {
+    return "";
+  }
+
+  return amount > 1 ? amount / 100 : amount;
+}
+
+function getLatestStructuredValue(rows, key) {
+  if (!Array.isArray(rows)) {
+    return "";
+  }
+
+  const match = rows.find((row) => String(row[key] || "").trim());
+  return match ? String(match[key] || "").trim() : "";
+}
+
+function isDistributionType(type) {
+  const lowered = String(type || "").trim().toLowerCase();
+  return (
+    lowered.includes("distribution") ||
+    lowered.includes("dividend") ||
+    lowered.includes("return of capital") ||
+    lowered.includes("partial exit") ||
+    lowered.includes("full exit")
+  );
+}
+
+function calculateCompanyPerformanceSnapshot(company) {
+  const capitalActivities = Array.isArray(company.capitalActivities)
+    ? company.capitalActivities
+    : [];
+  const latestOfficialValue = parseNumericValue(
+    getLatestStructuredValue(company.valuationHistory, "officialValue")
+  );
+  const latestInternalValue = parseNumericValue(
+    getLatestStructuredValue(company.valuationHistory, "internalValue")
+  );
+  const latestExitValue = parseNumericValue(
+    getLatestStructuredValue(company.valuationHistory, "exitValue")
+  );
+
+  let totalInvestedCapital = 0;
+  let totalDistributions = 0;
+  const baseCashFlows = [];
+
+  capitalActivities.forEach((activity) => {
+    const amount = toPositiveNumber(activity.amount);
+    if (!amount) {
+      return;
+    }
+
+    const dateValue = new Date(activity.date || Date.now());
+    if (Number.isNaN(dateValue.getTime())) {
+      return;
+    }
+
+    if (isDistributionType(activity.type)) {
+      totalDistributions += amount;
+      baseCashFlows.push({ date: dateValue, amount });
+      return;
+    }
+
+    totalInvestedCapital += amount;
+    baseCashFlows.push({ date: dateValue, amount: -amount });
+  });
+
+  function buildScenarioMetrics(terminalValue) {
+    const cashFlows = [...baseCashFlows];
+    if (terminalValue > 0) {
+      cashFlows.push({ date: new Date(), amount: terminalValue });
+    }
+
+    const xirr = calculateXirr(cashFlows);
+    const moic =
+      totalInvestedCapital > 0
+        ? (totalDistributions + terminalValue) / totalInvestedCapital
+        : null;
+
+    return { xirr, moic };
+  }
+
+  return {
+    totalInvestedCapital,
+    totalDistributions,
+    officialValue: latestOfficialValue,
+    internalValue: latestInternalValue,
+    exitValue: latestExitValue,
+    official: buildScenarioMetrics(latestOfficialValue),
+    internal: buildScenarioMetrics(latestInternalValue),
+    exit: buildScenarioMetrics(latestExitValue)
+  };
+}
+
+function buildFamilyOfficeWorkbookBuffer(investments) {
+  const XLSX = require("xlsx");
+  const companies = buildCompanyRecords(investments, readTasks(), readCompanyDocuments());
+
+  if (!fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE)) {
+    return buildInvestmentsWorkbookBuffer(investments);
+  }
+
+  const workbook = XLSX.readFile(FAMILY_OFFICE_WORKBOOK_FILE, { cellDates: true });
+  const masterSheet = workbook.Sheets["Investment Master"];
+  const cashFlowSheet = workbook.Sheets["Cash Flow Ledger"];
+
+  if (masterSheet) {
+    for (let row = 4; row <= 1000; row += 1) {
+      for (let col = 0; col < 32; col += 1) {
+        const address = XLSX.utils.encode_cell({ r: row - 1, c: col });
+        delete masterSheet[address];
+      }
+    }
+
+    const masterRows = companies.map((company) => {
+      const latest = company.updates[0] || {};
+      const performance = calculateCompanyPerformanceSnapshot(company);
+      const ownershipByEntity = company.entities.reduce((result, entityName) => {
+        const latestForEntity = company.updates.find(
+          (investment) => investment.entity === entityName
+        );
+        result[entityName] = normalizePercentageForWorkbook(
+          latestForEntity ? latestForEntity.entityOwnershipPercent : ""
+        );
+        return result;
+      }, {});
+      const commitmentAmount =
+        performance.totalInvestedCapital ||
+        toPositiveNumber(latest.amount) ||
+        toPositiveNumber(latest.capitalCallAmount) ||
+        "";
+      const initialInvestmentDate =
+        formatWorkbookDate(
+          company.capitalActivities.length
+            ? company.capitalActivities[company.capitalActivities.length - 1].date
+            : latest.createdAt
+        ) || "";
+      const totalOwnershipPercent =
+        normalizePercentageForWorkbook(
+          getLatestStructuredValue(company.ownershipHistory, "totalPercent") ||
+            latest.ownershipPercent
+        ) || "";
+      const ownershipNotes =
+        getLatestStructuredValue(company.ownershipHistory, "notes") ||
+        latest.ownershipNotes ||
+        "";
+
+      return [
+        company.companyKey || latest.id || makeId(),
+        company.company,
+        latest.stage || "",
+        "",
+        latest.status || "Active",
+        initialInvestmentDate,
+        latest.contactName || latest.owner || "",
+        "",
+        "Cost / Official Conservative",
+        "Internal Valuation",
+        "Exit Scenario",
+        "",
+        "",
+        commitmentAmount || "",
+        ownershipByEntity["Beaman Ventures"] || "",
+        ownershipByEntity["Lee Beaman"] || "",
+        ownershipByEntity["Katherine Trust"] || "",
+        ownershipByEntity["Natalie Trust"] || "",
+        totalOwnershipPercent,
+        ownershipNotes,
+        latest.notes || "",
+        performance.totalInvestedCapital || "",
+        performance.totalDistributions || "",
+        performance.officialValue || "",
+        performance.internalValue || "",
+        performance.exitValue || "",
+        performance.official.moic ?? "",
+        performance.internal.moic ?? "",
+        performance.exit.moic ?? "",
+        performance.official.xirr ?? "",
+        performance.internal.xirr ?? "",
+        performance.exit.xirr ?? ""
+      ];
+    });
+
+    XLSX.utils.sheet_add_aoa(masterSheet, masterRows, { origin: "A4" });
+    masterSheet["!ref"] = XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: Math.max(3, masterRows.length + 2), c: 31 }
+    });
+  }
+
+  if (cashFlowSheet) {
+    for (let row = 4; row <= 3000; row += 1) {
+      for (let col = 0; col < 13; col += 1) {
+        const address = XLSX.utils.encode_cell({ r: row - 1, c: col });
+        delete cashFlowSheet[address];
+      }
+    }
+
+    const cashRows = companies.flatMap((company) =>
+      company.capitalActivities.map((activity, index) => {
+        const amount = toPositiveNumber(activity.amount);
+        const isDistribution = isDistributionType(activity.type);
+        return [
+          `${company.companyKey || normalizeCompanyKey(company.company)}-${index + 1}`,
+          company.companyKey || "",
+          company.company,
+          activity.entity || company.profile.entity || "",
+          formatWorkbookDate(activity.date),
+          activity.type || "Capital Call",
+          activity.notes || "",
+          isDistribution ? "" : amount || "",
+          isDistribution ? amount || "" : "",
+          isDistribution ? amount || "" : amount ? -amount : "",
+          isDistribution ? "Realized" : "Unrealized",
+          "",
+          activity.notes || ""
+        ];
+      })
+    );
+
+    XLSX.utils.sheet_add_aoa(cashFlowSheet, cashRows, { origin: "A4" });
+    cashFlowSheet["!ref"] = XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: Math.max(3, cashRows.length + 2), c: 12 }
+    });
+  }
+
+  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+}
+
 function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
   const XLSX = require("xlsx");
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
@@ -1391,6 +1636,144 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
         },
         tag
       );
+    });
+  }
+
+  const investmentMasterSheet = workbook.Sheets["Investment Master"];
+  if (investmentMasterSheet) {
+    usedSheets.push("Investment Master");
+    const rows = XLSX.utils.sheet_to_json(investmentMasterSheet, {
+      defval: "",
+      raw: false,
+      cellDates: true
+    });
+
+    rows.forEach((row, index) => {
+      const company = String(row["Investment Name"] || row.Company || "").trim();
+      if (!company) {
+        return;
+      }
+
+      const investmentId =
+        String(row["Investment ID"] || "").trim() || normalizeCompanyKey(company);
+      const initialInvestmentDateRaw = String(row["Initial Investment Date"] || "").trim();
+      const initialInvestmentDate = initialInvestmentDateRaw
+        ? parseWorkbookDate(initialInvestmentDateRaw)
+        : "";
+      const totalInvestedCapital = parseNumericValue(row["Total invested capital"]);
+      const totalDistributions = parseNumericValue(row["Total distributions"]);
+      const ownershipTotal = String(row["Ownership % total"] || "").trim();
+      const ownershipNotes = String(row["Entity ownership notes"] || "").trim();
+      const entitiesFromOwnership = [
+        {
+          entity: "Beaman Ventures",
+          percent: String(row["Beaman Ventures %"] || "").trim()
+        },
+        {
+          entity: "Lee Beaman",
+          percent: String(row["Lee Beaman %"] || "").trim()
+        },
+        {
+          entity: "Katherine Trust",
+          percent: String(row["Kat Trust %"] || "").trim()
+        },
+        {
+          entity: "Natalie Trust",
+          percent: String(row["Nat Trust %"] || "").trim()
+        }
+      ].filter((entry) => parseNumericValue(entry.percent) > 0);
+
+      const selectedEntities =
+        entitiesFromOwnership.length > 0
+          ? entitiesFromOwnership
+          : [
+              {
+                entity:
+                  normalizeEntityName(
+                    inferEntityFromContext(
+                      sourceName,
+                      workbook.Props && workbook.Props.Title,
+                      ownershipNotes,
+                      company
+                    )
+                  ) || "Beaman Ventures",
+                percent: ""
+              }
+            ];
+
+      selectedEntities.forEach((entityEntry) => {
+        const tag = `[Workbook Import:Investment Master:${investmentId}:${entityEntry.entity}]`;
+        const importedNotes = buildImportNote(tag, [
+          `Imported from workbook sheet "Investment Master".`,
+          String(row.Notes || "").trim(),
+          ownershipNotes ? `Entity ownership notes: ${ownershipNotes}` : ""
+        ]);
+        const capitalActivity = [];
+
+        if (totalInvestedCapital > 0) {
+          capitalActivity.push({
+            date: initialInvestmentDate || new Date().toISOString(),
+            type: "Capital Call",
+            amount: String(totalInvestedCapital),
+            notes: "Imported from Investment Master",
+            sourceUpdateId: ""
+          });
+        }
+
+        if (totalDistributions > 0) {
+          capitalActivity.push({
+            date: initialInvestmentDate || new Date().toISOString(),
+            type: "Distribution",
+            amount: String(totalDistributions),
+            notes: "Imported from Investment Master",
+            sourceUpdateId: ""
+          });
+        }
+
+        pushImported(
+          {
+            company,
+            entity: entityEntry.entity,
+            amount: String(
+              parseNumericValue(row["Commitment Amount"]) || totalInvestedCapital || ""
+            ).trim(),
+            currency: "USD",
+            stage: String(row["Sector / Strategy"] || "").trim(),
+            status: String(row.Status || "Investment update").trim() || "Investment update",
+            owner: String(row["Sponsor / Manager"] || "Workbook import").trim(),
+            nextStep: "",
+            notes: importedNotes,
+            deckSummary: "",
+            capitalCallDate:
+              totalInvestedCapital > 0 ? initialInvestmentDate : "",
+            capitalCallAmount: totalInvestedCapital > 0 ? String(totalInvestedCapital) : "",
+            distributionDate:
+              totalDistributions > 0 ? initialInvestmentDate : "",
+            distributionAmount: totalDistributions > 0 ? String(totalDistributions) : "",
+            valuationDate: initialInvestmentDate,
+            officialValue: String(row["Official current value"] || "").trim(),
+            internalValue: String(row["Internal current value"] || "").trim(),
+            exitValue: String(row["Exit scenario value"] || "").trim(),
+            ownershipPercent: ownershipTotal,
+            entityOwnershipPercent: entityEntry.percent,
+            ownershipNotes,
+            contactName: String(row["Sponsor / Manager"] || "").trim(),
+            contactPosition: "Lead contact",
+            contactEmail: "",
+            contactPhone: "",
+            documentLinks: "",
+            documents: [],
+            decisionDate: "",
+            decisionType: "",
+            decisionSummary: "",
+            capitalActivity,
+            recipients: [],
+            submittedBy: sessionUser.email,
+            createdAt: initialInvestmentDate || new Date().toISOString()
+          },
+          tag
+        );
+      });
     });
   }
 
@@ -1660,7 +2043,7 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
 
   if (!imported.length) {
     throw new Error(
-      "No importable rows were found. Use a workbook with an Investment Updates sheet, a Cash Flow Ledger sheet, or a holdings sheet with columns like Investment Name and Current Valuation."
+      "No importable rows were found. Use a workbook with an Investment Updates sheet, an Investment Master sheet, a Cash Flow Ledger sheet, or a holdings sheet with columns like Investment Name and Current Valuation."
     );
   }
 
@@ -2545,21 +2928,22 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (!fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE)) {
-      sendJson(response, 404, {
-        error: "The family office workbook template is not available on the server yet."
+    try {
+      const workbookBuffer = buildFamilyOfficeWorkbookBuffer(readInvestments());
+      response.writeHead(200, {
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition":
+          'attachment; filename="family-office-private-investment-tracker.xlsx"'
+      });
+      response.end(workbookBuffer);
+      return;
+    } catch (error) {
+      sendJson(response, 500, {
+        error: error.message || "Family office workbook export failed."
       });
       return;
     }
-
-    response.writeHead(200, {
-      "Content-Type":
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition":
-        'attachment; filename="family-office-private-investment-tracker.xlsx"'
-    });
-    fs.createReadStream(FAMILY_OFFICE_WORKBOOK_FILE).pipe(response);
-    return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/import-workbook") {
