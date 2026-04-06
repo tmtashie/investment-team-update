@@ -714,12 +714,20 @@ function buildCompanyPerformance(updates) {
   const investedCapital = normalizedActivities.reduce((sum, activity) => {
     const type = String(activity.type || "").toLowerCase();
     const amount = toNumber(activity.amount);
-    return type.includes("capital call") || type.includes("fee") ? sum + amount : sum;
+    return type.includes("capital call") ||
+      type.includes("investment amount") ||
+      type.includes("fee")
+      ? sum + amount
+      : sum;
   }, 0);
   const distributions = normalizedActivities.reduce((sum, activity) => {
     const type = String(activity.type || "").toLowerCase();
     const amount = toNumber(activity.amount);
-    return !type.includes("capital call") && !type.includes("fee") ? sum + amount : sum;
+    return !type.includes("capital call") &&
+      !type.includes("investment amount") &&
+      !type.includes("fee")
+      ? sum + amount
+      : sum;
   }, 0);
   const officialMark = pickLatestNumericValue(updates, "officialValue");
   const internalMark = pickLatestNumericValue(updates, "internalValue");
@@ -737,7 +745,7 @@ function buildCompanyPerformance(updates) {
       return;
     }
 
-    if (type.includes("capital call") || type.includes("fee")) {
+    if (type.includes("capital call") || type.includes("investment amount") || type.includes("fee")) {
       baseCashFlows.push({ date, amount: -amount });
       return;
     }
