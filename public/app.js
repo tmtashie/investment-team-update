@@ -264,7 +264,7 @@ function buildLegacyCapitalActivityRows(investment) {
   if (investment.capitalCallDate || investment.capitalCallAmount) {
     rows.push({
       date: investment.capitalCallDate || "",
-      type: "Capital Call",
+      type: "Investment Amount",
       amount: investment.capitalCallAmount || "",
       notes: ""
     });
@@ -284,7 +284,9 @@ function buildLegacyCapitalActivityRows(investment) {
 
 function renderCapitalActivityRows(rows = []) {
   const normalizedRows = normalizeCapitalActivityRows(rows);
-  const rowsToRender = normalizedRows.length ? normalizedRows : [{ date: "", type: "Capital Call", amount: "", notes: "" }];
+  const rowsToRender = normalizedRows.length
+    ? normalizedRows
+    : [{ date: "", type: "Investment Amount", amount: "", notes: "" }];
 
   capitalActivityList.innerHTML = rowsToRender
     .map(
@@ -298,6 +300,7 @@ function renderCapitalActivityRows(rows = []) {
             <label>
               Type
               <select data-capital-field="type">
+                <option value="Investment Amount" ${row.type === "Investment Amount" ? "selected" : ""}>Investment Amount</option>
                 <option value="Capital Call" ${row.type === "Capital Call" ? "selected" : ""}>Capital Call</option>
                 <option value="Distribution" ${row.type === "Distribution" ? "selected" : ""}>Distribution</option>
                 <option value="Dividend" ${row.type === "Dividend" ? "selected" : ""}>Dividend</option>
@@ -824,6 +827,13 @@ function buildDashboardCards(investments) {
   const openCount = companySummaries.filter(
     (summary) => !["Passed", "Closed"].includes(summary.latest && summary.latest.status)
   ).length;
+  const openPipelineAmount = companySummaries.reduce((sum, summary) => {
+    if (["Passed", "Closed"].includes(summary.latest && summary.latest.status)) {
+      return sum;
+    }
+
+    return sum + summary.performance.investedCapital;
+  }, 0);
   const approvedCount = investments.filter((investment) => investment.status === "Approved").length;
   const totalInvestedCapital = companySummaries.reduce(
     (sum, summary) => sum + summary.performance.investedCapital,
@@ -842,6 +852,11 @@ function buildDashboardCards(investments) {
     { label: "Updates", value: String(investments.length), action: "portfolio" },
     { label: "Companies", value: String(companySummaries.length), action: "portfolio" },
     { label: "Active pipeline", value: String(openCount), action: "portfolio" },
+    {
+      label: "Active pipeline $",
+      value: formatMoney(openPipelineAmount),
+      action: "portfolio"
+    },
     {
       label: "Approved",
       value: String(approvedCount),
@@ -2332,7 +2347,7 @@ refreshButton.addEventListener("click", () => {
 
 addCapitalActivityButton.addEventListener("click", () => {
   const rows = collectCapitalActivityRows();
-  rows.push({ date: "", type: "Capital Call", amount: "", notes: "" });
+  rows.push({ date: "", type: "Investment Amount", amount: "", notes: "" });
   renderCapitalActivityRows(rows);
 });
 
