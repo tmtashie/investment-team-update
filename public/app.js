@@ -750,19 +750,26 @@ function buildDashboardCards(investments) {
   );
 
   const cards = [
-    { label: "Updates", value: String(investments.length) },
-    { label: "Companies", value: String(companySummaries.length) },
-    { label: "Active pipeline", value: String(openCount) },
-    { label: "Approved", value: String(approvedCount) },
-    { label: "Invested capital", value: formatMoney(totalInvestedCapital) },
-    { label: "Official NAV", value: formatMoney(officialNav) },
-    { label: "Internal NAV", value: formatMoney(internalNav) }
+    { label: "Updates", value: String(investments.length), action: "portfolio" },
+    { label: "Companies", value: String(companySummaries.length), action: "portfolio" },
+    { label: "Active pipeline", value: String(openCount), action: "portfolio" },
+    {
+      label: "Approved",
+      value: String(approvedCount),
+      action: "portfolio",
+      status: "Approved"
+    },
+    { label: "Invested capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
+    { label: "Official NAV", value: formatMoney(officialNav), action: "portfolio" },
+    { label: "Internal NAV", value: formatMoney(internalNav), action: "portfolio" }
   ];
 
   const entityTotals = (configuredEntities.length ? configuredEntities : [])
     .map((entity) => ({
       label: entity,
-      value: String(investments.filter((investment) => investment.entity === entity).length)
+      value: String(investments.filter((investment) => investment.entity === entity).length),
+      action: "entity",
+      entity
     }));
 
   return cards.concat(entityTotals);
@@ -773,7 +780,12 @@ function renderDashboard(investments) {
   dashboardCards.innerHTML = cards
     .map(
       (card) => `
-        <article class="dashboard-card">
+        <article
+          class="dashboard-card"
+          ${card.action ? `data-dashboard-action="${escapeHtml(card.action)}"` : ""}
+          ${card.entity ? `data-entity="${escapeHtml(card.entity)}"` : ""}
+          ${card.status ? `data-status="${escapeHtml(card.status)}"` : ""}
+        >
           <p class="dashboard-label">${escapeHtml(card.label)}</p>
           <p class="dashboard-value">${escapeHtml(card.value)}</p>
         </article>
@@ -2409,6 +2421,36 @@ entityPerformanceCards.addEventListener("click", (event) => {
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
+dashboardCards.addEventListener("click", (event) => {
+  const card = event.target.closest("[data-dashboard-action], [data-entity]");
+  if (!card) {
+    return;
+  }
+
+  const action = card.dataset.dashboardAction || "";
+  const entity = card.dataset.entity || "";
+  const status = card.dataset.status || "";
+
+  if (action === "entity" && entity) {
+    selectedEntity = entity;
+    renderEntityDetail();
+    showWorkspaceView("entity");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  if (action === "portfolio") {
+    if (statusFilter) {
+      statusFilter.value = status || "";
+    }
+    renderDashboard(allInvestments);
+    renderEntityDetail();
+    renderCompanyPanel();
+    showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+});
+
 companyDecisionLog.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action='delete-company-document']");
   if (!target) {
@@ -2419,6 +2461,34 @@ companyDecisionLog.addEventListener("click", (event) => {
 });
 
 updatesList.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-action], [data-company]");
+  if (!target) {
+    return;
+  }
+
+  const company = target.dataset.company || "";
+  const action = target.dataset.action || "";
+  const investmentId = target.dataset.id || "";
+
+  if (company && (!action || action === "view-company")) {
+    selectedCompany = company;
+    renderCompanyPanel();
+    showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  if (action === "edit" && investmentId) {
+    beginEditInvestment(investmentId);
+    return;
+  }
+
+  if (action === "delete" && investmentId) {
+    deleteInvestmentById(investmentId);
+  }
+});
+
+entityDetailInvestments.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action], [data-company]");
   if (!target) {
     return;
