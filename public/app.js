@@ -260,12 +260,14 @@ function normalizeCapitalActivityRows(rows) {
 
 function buildLegacyCapitalActivityRows(investment) {
   const rows = [];
+  const legacyInvestmentAmount = investment.capitalCallAmount || investment.amount || "";
+  const legacyInvestmentDate = investment.capitalCallDate || investment.createdAt || "";
 
-  if (investment.capitalCallDate || investment.capitalCallAmount) {
+  if (legacyInvestmentDate || legacyInvestmentAmount) {
     rows.push({
-      date: investment.capitalCallDate || "",
+      date: legacyInvestmentDate,
       type: "Investment Amount",
-      amount: investment.capitalCallAmount || "",
+      amount: legacyInvestmentAmount,
       notes: ""
     });
   }
