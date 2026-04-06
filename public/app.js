@@ -103,6 +103,14 @@ let allTasks = [];
 let activeWorkspaceView = "home";
 let selectedEntity = "";
 
+const moneyFieldNames = [
+  "amount",
+  "officialValue",
+  "internalValue",
+  "exitValue",
+  "followOnCapitalAmount"
+];
+
 function companyKey(value) {
   return String(value || "")
     .trim()
@@ -117,6 +125,58 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function normalizeMoneyString(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const cleaned = text.replace(/[^0-9.]/g, "");
+  const [integerPartRaw, decimalPartRaw = ""] = cleaned.split(".");
+  const integerPart = integerPartRaw.replace(/^0+(?=\d)/, "") || integerPartRaw || "0";
+  const decimalPart = decimalPartRaw.replace(/\./g, "").slice(0, 2);
+  const withCommas = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decimalPart ? `${withCommas}.${decimalPart}` : withCommas;
+}
+
+function formatPhoneNumber(value) {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 10);
+  if (!digits) {
+    return "";
+  }
+
+  if (digits.length <= 3) {
+    return `(${digits}`;
+  }
+
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  }
+
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function formatMoneyField(field) {
+  if (!field) {
+    return;
+  }
+
+  field.value = normalizeMoneyString(field.value);
+}
+
+function applyFormInputFormatting() {
+  moneyFieldNames.forEach((name) => {
+    const field = form.elements[name];
+    if (field) {
+      formatMoneyField(field);
+    }
+  });
+
+  if (form.elements.contactPhone) {
+    form.elements.contactPhone.value = formatPhoneNumber(form.elements.contactPhone.value);
+  }
 }
 
 async function fetchJson(url, options) {
@@ -248,7 +308,7 @@ function renderCapitalActivityRows(rows = []) {
             </label>
             <label>
               Amount
-              <input type="number" min="0" step="0.01" data-capital-field="amount" value="${escapeHtml(row.amount)}" placeholder="250000" />
+              <input type="text" inputmode="decimal" data-capital-field="amount" value="${escapeHtml(normalizeMoneyString(row.amount))}" placeholder="250,000" />
             </label>
           </div>
           <div class="capital-activity-row-footer">
@@ -275,6 +335,34 @@ function collectCapitalActivityRows() {
       notes: row.querySelector('[data-capital-field="notes"]')?.value || ""
     }))
     .filter((row) => row.date || row.type || row.amount || row.notes);
+}
+
+function attachFormattedInputHandlers() {
+  moneyFieldNames.forEach((name) => {
+    const field = form.elements[name];
+    if (!field || field.dataset.formattedBound === "true") {
+      return;
+    }
+
+    field.dataset.formattedBound = "true";
+    field.addEventListener("input", () => {
+      formatMoneyField(field);
+    });
+    field.addEventListener("blur", () => {
+      formatMoneyField(field);
+    });
+  });
+
+  const phoneField = form.elements.contactPhone;
+  if (phoneField && phoneField.dataset.formattedBound !== "true") {
+    phoneField.dataset.formattedBound = "true";
+    phoneField.addEventListener("input", () => {
+      phoneField.value = formatPhoneNumber(phoneField.value);
+    });
+    phoneField.addEventListener("blur", () => {
+      phoneField.value = formatPhoneNumber(phoneField.value);
+    });
+  }
 }
 
 function summarizeCapitalActivity(investment) {
@@ -410,6 +498,7 @@ function hydrateFormFromCompanyRecord(company) {
     }
   }
 
+  applyFormInputFormatting();
   return true;
 }
 
@@ -968,6 +1057,7 @@ function beginEditInvestment(investmentId) {
   submitButton.textContent = "Save changes";
   cancelEditButton.classList.remove("hidden");
   formMessage.textContent = `Editing ${investment.company}.`;
+  applyFormInputFormatting();
   showWorkspaceView("capture");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -985,6 +1075,7 @@ function resetFormToCreateMode() {
   renderUploadedDocuments();
   documentMessage.textContent = "";
   renderCapitalActivityRows([]);
+  applyFormInputFormatting();
 }
 
 function beginEditTask(taskId) {
@@ -2255,6 +2346,18 @@ capitalActivityList.addEventListener("click", (event) => {
   const rows = collectCapitalActivityRows().filter((_, rowIndex) => rowIndex !== index);
   renderCapitalActivityRows(rows);
 });
+
+capitalActivityList.addEventListener("input", (event) => {
+  const amountField = event.target.closest('[data-capital-field="amount"]');
+  if (!amountField) {
+    return;
+  }
+
+  amountField.value = normalizeMoneyString(amountField.value);
+});
+
+attachFormattedInputHandlers();
+applyFormInputFormatting();
 
 loadCompanyDetailsButton.addEventListener("click", () => {
   const company = String(form.elements.company.value || "").trim();
