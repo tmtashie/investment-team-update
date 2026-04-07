@@ -952,10 +952,12 @@ function renderDashboard(investments) {
       ({ entity, performance }) => `
         <article class="dashboard-card entity-performance-card" data-entity="${escapeHtml(entity)}">
           <p class="dashboard-label">${escapeHtml(entity)}</p>
-          <p class="dashboard-value">${escapeHtml(formatMoney(performance.investedCapital))}</p>
+          <p class="dashboard-value">${escapeHtml(formatMoney(performance.internalValue))}</p>
+          <p class="update-meta">Invested capital: ${escapeHtml(formatMoney(performance.investedCapital))}</p>
           <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(performance.officialValue))}</p>
-          <p class="update-meta">Official XIRR: ${escapeHtml(formatPercent(performance.official.xirr))}</p>
-          <p class="update-meta">Official MOIC: ${escapeHtml(formatTurns(performance.official.moic))}</p>
+          <p class="update-meta">Internal NAV: ${escapeHtml(formatMoney(performance.internalValue))}</p>
+          <p class="update-meta">Internal XIRR: ${escapeHtml(formatPercent(performance.internal.xirr))}</p>
+          <p class="update-meta">Internal MOIC: ${escapeHtml(formatTurns(performance.internal.moic))}</p>
         </article>
       `
     )
@@ -987,8 +989,9 @@ function renderEntityDetail() {
     { label: "Invested capital", value: formatMoney(performance.investedCapital) },
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official NAV", value: formatMoney(performance.officialValue) },
-    { label: "Official XIRR", value: formatPercent(performance.official.xirr) },
-    { label: "Official MOIC", value: formatTurns(performance.official.moic) },
+    { label: "Internal NAV", value: formatMoney(performance.internalValue) },
+    { label: "Internal XIRR", value: formatPercent(performance.internal.xirr) },
+    { label: "Internal MOIC", value: formatTurns(performance.internal.moic) },
     { label: "Current investments", value: String(investmentCount) }
   ]
     .map(
