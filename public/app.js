@@ -972,8 +972,10 @@ function renderEntityDetail() {
     return;
   }
 
-  const investments = allInvestments.filter(
-    (investment) => normalizeEntityName(investment.entity) === normalizeEntityName(selectedEntity)
+  const investments = sortInvestmentsAlphabetically(
+    allInvestments.filter(
+      (investment) => normalizeEntityName(investment.entity) === normalizeEntityName(selectedEntity)
+    )
   );
   const performance = entityPerformanceMap.get(selectedEntity) || buildCompanyPerformance(investments);
 
@@ -1073,6 +1075,14 @@ function summarizeText(value, fallback) {
   }
 
   return text.length > 220 ? `${text.slice(0, 217)}...` : text;
+}
+
+function sortInvestmentsAlphabetically(investments) {
+  return [...investments].sort((left, right) =>
+    String(left.company || "").localeCompare(String(right.company || ""), undefined, {
+      sensitivity: "base"
+    })
+  );
 }
 
 function beginEditInvestment(investmentId) {
@@ -1649,7 +1659,7 @@ function renderUpdates(investments) {
     return;
   }
 
-  updatesList.innerHTML = investments
+  updatesList.innerHTML = sortInvestmentsAlphabetically(investments)
     .map((investment) => {
       const performance =
         companyPerformanceMap.get(companyKey(investment.company)) || buildCompanyPerformance([investment]);
