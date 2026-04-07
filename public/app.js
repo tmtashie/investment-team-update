@@ -111,11 +111,25 @@ const moneyFieldNames = [
   "followOnCapitalAmount"
 ];
 
+const ENTITY_ALIASES = {
+  "Beaman Ventures": "Beaman Ventures",
+  "Lee Beaman": "Lee Beaman",
+  "Kat Trust": "Katherine Trust",
+  "Nat Trust": "Natalie Trust",
+  "Katherine Trust": "Katherine Trust",
+  "Natalie Trust": "Natalie Trust"
+};
+
 function companyKey(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
+}
+
+function normalizeEntityName(value) {
+  const raw = String(value || "").trim();
+  return ENTITY_ALIASES[raw] || raw;
 }
 
 function escapeHtml(value) {
@@ -543,7 +557,8 @@ function filterInvestments(investments) {
       .toLowerCase();
 
     const matchesSearch = !filters.search || searchHaystack.includes(filters.search);
-    const matchesEntity = !filters.entity || investment.entity === filters.entity;
+    const matchesEntity =
+      !filters.entity || normalizeEntityName(investment.entity) === normalizeEntityName(filters.entity);
     const matchesStatus = !filters.status || investment.status === filters.status;
     const matchesStage = !filters.stage || investment.stage === filters.stage;
     const matchesOwner = !filters.owner || investment.owner === filters.owner;
@@ -810,11 +825,17 @@ function buildCompanyPerformanceMap(investments) {
 function buildEntityPerformanceMap(investments) {
   const performanceMap = new Map();
   const entityList = Array.from(
-    new Set(configuredEntities.concat(investments.map((investment) => investment.entity).filter(Boolean)))
+    new Set(
+      configuredEntities
+        .concat(investments.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+        .map(normalizeEntityName)
+    )
   ).filter(Boolean);
 
   entityList.forEach((entity) => {
-    const entityUpdates = investments.filter((investment) => investment.entity === entity);
+    const entityUpdates = investments.filter(
+      (investment) => normalizeEntityName(investment.entity) === normalizeEntityName(entity)
+    );
     performanceMap.set(entity, buildCompanyPerformance(entityUpdates));
   });
 
@@ -882,10 +903,17 @@ function buildDashboardCards(investments) {
     { label: "Internal NAV", value: formatMoney(internalNav), action: "portfolio" }
   ];
 
-  const entityTotals = (configuredEntities.length ? configuredEntities : [])
+  const entityTotals = (configuredEntities.length ? configuredEntities.map(normalizeEntityName) : [])
     .map((entity) => ({
       label: entity,
-      value: String(investments.filter((investment) => investment.entity === entity).length),
+      value: String(
+        new Set(
+          investments
+            .filter((investment) => normalizeEntityName(investment.entity) === normalizeEntityName(entity))
+            .map((investment) => companyKey(investment.company))
+            .filter(Boolean)
+        ).size
+      ),
       action: "entity",
       entity
     }));
@@ -913,7 +941,11 @@ function renderDashboard(investments) {
 
   const entityCards = Array.from(entityPerformanceMap.entries())
     .map(([entity, performance]) => ({ entity, performance }))
-    .filter(({ entity }) => !currentFilters().entity || currentFilters().entity === entity);
+    .filter(
+      ({ entity }) =>
+        !currentFilters().entity ||
+        normalizeEntityName(currentFilters().entity) === normalizeEntityName(entity)
+    );
 
   entityPerformanceCards.innerHTML = entityCards
     .map(
@@ -940,19 +972,22 @@ function renderEntityDetail() {
     return;
   }
 
-  const investments = allInvestments.filter((investment) => investment.entity === selectedEntity);
+  const investments = allInvestments.filter(
+    (investment) => normalizeEntityName(investment.entity) === normalizeEntityName(selectedEntity)
+  );
   const performance = entityPerformanceMap.get(selectedEntity) || buildCompanyPerformance(investments);
 
   entityDetailSection.classList.remove("hidden");
   entityDetailTitle.textContent = selectedEntity;
-  entityDetailCopy.textContent = `${investments.length} investment update${investments.length === 1 ? "" : "s"} tracked under this entity.`;
+  const investmentCount = new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean)).size;
+  entityDetailCopy.textContent = `${investmentCount} investment${investmentCount === 1 ? "" : "s"} tracked under this entity.`;
   entityDetailSummary.innerHTML = [
     { label: "Invested capital", value: formatMoney(performance.investedCapital) },
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official NAV", value: formatMoney(performance.officialValue) },
     { label: "Official XIRR", value: formatPercent(performance.official.xirr) },
     { label: "Official MOIC", value: formatTurns(performance.official.moic) },
-    { label: "Current investments", value: String(investments.length) }
+    { label: "Current investments", value: String(investmentCount) }
   ]
     .map(
       (item) => `
@@ -993,7 +1028,11 @@ function renderEntityDetail() {
 
 function renderFilterOptions() {
   const entities = Array.from(
-    new Set(configuredEntities.concat(allInvestments.map((item) => item.entity).filter(Boolean)))
+    new Set(
+      configuredEntities
+        .concat(allInvestments.map((item) => normalizeEntityName(item.entity)).filter(Boolean))
+        .map(normalizeEntityName)
+    )
   ).sort();
   const statuses = Array.from(new Set(allInvestments.map((item) => item.status).filter(Boolean))).sort();
   const stages = Array.from(new Set(allInvestments.map((item) => item.stage).filter(Boolean))).sort();
@@ -1265,11 +1304,13 @@ function renderCompanyPanel() {
           investment.ownershipNotes
       );
   const perEntityCompanyPerformance = Array.from(
-    new Set(companyUpdates.map((investment) => investment.entity).filter(Boolean))
+    new Set(companyUpdates.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
   ).map((entity) => ({
     entity,
     performance: buildCompanyPerformance(
-      companyUpdates.filter((investment) => investment.entity === entity)
+      companyUpdates.filter(
+        (investment) => normalizeEntityName(investment.entity) === normalizeEntityName(entity)
+      )
     )
   }));
   companyPanel.classList.remove("hidden");
@@ -1281,7 +1322,7 @@ function renderCompanyPanel() {
     : `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
   companySummary.innerHTML = [
     { label: "Latest status", value: latest.status || "Not set" },
-    { label: "Latest entity", value: latest.entity || "Not set" },
+    { label: "Latest entity", value: normalizeEntityName(latest.entity) || "Not set" },
     { label: "Latest stage", value: latest.stage || "Not set" },
     { label: "Latest owner", value: latest.owner || "Not set" },
     { label: "Reported amount", value: formatMoney(totalAmount) }
@@ -1300,7 +1341,13 @@ function renderCompanyPanel() {
     { label: "First entered", value: earliest.createdAt || "Unknown" },
     { label: "Latest update", value: latest.createdAt || "Unknown" },
     { label: "Submitted by", value: latest.submittedBy || "Unknown" },
-    { label: "Entities used", value: Array.from(new Set(companyUpdates.map((investment) => investment.entity).filter(Boolean))).join(", ") || "Not set" },
+    {
+      label: "Entities used",
+      value:
+        Array.from(
+          new Set(companyUpdates.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+        ).join(", ") || "Not set"
+    },
     { label: "Owners involved", value: uniqueOwners.length ? uniqueOwners.join(", ") : "Not set" },
     { label: "Statuses used", value: uniqueStatuses.length ? uniqueStatuses.join(", ") : "Not set" },
     { label: "Latest notes", value: latest.notes || "No notes provided." },
