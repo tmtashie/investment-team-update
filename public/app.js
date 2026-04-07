@@ -718,7 +718,7 @@ function pickLatestNumericValue(updates, fieldName) {
   return { value: 0, date: parseDateValue(sorted[0] && sorted[0].createdAt, new Date()) };
 }
 
-function buildCompanyPerformance(updates) {
+function buildPerformanceInputs(updates) {
   const normalizedActivities = updates.flatMap((update) => {
     const activityRows = normalizeCapitalActivityRows(
       update.capitalActivity && update.capitalActivity.length
@@ -753,8 +753,6 @@ function buildCompanyPerformance(updates) {
   const officialMark = pickLatestNumericValue(updates, "officialValue");
   const internalMark = pickLatestNumericValue(updates, "internalValue");
   const exitMark = pickLatestNumericValue(updates, "exitValue");
-  const valuationDate =
-    officialMark.date || internalMark.date || exitMark.date || new Date();
 
   const baseCashFlows = [];
   normalizedActivities.forEach((activity) => {
@@ -774,18 +772,40 @@ function buildCompanyPerformance(updates) {
     baseCashFlows.push({ date, amount });
   });
 
-  const buildView = (terminalValue) => {
-    const cashFlows = [...baseCashFlows];
-    if (terminalValue > 0 && valuationDate) {
-      cashFlows.push({ date: valuationDate, amount: terminalValue });
-    }
-
-    return {
-      xirr: calculateXirr(cashFlows),
-      moic:
-        investedCapital > 0 ? (distributions + terminalValue) / investedCapital : null
-    };
+  return {
+    investedCapital,
+    distributions,
+    officialMark,
+    internalMark,
+    exitMark,
+    baseCashFlows
   };
+}
+
+function buildPerformanceView(baseCashFlows, terminalMark, investedCapital, distributions) {
+  const terminalValue = terminalMark && terminalMark.value ? terminalMark.value : 0;
+  const terminalDate = terminalMark && terminalMark.date ? terminalMark.date : null;
+  const cashFlows = [...baseCashFlows];
+  if (terminalValue > 0 && terminalDate) {
+    cashFlows.push({ date: terminalDate, amount: terminalValue });
+  }
+
+  return {
+    xirr: calculateXirr(cashFlows),
+    moic:
+      investedCapital > 0 ? (distributions + terminalValue) / investedCapital : null
+  };
+}
+
+function buildCompanyPerformance(updates) {
+  const {
+    investedCapital,
+    distributions,
+    officialMark,
+    internalMark,
+    exitMark,
+    baseCashFlows
+  } = buildPerformanceInputs(updates);
 
   return {
     investedCapital,
@@ -793,9 +813,93 @@ function buildCompanyPerformance(updates) {
     officialValue: officialMark.value,
     internalValue: internalMark.value,
     exitValue: exitMark.value,
-    official: buildView(officialMark.value),
-    internal: buildView(internalMark.value),
-    exit: buildView(exitMark.value)
+    official: buildPerformanceView(baseCashFlows, officialMark, investedCapital, distributions),
+    internal: buildPerformanceView(baseCashFlows, internalMark, investedCapital, distributions),
+    exit: buildPerformanceView(baseCashFlows, exitMark, investedCapital, distributions)
+  };
+}
+
+function getCompanyCollections(investments) {
+  if (allCompanies.length) {
+    return allCompanies
+      .map((company) => ({
+        key: company.companyKey,
+        latest: company.updates[0],
+        updates: company.updates,
+        performance: buildCompanyPerformance(company.updates)
+      }))
+      .filter((company) => company.latest);
+  }
+
+  return Array.from(new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean)))
+    .map((key) => {
+      const updates = investments.filter((investment) => companyKey(investment.company) === key);
+      return {
+        key,
+        latest: updates.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0],
+        updates,
+        performance: buildCompanyPerformance(updates)
+      };
+    })
+    .filter((company) => company.latest);
+}
+
+function buildAggregatePerformance(companyCollections) {
+  const companyInputs = companyCollections.map((company) => ({
+    company,
+    inputs: buildPerformanceInputs(company.updates)
+  }));
+
+  const investedCapital = companyInputs.reduce(
+    (sum, { inputs }) => sum + inputs.investedCapital,
+    0
+  );
+  const distributions = companyInputs.reduce(
+    (sum, { inputs }) => sum + inputs.distributions,
+    0
+  );
+  const officialValue = companyInputs.reduce(
+    (sum, { inputs }) => sum + inputs.officialMark.value,
+    0
+  );
+  const internalValue = companyInputs.reduce(
+    (sum, { inputs }) => sum + inputs.internalMark.value,
+    0
+  );
+  const exitValue = companyInputs.reduce(
+    (sum, { inputs }) => sum + inputs.exitMark.value,
+    0
+  );
+
+  const buildAggregateView = (markName) => {
+    const cashFlows = [];
+    let terminalTotal = 0;
+
+    companyInputs.forEach(({ inputs }) => {
+      cashFlows.push(...inputs.baseCashFlows);
+      const terminalMark = inputs[markName];
+      if (terminalMark.value > 0 && terminalMark.date) {
+        cashFlows.push({ date: terminalMark.date, amount: terminalMark.value });
+        terminalTotal += terminalMark.value;
+      }
+    });
+
+    return {
+      xirr: calculateXirr(cashFlows),
+      moic:
+        investedCapital > 0 ? (distributions + terminalTotal) / investedCapital : null
+    };
+  };
+
+  return {
+    investedCapital,
+    distributions,
+    officialValue,
+    internalValue,
+    exitValue,
+    official: buildAggregateView("officialMark"),
+    internal: buildAggregateView("internalMark"),
+    exit: buildAggregateView("exitMark")
   };
 }
 
@@ -824,41 +928,29 @@ function buildCompanyPerformanceMap(investments) {
 
 function buildEntityPerformanceMap(investments) {
   const performanceMap = new Map();
+  const companyCollections = getCompanyCollections(investments);
   const entityList = Array.from(
     new Set(
       configuredEntities
-        .concat(investments.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+        .concat(
+          companyCollections.map((company) => normalizeEntityName(company.latest.entity)).filter(Boolean)
+        )
         .map(normalizeEntityName)
     )
   ).filter(Boolean);
 
   entityList.forEach((entity) => {
-    const entityUpdates = investments.filter(
-      (investment) => normalizeEntityName(investment.entity) === normalizeEntityName(entity)
+    const entityCompanies = companyCollections.filter(
+      (company) => normalizeEntityName(company.latest.entity) === normalizeEntityName(entity)
     );
-    performanceMap.set(entity, buildCompanyPerformance(entityUpdates));
+    performanceMap.set(entity, buildAggregatePerformance(entityCompanies));
   });
 
   return performanceMap;
 }
 
 function buildDashboardCards(investments) {
-  const companySummaries = (allCompanies.length
-    ? allCompanies.map((company) => ({
-        key: company.companyKey,
-        latest: company.updates[0],
-        performance: buildCompanyPerformance(company.updates)
-      }))
-    : Array.from(new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean)))
-        .map((key) => {
-          const updates = investments.filter((investment) => companyKey(investment.company) === key);
-          return {
-            key,
-            latest: updates.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0],
-            performance: buildCompanyPerformance(updates)
-          };
-        }))
-    .filter(Boolean);
+  const companySummaries = getCompanyCollections(investments);
   const openCount = companySummaries.filter(
     (summary) => !["Passed", "Closed"].includes(summary.latest && summary.latest.status)
   ).length;
@@ -907,12 +999,9 @@ function buildDashboardCards(investments) {
     .map((entity) => ({
       label: entity,
       value: String(
-        new Set(
-          investments
-            .filter((investment) => normalizeEntityName(investment.entity) === normalizeEntityName(entity))
-            .map((investment) => companyKey(investment.company))
-            .filter(Boolean)
-        ).size
+        companySummaries.filter(
+          (company) => normalizeEntityName(company.latest.entity) === normalizeEntityName(entity)
+        ).length
       ),
       action: "entity",
       entity
