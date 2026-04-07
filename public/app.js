@@ -88,6 +88,7 @@ const researchDeckFeed = document.getElementById("researchDeckFeed");
 const researchNotesFeed = document.getElementById("researchNotesFeed");
 const researchDocumentsFeed = document.getElementById("researchDocumentsFeed");
 const researchDecisionFeed = document.getElementById("researchDecisionFeed");
+const reconciliationList = document.getElementById("reconciliationList");
 const workspaceViews = Array.from(document.querySelectorAll(".workspace-view"));
 const workspaceMenuLinks = Array.from(document.querySelectorAll(".menu-link[data-view]"));
 
@@ -1945,6 +1946,89 @@ function renderResearchLibrary(investments) {
     : '<p class="update-meta">No decisions recorded yet.</p>';
 }
 
+function renderReconciliation() {
+  const companySummaries = getCompanyCollections(allInvestments);
+  const entities = Array.from(
+    new Set(
+      configuredEntities
+        .concat(companySummaries.map((company) => normalizeEntityName(company.latest.entity)).filter(Boolean))
+        .map(normalizeEntityName)
+    )
+  ).filter(Boolean);
+
+  if (!entities.length) {
+    reconciliationList.innerHTML =
+      '<p class="update-meta">No entity data is available yet.</p>';
+    return;
+  }
+
+  reconciliationList.innerHTML = entities
+    .map((entity) => {
+      const entityCompanies = companySummaries
+        .filter((company) => normalizeEntityName(company.latest.entity) === normalizeEntityName(entity))
+        .sort((left, right) =>
+          String(left.latest.company || "").localeCompare(String(right.latest.company || ""), undefined, {
+            sensitivity: "base"
+          })
+        );
+      const entityPerformance = entityPerformanceMap.get(entity) || buildAggregatePerformance(entityCompanies);
+
+      return `
+        <section class="reconciliation-card">
+          <div class="panel-header">
+            <div>
+              <h3>${escapeHtml(entity)}</h3>
+              <p class="section-copy">${entityCompanies.length} investment${entityCompanies.length === 1 ? "" : "s"} included in this entity total.</p>
+            </div>
+          </div>
+          <table class="reconciliation-table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Stage</th>
+                <th>Status</th>
+                <th>Invested capital</th>
+                <th>Official NAV</th>
+                <th>Internal NAV</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${entityCompanies.length
+                ? entityCompanies
+                    .map(
+                      ({ latest, performance }) => `
+                        <tr>
+                          <td>
+                            <button class="link-button company-link" type="button" data-company="${escapeHtml(latest.company)}">
+                              ${escapeHtml(latest.company)}
+                            </button>
+                          </td>
+                          <td>${escapeHtml(latest.stage || "Not set")}</td>
+                          <td>${escapeHtml(latest.status || "Not set")}</td>
+                          <td>${escapeHtml(formatMoney(performance.investedCapital))}</td>
+                          <td>${escapeHtml(formatMoney(performance.officialValue))}</td>
+                          <td>${escapeHtml(formatMoney(performance.internalValue))}</td>
+                        </tr>
+                      `
+                    )
+                    .join("")
+                : `<tr><td colspan="6" class="update-meta">No investments are assigned to this entity.</td></tr>`}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3">Subtotal</td>
+                <td>${escapeHtml(formatMoney(entityPerformance.investedCapital))}</td>
+                <td>${escapeHtml(formatMoney(entityPerformance.officialValue))}</td>
+                <td>${escapeHtml(formatMoney(entityPerformance.internalValue))}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+      `;
+    })
+    .join("");
+}
+
 function renderAll() {
   companyPerformanceMap = buildCompanyPerformanceMap(allInvestments);
   entityPerformanceMap = buildEntityPerformanceMap(allInvestments);
@@ -1956,6 +2040,7 @@ function renderAll() {
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
   renderTasks();
+  renderReconciliation();
   renderCompanyPanel();
   renderEntityDetail();
 }
@@ -2794,6 +2879,23 @@ entityDetailInvestments.addEventListener("click", (event) => {
   if (action === "delete" && investmentId) {
     deleteInvestmentById(investmentId);
   }
+});
+
+reconciliationList.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-company]");
+  if (!target) {
+    return;
+  }
+
+  const company = target.dataset.company || "";
+  if (!company) {
+    return;
+  }
+
+  selectedCompany = company;
+  renderCompanyPanel();
+  showWorkspaceView("portfolio");
+  window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
 tasksList.addEventListener("click", (event) => {

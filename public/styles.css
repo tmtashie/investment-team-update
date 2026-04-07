@@ -819,6 +819,47 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.reconciliation-list {
+  display: grid;
+  gap: 18px;
+}
+
+.reconciliation-card {
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.9);
+  display: grid;
+  gap: 14px;
+}
+
+.reconciliation-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.96rem;
+}
+
+.reconciliation-table th,
+.reconciliation-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(23, 50, 77, 0.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+.reconciliation-table th {
+  color: var(--muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reconciliation-table tfoot td {
+  font-weight: 700;
+  border-bottom: none;
+  border-top: 2px solid rgba(23, 50, 77, 0.12);
+}
+
 a.secondary-button.inline-action-button {
   display: inline-flex;
   align-items: center;

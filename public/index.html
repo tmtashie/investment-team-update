@@ -35,6 +35,7 @@
           <button type="button" class="menu-link" data-view="research">Decks and notes</button>
           <button type="button" class="menu-link" data-view="tasks">Tasks and reminders</button>
           <button type="button" class="menu-link" data-view="exports">Exports and backup</button>
+          <button type="button" class="menu-link" data-view="reconciliation">Entity reconciliation</button>
         </nav>
         <div class="hero-grid hero-grid-minimal">
           <div class="hero-copy-block hero-copy-block-minimal">
@@ -804,6 +805,16 @@
             </div>
           </div>
           <p id="importWorkbookMessage" class="form-message" aria-live="polite"></p>
+        </section>
+
+        <section id="reconciliationSection" class="panel workspace-view hidden" data-view="reconciliation">
+          <div class="panel-header">
+            <div>
+              <h2>Entity reconciliation</h2>
+              <p class="section-copy">Review every company and invested capital amount contributing to each entity total.</p>
+            </div>
+          </div>
+          <div id="reconciliationList" class="reconciliation-list"></div>
         </section>
       </section>
     </main>
