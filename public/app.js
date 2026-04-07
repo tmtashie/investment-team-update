@@ -1804,7 +1804,7 @@ function renderAll() {
   renderCompanySuggestions();
   renderFilterOptions();
   const filteredInvestments = filterInvestments(allInvestments);
-  renderDashboard(filteredInvestments);
+  renderDashboard(allInvestments);
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
   renderTasks();
