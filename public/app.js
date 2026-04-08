@@ -1406,16 +1406,65 @@ async function deleteInvestmentById(investmentId) {
   }
 }
 
-async function saveReportedAmountFromReconciliation(investmentId, amountValue) {
+function buildReconciliationCapitalActivity(investment, investedCapitalValue) {
+  const normalizedAmount = normalizeMoneyString(investedCapitalValue);
+  const existingRows = normalizeCapitalActivityRows(
+    investment.capitalActivity && investment.capitalActivity.length
+      ? investment.capitalActivity
+      : buildLegacyCapitalActivityRows(investment)
+  );
+
+  const contributionRows = existingRows.filter((row) => {
+    const type = String(row.type || "").toLowerCase();
+    return (
+      type.includes("capital call") ||
+      type.includes("investment amount") ||
+      type.includes("fee")
+    );
+  });
+
+  const nonContributionRows = existingRows.filter((row) => {
+    const type = String(row.type || "").toLowerCase();
+    return !(
+      type.includes("capital call") ||
+      type.includes("investment amount") ||
+      type.includes("fee")
+    );
+  });
+
+  const contributionDate =
+    contributionRows
+      .map((row) => row.date)
+      .filter(Boolean)
+      .sort()[0] || investment.capitalCallDate || investment.createdAt || "";
+
+  return normalizedAmount
+    ? [
+        {
+          date: contributionDate,
+          type: "Investment Amount",
+          amount: normalizedAmount,
+          notes: "Updated from entity reconciliation"
+        }
+      ].concat(nonContributionRows)
+    : nonContributionRows;
+}
+
+async function saveReconciliationRow(investmentId, values) {
   const investment = allInvestments.find((item) => item.id === investmentId);
   if (!investment) {
     return;
   }
 
+  const reportedAmount = normalizeMoneyString(values.reportedAmount);
+  const investedCapital = normalizeMoneyString(values.investedCapital);
+  const officialValue = normalizeMoneyString(values.officialValue);
+  const internalValue = normalizeMoneyString(values.internalValue);
+
   const payload = {
     company: investment.company,
     entity: investment.entity,
-    amount: normalizeMoneyString(amountValue),
+    amount: reportedAmount,
     currency: investment.currency || "USD",
     stage: investment.stage || "",
     status: investment.status || "",
@@ -1423,14 +1472,14 @@ async function saveReportedAmountFromReconciliation(investmentId, amountValue) {
     nextStep: investment.nextStep || "",
     notes: investment.notes || "",
     deckSummary: investment.deckSummary || "",
-    capitalActivity: investment.capitalActivity || [],
+    capitalActivity: buildReconciliationCapitalActivity(investment, investedCapital),
     capitalCallDate: investment.capitalCallDate || "",
     capitalCallAmount: investment.capitalCallAmount || "",
     distributionDate: investment.distributionDate || "",
     distributionAmount: investment.distributionAmount || "",
     valuationDate: investment.valuationDate || "",
-    officialValue: investment.officialValue || "",
-    internalValue: investment.internalValue || "",
+    officialValue,
+    internalValue,
     exitValue: investment.exitValue || "",
     ownershipPercent: investment.ownershipPercent || "",
     entityOwnershipPercent: investment.entityOwnershipPercent || "",
@@ -2169,13 +2218,37 @@ function renderReconciliation() {
                               canEditWorkspace()
                                 ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
                                     normalizeMoneyString(latest.amount || "")
-                                  )}" data-amount-input="true" data-id="${escapeHtml(latest.id)}" aria-label="Reported amount for ${escapeHtml(latest.company)}" />`
+                                  )}" data-amount-input="true" data-field="reportedAmount" data-id="${escapeHtml(latest.id)}" aria-label="Reported amount for ${escapeHtml(latest.company)}" />`
                                 : escapeHtml(formatMoney(toNumber(latest.amount)))
                             }
                           </td>
-                          <td>${escapeHtml(formatMoney(performance.investedCapital))}</td>
-                          <td>${escapeHtml(formatMoney(performance.officialValue))}</td>
-                          <td>${escapeHtml(formatMoney(performance.internalValue))}</td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
+                                    normalizeMoneyString(performance.investedCapital)
+                                  )}" data-amount-input="true" data-field="investedCapital" data-id="${escapeHtml(latest.id)}" aria-label="Invested capital for ${escapeHtml(latest.company)}" />`
+                                : escapeHtml(formatMoney(performance.investedCapital))
+                            }
+                          </td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
+                                    normalizeMoneyString(performance.officialValue)
+                                  )}" data-amount-input="true" data-field="officialValue" data-id="${escapeHtml(latest.id)}" aria-label="Official NAV for ${escapeHtml(latest.company)}" />`
+                                : escapeHtml(formatMoney(performance.officialValue))
+                            }
+                          </td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
+                                    normalizeMoneyString(performance.internalValue)
+                                  )}" data-amount-input="true" data-field="internalValue" data-id="${escapeHtml(latest.id)}" aria-label="Internal NAV for ${escapeHtml(latest.company)}" />`
+                                : escapeHtml(formatMoney(performance.internalValue))
+                            }
+                          </td>
                           ${
                             canEditWorkspace()
                               ? `<td><button class="secondary-button card-action-button" type="button" data-action="save-reconciliation-amount" data-id="${escapeHtml(
@@ -3066,14 +3139,25 @@ reconciliationList.addEventListener("click", (event) => {
   const saveButton = event.target.closest("[data-action='save-reconciliation-amount']");
   if (saveButton) {
     const investmentId = saveButton.dataset.id || "";
-    const input = reconciliationList.querySelector(`[data-amount-input="true"][data-id="${CSS.escape(investmentId)}"]`);
-    if (!investmentId || !input) {
+    if (!investmentId) {
       return;
     }
 
+    const inputs = Array.from(
+      reconciliationList.querySelectorAll(`[data-amount-input="true"][data-id="${CSS.escape(investmentId)}"]`)
+    );
+    if (!inputs.length) {
+      return;
+    }
+
+    const values = inputs.reduce((result, input) => {
+      result[input.dataset.field] = input.value;
+      return result;
+    }, {});
+
     saveButton.disabled = true;
     saveButton.textContent = "Saving...";
-    saveReportedAmountFromReconciliation(investmentId, input.value)
+    saveReconciliationRow(investmentId, values)
       .catch((error) => {
         formMessage.textContent = error.message;
       })
