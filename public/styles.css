@@ -860,6 +860,17 @@ button:disabled {
   border-top: 2px solid rgba(23, 50, 77, 0.12);
 }
 
+.reconciliation-amount-input {
+  width: 140px;
+  min-width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff7c9;
+  color: var(--ink);
+  font: inherit;
+}
+
 a.secondary-button.inline-action-button {
   display: inline-flex;
   align-items: center;

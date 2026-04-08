@@ -1406,6 +1406,61 @@ async function deleteInvestmentById(investmentId) {
   }
 }
 
+async function saveReportedAmountFromReconciliation(investmentId, amountValue) {
+  const investment = allInvestments.find((item) => item.id === investmentId);
+  if (!investment) {
+    return;
+  }
+
+  const payload = {
+    company: investment.company,
+    entity: investment.entity,
+    amount: normalizeMoneyString(amountValue),
+    currency: investment.currency || "USD",
+    stage: investment.stage || "",
+    status: investment.status || "",
+    owner: investment.owner || "",
+    nextStep: investment.nextStep || "",
+    notes: investment.notes || "",
+    deckSummary: investment.deckSummary || "",
+    capitalActivity: investment.capitalActivity || [],
+    capitalCallDate: investment.capitalCallDate || "",
+    capitalCallAmount: investment.capitalCallAmount || "",
+    distributionDate: investment.distributionDate || "",
+    distributionAmount: investment.distributionAmount || "",
+    valuationDate: investment.valuationDate || "",
+    officialValue: investment.officialValue || "",
+    internalValue: investment.internalValue || "",
+    exitValue: investment.exitValue || "",
+    ownershipPercent: investment.ownershipPercent || "",
+    entityOwnershipPercent: investment.entityOwnershipPercent || "",
+    ownershipNotes: investment.ownershipNotes || "",
+    followOnCapitalAmount: investment.followOnCapitalAmount || "",
+    followOnCapitalStatus: investment.followOnCapitalStatus || "",
+    followOnCapitalNotes: investment.followOnCapitalNotes || "",
+    contactName: investment.contactName || "",
+    contactPosition: investment.contactPosition || "",
+    contactEmail: investment.contactEmail || "",
+    contactPhone: investment.contactPhone || "",
+    documentLinks: investment.documentLinks || "",
+    documents: Array.isArray(investment.documents) ? investment.documents : [],
+    decisionDate: investment.decisionDate || "",
+    decisionType: investment.decisionType || "",
+    decisionSummary: investment.decisionSummary || "",
+    recipients: Array.isArray(investment.recipients) ? investment.recipients : []
+  };
+
+  await fetchJson(`/api/investments/${investmentId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  await loadUpdates();
+}
+
 function renderCompanyPanel() {
   if (!selectedCompany) {
     companyPanel.classList.add("hidden");
@@ -2089,9 +2144,11 @@ function renderReconciliation() {
                 <th>Company</th>
                 <th>Stage</th>
                 <th>Status</th>
+                <th>Reported amount</th>
                 <th>Invested capital</th>
                 <th>Official NAV</th>
                 <th>Internal NAV</th>
+                ${canEditWorkspace() ? "<th>Edit</th>" : ""}
               </tr>
             </thead>
             <tbody>
@@ -2107,21 +2164,38 @@ function renderReconciliation() {
                           </td>
                           <td>${escapeHtml(latest.stage || "Not set")}</td>
                           <td>${escapeHtml(latest.status || "Not set")}</td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
+                                    normalizeMoneyString(latest.amount || "")
+                                  )}" data-amount-input="true" data-id="${escapeHtml(latest.id)}" aria-label="Reported amount for ${escapeHtml(latest.company)}" />`
+                                : escapeHtml(formatMoney(toNumber(latest.amount)))
+                            }
+                          </td>
                           <td>${escapeHtml(formatMoney(performance.investedCapital))}</td>
                           <td>${escapeHtml(formatMoney(performance.officialValue))}</td>
                           <td>${escapeHtml(formatMoney(performance.internalValue))}</td>
+                          ${
+                            canEditWorkspace()
+                              ? `<td><button class="secondary-button card-action-button" type="button" data-action="save-reconciliation-amount" data-id="${escapeHtml(
+                                  latest.id
+                                )}">Save</button></td>`
+                              : ""
+                          }
                         </tr>
                       `
                     )
                     .join("")
-                : `<tr><td colspan="6" class="update-meta">No investments are assigned to this entity.</td></tr>`}
+                : `<tr><td colspan="${canEditWorkspace() ? "8" : "7"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="3">Subtotal</td>
+                <td colspan="${canEditWorkspace() ? "4" : "4"}">Subtotal</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.investedCapital))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.officialValue))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.internalValue))}</td>
+                ${canEditWorkspace() ? "<td></td>" : ""}
               </tr>
             </tfoot>
           </table>
@@ -2989,6 +3063,27 @@ entityDetailInvestments.addEventListener("click", (event) => {
 });
 
 reconciliationList.addEventListener("click", (event) => {
+  const saveButton = event.target.closest("[data-action='save-reconciliation-amount']");
+  if (saveButton) {
+    const investmentId = saveButton.dataset.id || "";
+    const input = reconciliationList.querySelector(`[data-amount-input="true"][data-id="${CSS.escape(investmentId)}"]`);
+    if (!investmentId || !input) {
+      return;
+    }
+
+    saveButton.disabled = true;
+    saveButton.textContent = "Saving...";
+    saveReportedAmountFromReconciliation(investmentId, input.value)
+      .catch((error) => {
+        formMessage.textContent = error.message;
+      })
+      .finally(() => {
+        saveButton.disabled = false;
+        saveButton.textContent = "Save";
+      });
+    return;
+  }
+
   const target = event.target.closest("[data-company]");
   if (!target) {
     return;
@@ -3005,6 +3100,15 @@ reconciliationList.addEventListener("click", (event) => {
   renderCompanyPanel();
   showWorkspaceView("portfolio");
   window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+reconciliationList.addEventListener("input", (event) => {
+  const target = event.target.closest("[data-amount-input='true']");
+  if (!target) {
+    return;
+  }
+
+  target.value = normalizeMoneyString(target.value);
 });
 
 tasksList.addEventListener("click", (event) => {
