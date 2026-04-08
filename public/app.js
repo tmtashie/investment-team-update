@@ -96,6 +96,7 @@ let currentUser = null;
 let allInvestments = [];
 let allCompanies = [];
 let selectedCompany = "";
+let selectedCompanyEntity = "";
 let configuredEntities = [];
 let companyPerformanceMap = new Map();
 let entityPerformanceMap = new Map();
@@ -131,6 +132,24 @@ function companyKey(value) {
 function normalizeEntityName(value) {
   const raw = String(value || "").trim();
   return ENTITY_ALIASES[raw] || raw;
+}
+
+function entityKey(value) {
+  return companyKey(normalizeEntityName(value));
+}
+
+function companyEntityKey(company, entity) {
+  const normalizedCompany = companyKey(company);
+  if (!normalizedCompany) {
+    return "";
+  }
+
+  const normalizedEntity = entityKey(entity);
+  return normalizedEntity ? `${normalizedCompany}::${normalizedEntity}` : normalizedCompany;
+}
+
+function getInvestmentPositionKey(investment) {
+  return companyEntityKey(investment && investment.company, investment && investment.entity);
 }
 
 function escapeHtml(value) {
@@ -462,13 +481,17 @@ function currentFilters() {
   };
 }
 
-function findCompanyRecord(company) {
-  const key = companyKey(company);
-  return allCompanies.find((record) => record.companyKey === key) || null;
+function findCompanyRecord(company, entity = "") {
+  const key = companyEntityKey(company, entity);
+  if (!key) {
+    return null;
+  }
+
+  return getCompanyCollections(allInvestments).find((record) => record.key === key) || null;
 }
 
 function hydrateFormFromCompanyRecord(company) {
-  const companyRecord = findCompanyRecord(company);
+  const companyRecord = findCompanyRecord(company, form.elements.entity ? form.elements.entity.value : "");
   if (!companyRecord || !companyRecord.updates || !companyRecord.updates.length) {
     return false;
   }
@@ -823,23 +846,89 @@ function buildCompanyPerformance(updates) {
 function getCompanyCollections(investments) {
   if (allCompanies.length) {
     return allCompanies
-      .map((company) => ({
-        key: company.companyKey,
-        latest: company.updates[0],
-        updates: company.updates,
-        performance: buildCompanyPerformance(company.updates)
-      }))
+      .flatMap((company) => {
+        const groupedUpdates = new Map();
+
+        (company.updates || []).forEach((investment) => {
+          const key = getInvestmentPositionKey(investment);
+          if (!key) {
+            return;
+          }
+
+          if (!groupedUpdates.has(key)) {
+            groupedUpdates.set(key, []);
+          }
+
+          groupedUpdates.get(key).push(investment);
+        });
+
+        return Array.from(groupedUpdates.entries()).map(([key, updates]) => {
+          const sortedUpdates = [...updates].sort(
+            (left, right) => new Date(right.createdAt) - new Date(left.createdAt)
+          );
+          const latest = sortedUpdates[0];
+          const sameEntity = (row) =>
+            normalizeEntityName(row && row.entity) === normalizeEntityName(latest.entity);
+
+          return {
+            key,
+            companyKey: company.companyKey,
+            latest,
+            updates: sortedUpdates,
+            tasks: (company.tasks || []).filter(sameEntity),
+            documents: (company.documents || []).filter(
+              (document) => !document.entity || sameEntity(document)
+            ),
+            researchEntries: (company.researchEntries || []).filter(
+              (entry) => !entry.entity || sameEntity(entry)
+            ),
+            capitalActivities: (company.capitalActivities || []).filter(
+              (entry) => !entry.entity || sameEntity(entry)
+            ),
+            followOnHistory: (company.followOnHistory || []).filter(
+              (entry) => !entry.entity || sameEntity(entry)
+            ),
+            decisionLog: (company.decisionLog || []).filter(
+              (entry) => !entry.entity || sameEntity(entry)
+            ),
+            valuationHistory: (company.valuationHistory || []).filter(
+              (entry) => !entry.entity || sameEntity(entry)
+            ),
+            ownershipHistory: (company.ownershipHistory || []).filter(
+              (entry) => !entry.entity || sameEntity(entry)
+            ),
+            performance: buildCompanyPerformance(sortedUpdates)
+          };
+        });
+      })
       .filter((company) => company.latest);
   }
 
-  return Array.from(new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean)))
-    .map((key) => {
-      const updates = investments.filter((investment) => companyKey(investment.company) === key);
+  const grouped = new Map();
+
+  investments.forEach((investment) => {
+    const key = getInvestmentPositionKey(investment);
+    if (!key) {
+      return;
+    }
+
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+
+    grouped.get(key).push(investment);
+  });
+
+  return Array.from(grouped.entries())
+    .map(([key, updates]) => {
+      const sortedUpdates = [...updates].sort(
+        (left, right) => new Date(right.createdAt) - new Date(left.createdAt)
+      );
       return {
         key,
-        latest: updates.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0],
-        updates,
-        performance: buildCompanyPerformance(updates)
+        latest: sortedUpdates[0],
+        updates: sortedUpdates,
+        performance: buildCompanyPerformance(sortedUpdates)
       };
     })
     .filter((company) => company.latest);
@@ -908,7 +997,7 @@ function buildCompanyPerformanceMap(investments) {
   const grouped = new Map();
 
   investments.forEach((investment) => {
-    const key = companyKey(investment.company);
+    const key = getInvestmentPositionKey(investment);
     if (!key) {
       return;
     }
@@ -1072,7 +1161,9 @@ function renderEntityDetail() {
 
   entityDetailSection.classList.remove("hidden");
   entityDetailTitle.textContent = selectedEntity;
-  const investmentCount = new Set(investments.map((investment) => companyKey(investment.company)).filter(Boolean)).size;
+  const investmentCount = new Set(
+    investments.map((investment) => getInvestmentPositionKey(investment)).filter(Boolean)
+  ).size;
   entityDetailCopy.textContent = `${investmentCount} investment${investmentCount === 1 ? "" : "s"} tracked under this entity.`;
   entityDetailSummary.innerHTML = [
     { label: "Invested capital", value: formatMoney(performance.investedCapital) },
@@ -1097,11 +1188,12 @@ function renderEntityDetail() {
     ? investments
         .map((investment) => {
           const companyPerformance =
-            companyPerformanceMap.get(companyKey(investment.company)) || buildCompanyPerformance([investment]);
+            companyPerformanceMap.get(getInvestmentPositionKey(investment)) ||
+            buildCompanyPerformance([investment]);
           return `
             <article class="update-card">
               <div class="update-head">
-                <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}">
+                <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
                   ${escapeHtml(investment.company)}
                 </button>
                 <span class="status-chip">${escapeHtml(investment.status || "Update")}</span>
@@ -1110,7 +1202,7 @@ function renderEntityDetail() {
               <p class="update-meta">Official NAV ${escapeHtml(formatMoney(companyPerformance.officialValue))} • XIRR ${escapeHtml(formatPercent(companyPerformance.official.xirr))}</p>
               <p class="update-notes">${escapeHtml(summarizeText(investment.notes, "No notes provided."))}</p>
               <div class="card-actions">
-                <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}">View company</button>
+                <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">View company</button>
                 <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>
               </div>
             </article>
@@ -1334,11 +1426,15 @@ function renderCompanyPanel() {
     return;
   }
 
-  const companyRecord = findCompanyRecord(selectedCompany);
+  const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
   const companyUpdates = companyRecord
     ? [...companyRecord.updates]
     : allInvestments
-        .filter((investment) => companyKey(investment.company) === companyKey(selectedCompany))
+        .filter(
+          (investment) =>
+            companyKey(investment.company) === companyKey(selectedCompany) &&
+            normalizeEntityName(investment.entity) === normalizeEntityName(selectedCompanyEntity)
+        )
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   if (!companyUpdates.length) {
@@ -1383,7 +1479,11 @@ function renderCompanyPanel() {
   const relatedTasks = companyRecord
     ? companyRecord.tasks
     : allTasks
-        .filter((task) => companyKey(task.company) === companyKey(selectedCompany))
+        .filter(
+          (task) =>
+            companyKey(task.company) === companyKey(selectedCompany) &&
+            normalizeEntityName(task.entity) === normalizeEntityName(selectedCompanyEntity)
+        )
         .sort(
           (left, right) =>
             new Date(left.dueDate || left.createdAt) - new Date(right.dueDate || right.createdAt)
@@ -1417,7 +1517,8 @@ function renderCompanyPanel() {
   }));
   companyPanel.classList.remove("hidden");
   const performance =
-    companyPerformanceMap.get(companyKey(selectedCompany)) || buildCompanyPerformance(companyUpdates);
+    companyPerformanceMap.get(companyEntityKey(selectedCompany, selectedCompanyEntity)) ||
+    buildCompanyPerformance(companyUpdates);
   companyPanelTitle.textContent = latest.company || selectedCompany;
   companyPanelCopy.textContent = companyRecord
     ? `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} organized into structured research, capital, valuation, decision, and document records.`
@@ -1754,7 +1855,8 @@ function renderUpdates(investments) {
   updatesList.innerHTML = sortInvestmentsAlphabetically(investments)
     .map((investment) => {
       const performance =
-        companyPerformanceMap.get(companyKey(investment.company)) || buildCompanyPerformance([investment]);
+        companyPerformanceMap.get(getInvestmentPositionKey(investment)) ||
+        buildCompanyPerformance([investment]);
       const amount = investment.amount
         ? `${escapeHtml(investment.currency)} ${escapeHtml(investment.amount)}`
         : "Amount not specified";
@@ -1762,7 +1864,7 @@ function renderUpdates(investments) {
       return `
         <article class="update-card">
           <div class="update-head">
-            <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}">
+            <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
               ${escapeHtml(investment.company)}
             </button>
             <span class="status-chip">${escapeHtml(investment.status)}</span>
@@ -1821,7 +1923,7 @@ function renderUpdates(investments) {
               : ""
           }
           <div class="card-actions">
-            <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}">View company</button>
+            <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">View company</button>
             <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>
             <button class="secondary-button card-action-button danger-button" type="button" data-action="delete" data-id="${investment.id}">Delete</button>
           </div>
@@ -1999,7 +2101,7 @@ function renderReconciliation() {
                       ({ latest, performance }) => `
                         <tr>
                           <td>
-                            <button class="link-button company-link" type="button" data-company="${escapeHtml(latest.company)}">
+                            <button class="link-button company-link" type="button" data-company="${escapeHtml(latest.company)}" data-entity="${escapeHtml(latest.entity || "")}">
                               ${escapeHtml(latest.company)}
                             </button>
                           </td>
@@ -2145,7 +2247,7 @@ async function uploadCompanyDocuments(files) {
     return;
   }
 
-  const companyRecord = findCompanyRecord(selectedCompany);
+  const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
   const entity = (companyRecord && companyRecord.profile && companyRecord.profile.entity) || "";
   companyDocumentMessage.textContent = `Uploading ${files.length} investment file${files.length === 1 ? "" : "s"}...`;
 
@@ -2764,6 +2866,7 @@ uploadedDocumentsList.addEventListener("click", (event) => {
 
 closeCompanyPanelButton.addEventListener("click", () => {
   selectedCompany = "";
+  selectedCompanyEntity = "";
   renderCompanyPanel();
   showWorkspaceView("portfolio");
 });
@@ -2832,11 +2935,13 @@ updatesList.addEventListener("click", (event) => {
   }
 
   const company = target.dataset.company || "";
+  const entity = target.dataset.entity || "";
   const action = target.dataset.action || "";
   const investmentId = target.dataset.id || "";
 
   if (company && (!action || action === "view-company")) {
     selectedCompany = company;
+    selectedCompanyEntity = entity;
     renderCompanyPanel();
     showWorkspaceView("portfolio");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -2860,11 +2965,13 @@ entityDetailInvestments.addEventListener("click", (event) => {
   }
 
   const company = target.dataset.company || "";
+  const entity = target.dataset.entity || "";
   const action = target.dataset.action || "";
   const investmentId = target.dataset.id || "";
 
   if (company && (!action || action === "view-company")) {
     selectedCompany = company;
+    selectedCompanyEntity = entity;
     renderCompanyPanel();
     showWorkspaceView("portfolio");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -2888,11 +2995,13 @@ reconciliationList.addEventListener("click", (event) => {
   }
 
   const company = target.dataset.company || "";
+  const entity = target.dataset.entity || "";
   if (!company) {
     return;
   }
 
   selectedCompany = company;
+  selectedCompanyEntity = entity;
   renderCompanyPanel();
   showWorkspaceView("portfolio");
   window.scrollTo({ top: 0, behavior: "smooth" });
