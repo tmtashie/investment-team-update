@@ -1463,11 +1463,11 @@ async function saveReconciliationRow(investmentId, values) {
 
   const payload = {
     company: investment.company,
-    entity: investment.entity,
+    entity: values.entity || investment.entity,
     amount: reportedAmount,
     currency: investment.currency || "USD",
-    stage: investment.stage || "",
-    status: investment.status || "",
+    stage: values.stage || "",
+    status: values.status || "",
     owner: investment.owner || "",
     nextStep: investment.nextStep || "",
     notes: investment.notes || "",
@@ -2168,6 +2168,16 @@ function renderReconciliation() {
     return;
   }
 
+  const statusOptions = Array.from(
+    new Set(allInvestments.map((investment) => investment.status).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right));
+  const entityOptions = Array.from(
+    new Set(configuredEntities.concat(allInvestments.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean)))
+  )
+    .map(normalizeEntityName)
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+
   reconciliationList.innerHTML = entities
     .map((entity) => {
       const entityCompanies = companySummaries
@@ -2191,6 +2201,7 @@ function renderReconciliation() {
             <thead>
               <tr>
                 <th>Company</th>
+                <th>Entity</th>
                 <th>Stage</th>
                 <th>Status</th>
                 <th>Reported amount</th>
@@ -2211,14 +2222,55 @@ function renderReconciliation() {
                               ${escapeHtml(latest.company)}
                             </button>
                           </td>
-                          <td>${escapeHtml(latest.stage || "Not set")}</td>
-                          <td>${escapeHtml(latest.status || "Not set")}</td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<select class="reconciliation-amount-input" data-edit-input="true" data-field="entity" data-id="${escapeHtml(latest.id)}" aria-label="Entity for ${escapeHtml(latest.company)}">
+                                    ${entityOptions
+                                      .map(
+                                        (entityOption) =>
+                                          `<option value="${escapeHtml(entityOption)}" ${
+                                            normalizeEntityName(entityOption) === normalizeEntityName(latest.entity || "")
+                                              ? "selected"
+                                              : ""
+                                          }>${escapeHtml(entityOption)}</option>`
+                                      )
+                                      .join("")}
+                                  </select>`
+                                : escapeHtml(normalizeEntityName(latest.entity) || "Not set")
+                            }
+                          </td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="text" value="${escapeHtml(
+                                    latest.stage || ""
+                                  )}" data-edit-input="true" data-field="stage" data-id="${escapeHtml(latest.id)}" aria-label="Stage for ${escapeHtml(latest.company)}" />`
+                                : escapeHtml(latest.stage || "Not set")
+                            }
+                          </td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<select class="reconciliation-amount-input" data-edit-input="true" data-field="status" data-id="${escapeHtml(latest.id)}" aria-label="Status for ${escapeHtml(latest.company)}">
+                                    ${[""].concat(statusOptions)
+                                      .map(
+                                        (status) =>
+                                          `<option value="${escapeHtml(status)}" ${
+                                            status === (latest.status || "") ? "selected" : ""
+                                          }>${escapeHtml(status || "Select status")}</option>`
+                                      )
+                                      .join("")}
+                                  </select>`
+                                : escapeHtml(latest.status || "Not set")
+                            }
+                          </td>
                           <td>
                             ${
                               canEditWorkspace()
                                 ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
                                     normalizeMoneyString(latest.amount || "")
-                                  )}" data-amount-input="true" data-field="reportedAmount" data-id="${escapeHtml(latest.id)}" aria-label="Reported amount for ${escapeHtml(latest.company)}" />`
+                                  )}" data-edit-input="true" data-money-input="true" data-field="reportedAmount" data-id="${escapeHtml(latest.id)}" aria-label="Reported amount for ${escapeHtml(latest.company)}" />`
                                 : escapeHtml(formatMoney(toNumber(latest.amount)))
                             }
                           </td>
@@ -2227,7 +2279,7 @@ function renderReconciliation() {
                               canEditWorkspace()
                                 ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
                                     normalizeMoneyString(performance.investedCapital)
-                                  )}" data-amount-input="true" data-field="investedCapital" data-id="${escapeHtml(latest.id)}" aria-label="Invested capital for ${escapeHtml(latest.company)}" />`
+                                  )}" data-edit-input="true" data-money-input="true" data-field="investedCapital" data-id="${escapeHtml(latest.id)}" aria-label="Invested capital for ${escapeHtml(latest.company)}" />`
                                 : escapeHtml(formatMoney(performance.investedCapital))
                             }
                           </td>
@@ -2236,7 +2288,7 @@ function renderReconciliation() {
                               canEditWorkspace()
                                 ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
                                     normalizeMoneyString(performance.officialValue)
-                                  )}" data-amount-input="true" data-field="officialValue" data-id="${escapeHtml(latest.id)}" aria-label="Official NAV for ${escapeHtml(latest.company)}" />`
+                                  )}" data-edit-input="true" data-money-input="true" data-field="officialValue" data-id="${escapeHtml(latest.id)}" aria-label="Official NAV for ${escapeHtml(latest.company)}" />`
                                 : escapeHtml(formatMoney(performance.officialValue))
                             }
                           </td>
@@ -2245,7 +2297,7 @@ function renderReconciliation() {
                               canEditWorkspace()
                                 ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
                                     normalizeMoneyString(performance.internalValue)
-                                  )}" data-amount-input="true" data-field="internalValue" data-id="${escapeHtml(latest.id)}" aria-label="Internal NAV for ${escapeHtml(latest.company)}" />`
+                                  )}" data-edit-input="true" data-money-input="true" data-field="internalValue" data-id="${escapeHtml(latest.id)}" aria-label="Internal NAV for ${escapeHtml(latest.company)}" />`
                                 : escapeHtml(formatMoney(performance.internalValue))
                             }
                           </td>
@@ -2260,11 +2312,11 @@ function renderReconciliation() {
                       `
                     )
                     .join("")
-                : `<tr><td colspan="${canEditWorkspace() ? "8" : "7"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
+                : `<tr><td colspan="${canEditWorkspace() ? "9" : "8"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="${canEditWorkspace() ? "4" : "4"}">Subtotal</td>
+                <td colspan="5">Subtotal</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.investedCapital))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.officialValue))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.internalValue))}</td>
@@ -3144,7 +3196,7 @@ reconciliationList.addEventListener("click", (event) => {
     }
 
     const inputs = Array.from(
-      reconciliationList.querySelectorAll(`[data-amount-input="true"][data-id="${CSS.escape(investmentId)}"]`)
+      reconciliationList.querySelectorAll(`[data-edit-input="true"][data-id="${CSS.escape(investmentId)}"]`)
     );
     if (!inputs.length) {
       return;
@@ -3187,7 +3239,7 @@ reconciliationList.addEventListener("click", (event) => {
 });
 
 reconciliationList.addEventListener("input", (event) => {
-  const target = event.target.closest("[data-amount-input='true']");
+  const target = event.target.closest("[data-money-input='true']");
   if (!target) {
     return;
   }
