@@ -327,6 +327,10 @@ function buildLegacyCapitalActivityRows(investment) {
   return rows;
 }
 
+function isCommittedCapitalType(type) {
+  return String(type || "").toLowerCase().includes("committed capital");
+}
+
 function renderCapitalActivityRows(rows = []) {
   const normalizedRows = normalizeCapitalActivityRows(rows);
   const rowsToRender = normalizedRows.length
@@ -345,6 +349,7 @@ function renderCapitalActivityRows(rows = []) {
             <label>
               Type
               <select data-capital-field="type">
+                <option value="Committed Capital" ${row.type === "Committed Capital" ? "selected" : ""}>Committed Capital</option>
                 <option value="Investment Amount" ${row.type === "Investment Amount" ? "selected" : ""}>Investment Amount</option>
                 <option value="Capital Call" ${row.type === "Capital Call" ? "selected" : ""}>Capital Call</option>
                 <option value="Distribution" ${row.type === "Distribution" ? "selected" : ""}>Distribution</option>
@@ -802,9 +807,16 @@ function buildPerformanceInputs(updates) {
     const type = String(activity.type || "").toLowerCase();
     return type.includes("capital call") || type.includes("fee");
   });
+  const committedCapital = normalizedActivities.reduce((sum, activity) => {
+    const amount = toNumber(activity.amount);
+    return isCommittedCapitalType(activity.type) ? sum + amount : sum;
+  }, 0);
 
   const effectiveActivities = normalizedActivities.filter((activity) => {
     const type = String(activity.type || "").toLowerCase();
+    if (isCommittedCapitalType(type)) {
+      return false;
+    }
     if (hasActualCalledCapital && type.includes("investment amount")) {
       return false;
     }
@@ -825,6 +837,7 @@ function buildPerformanceInputs(updates) {
     const type = String(activity.type || "").toLowerCase();
     const amount = toNumber(activity.amount);
     return !type.includes("capital call") &&
+      !isCommittedCapitalType(type) &&
       !type.includes("investment amount") &&
       !type.includes("fee")
       ? sum + amount
@@ -853,6 +866,7 @@ function buildPerformanceInputs(updates) {
   });
 
   return {
+    committedCapital,
     investedCapital,
     distributions,
     officialMark,
@@ -879,6 +893,7 @@ function buildPerformanceView(baseCashFlows, terminalMark, investedCapital, dist
 
 function buildCompanyPerformance(updates) {
   const {
+    committedCapital,
     investedCapital,
     distributions,
     officialMark,
@@ -888,6 +903,7 @@ function buildCompanyPerformance(updates) {
   } = buildPerformanceInputs(updates);
 
   return {
+    committedCapital,
     investedCapital,
     distributions,
     officialValue: officialMark.value,
@@ -1006,6 +1022,10 @@ function buildAggregatePerformance(companyCollections) {
 
     if (includeInReportedAmount && latestReportedAmount > 0) {
       return sum + latestReportedAmount;
+    }
+
+    if (includeInReportedAmount && inputs.committedCapital > 0) {
+      return sum + inputs.committedCapital;
     }
 
     if (includeInReportedAmount) {
@@ -1140,6 +1160,10 @@ function buildDashboardCards(investments) {
     const latestReportedAmount = toNumber(summary.latest && summary.latest.amount);
     if (latestReportedAmount > 0) {
       return sum + latestReportedAmount;
+    }
+
+    if (summary.performance.committedCapital > 0) {
+      return sum + summary.performance.committedCapital;
     }
 
     return sum + summary.performance.investedCapital;

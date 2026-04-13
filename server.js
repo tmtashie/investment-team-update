@@ -1683,6 +1683,10 @@ function isDistributionType(type) {
   );
 }
 
+function isCommittedCapitalType(type) {
+  return String(type || "").trim().toLowerCase().includes("committed capital");
+}
+
 function calculateCompanyPerformanceSnapshot(company) {
   const capitalActivities = Array.isArray(company.capitalActivities)
     ? company.capitalActivities
@@ -1697,6 +1701,7 @@ function calculateCompanyPerformanceSnapshot(company) {
     getLatestStructuredValue(company.valuationHistory, "exitValue")
   );
 
+  let totalCommittedCapital = 0;
   let totalInvestedCapital = 0;
   let totalDistributions = 0;
   const baseCashFlows = [];
@@ -1709,6 +1714,11 @@ function calculateCompanyPerformanceSnapshot(company) {
 
     const dateValue = new Date(activity.date || Date.now());
     if (Number.isNaN(dateValue.getTime())) {
+      return;
+    }
+
+    if (isCommittedCapitalType(activity.type)) {
+      totalCommittedCapital += amount;
       return;
     }
 
@@ -1738,6 +1748,7 @@ function calculateCompanyPerformanceSnapshot(company) {
   }
 
   return {
+    committedCapital: totalCommittedCapital,
     totalInvestedCapital,
     totalDistributions,
     officialValue: latestOfficialValue,
@@ -1783,6 +1794,7 @@ function buildFamilyOfficeWorkbookBuffer(investments) {
       }, {});
       const commitmentAmount =
         toPositiveNumber(latest.amount) ||
+        performance.committedCapital ||
         performance.totalInvestedCapital ||
         toPositiveNumber(latest.capitalCallAmount) ||
         "";
