@@ -347,6 +347,16 @@ function findLatestByCompanyKey(companyKey, investments) {
   return investments.find((investment) => investment.companyKey === companyKey) || null;
 }
 
+function findLatestByPositionKey(positionKey, investments) {
+  if (!positionKey) {
+    return null;
+  }
+
+  return (
+    investments.find((investment) => getInvestmentPositionKey(investment) === positionKey) || null
+  );
+}
+
 function normalizeStructuredRow(row, fallback = {}) {
   return {
     date: String(row.date || fallback.date || "").trim(),
@@ -986,7 +996,10 @@ function saveInvestment(entry) {
     ...entry,
     updatedAt: new Date().toISOString()
   });
-  const latestMatch = findLatestByCompanyKey(normalizedEntry.companyKey, investments);
+  const latestMatch = findLatestByPositionKey(
+    getInvestmentPositionKey(normalizedEntry),
+    investments
+  );
 
   if (latestMatch && latestMatch.company) {
     normalizedEntry.company = latestMatch.company;
@@ -1016,8 +1029,8 @@ function updateInvestment(id, updates) {
     updatedAt: new Date().toISOString()
   });
 
-  const latestMatch = findLatestByCompanyKey(
-    merged.companyKey,
+  const latestMatch = findLatestByPositionKey(
+    getInvestmentPositionKey(merged),
     investments.filter((investment) => investment.id !== id)
   );
 
@@ -1057,15 +1070,16 @@ function buildCompanyRecords(investments, tasks = [], companyDocuments = []) {
   const grouped = new Map();
 
   investments.forEach((investment) => {
-    if (!investment.companyKey) {
+    const positionKey = getInvestmentPositionKey(investment);
+    if (!positionKey) {
       return;
     }
 
-    if (!grouped.has(investment.companyKey)) {
-      grouped.set(investment.companyKey, []);
+    if (!grouped.has(positionKey)) {
+      grouped.set(positionKey, []);
     }
 
-    grouped.get(investment.companyKey).push(investment);
+    grouped.get(positionKey).push(investment);
   });
 
   return Array.from(grouped.entries())
@@ -1075,7 +1089,7 @@ function buildCompanyRecords(investments, tasks = [], companyDocuments = []) {
       );
       const latest = updates[0];
       const companyTasks = tasks
-        .filter((task) => task.companyKey === key)
+        .filter((task) => companyEntityKey(task.company, task.entity) === key)
         .sort(
           (left, right) =>
             new Date(left.dueDate || left.createdAt || 0).getTime() -
@@ -1090,9 +1104,9 @@ function buildCompanyRecords(investments, tasks = [], companyDocuments = []) {
             sourceUpdateId: investment.id,
             source: "update"
           }))
-        )
+        );
       const vaultDocuments = companyDocuments
-        .filter((document) => document.companyKey === key)
+        .filter((document) => companyEntityKey(document.company, document.entity) === key)
         .map((document) => ({
           ...document,
           source: document.source || "company-vault"
@@ -1105,7 +1119,8 @@ function buildCompanyRecords(investments, tasks = [], companyDocuments = []) {
 
       return {
         company: latest.company,
-        companyKey: key,
+        companyKey: latest.companyKey,
+        positionKey: key,
         profile: {
           entity: latest.entity,
           stage: latest.stage,
@@ -1169,7 +1184,11 @@ function buildCompanyRecords(investments, tasks = [], companyDocuments = []) {
         entities: Array.from(new Set(updates.map((investment) => investment.entity).filter(Boolean)))
       };
     })
-    .sort((left, right) => left.company.localeCompare(right.company));
+    .sort((left, right) =>
+      `${left.company} ${left.profile.entity || ""}`.localeCompare(
+        `${right.company} ${right.profile.entity || ""}`
+      )
+    );
 }
 
 function signSession(payload) {
