@@ -3,7 +3,7 @@ services:
     name: investment-team-updates
     runtime: node
     plan: starter
-    buildCommand: "true"
+    buildCommand: "npm install"
     startCommand: "node server.js"
     healthCheckPath: /api/health
     disk:
@@ -27,3 +27,5 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      - key: NEXT_STEP_REMINDER_DAYS
+        value: "14"

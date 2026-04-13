@@ -23,6 +23,10 @@ const downloadBackupButton = document.getElementById("downloadBackupButton");
 const downloadFamilyOfficeWorkbookButton = document.getElementById(
   "downloadFamilyOfficeWorkbookButton"
 );
+const previewDigestButton = document.getElementById("previewDigestButton");
+const sendDigestButton = document.getElementById("sendDigestButton");
+const digestMessage = document.getElementById("digestMessage");
+const digestPreview = document.getElementById("digestPreview");
 const importWorkbookFile = document.getElementById("importWorkbookFile");
 const restoreBackupFile = document.getElementById("restoreBackupFile");
 const importWorkbookMessage = document.getElementById("importWorkbookMessage");
@@ -104,6 +108,11 @@ let uploadedDocuments = [];
 let allTasks = [];
 let activeWorkspaceView = "home";
 let selectedEntity = "";
+let digestStatus = {
+  lastDigestSentAt: "",
+  nextDigestDueAt: "",
+  openReminderCount: 0
+};
 
 const moneyFieldNames = [
   "amount",
@@ -466,6 +475,7 @@ function renderRoleState() {
   const editable = canEditWorkspace();
   form.classList.toggle("hidden", !editable);
   taskForm.classList.toggle("hidden", !editable);
+  sendDigestButton.classList.toggle("hidden", !editable);
   roleNotice.textContent = editable
     ? "Editors can add investments, tasks, documents, and research."
     : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
@@ -511,6 +521,7 @@ function hydrateFormFromCompanyRecord(company) {
   assignIfBlank("status", latest.status || "");
   assignIfBlank("owner", latest.owner || "");
   assignIfBlank("nextStep", latest.nextStep || "");
+  assignIfBlank("nextStepDueDate", latest.nextStepDueDate || "");
   assignIfBlank("contactName", latest.contactName || "");
   assignIfBlank("contactPosition", latest.contactPosition || "");
   assignIfBlank("contactEmail", latest.contactEmail || "");
@@ -1052,6 +1063,12 @@ function buildDashboardCards(investments) {
     return sum + summary.performance.investedCapital;
   }, 0);
   const approvedCount = investments.filter((investment) => investment.status === "Approved").length;
+  const openReminderCount = allTasks.filter(
+    (task) =>
+      task.autoManaged &&
+      task.sourceKind === "next-step" &&
+      String(task.status || "").trim() !== "Completed"
+  ).length;
   const totalInvestedCapital = companySummaries.reduce(
     (sum, summary) => sum + summary.performance.investedCapital,
     0
@@ -1080,6 +1097,7 @@ function buildDashboardCards(investments) {
       action: "portfolio",
       status: "Approved"
     },
+    { label: "Open reminders", value: String(openReminderCount), action: "tasks" },
     { label: "Invested capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
     { label: "Official NAV", value: formatMoney(officialNav), action: "portfolio" },
     { label: "Internal NAV", value: formatMoney(internalNav), action: "portfolio" }
@@ -1284,6 +1302,7 @@ function beginEditInvestment(investmentId) {
   form.elements.status.value = investment.status || "";
   form.elements.owner.value = investment.owner || "";
   form.elements.nextStep.value = investment.nextStep || "";
+  form.elements.nextStepDueDate.value = investment.nextStepDueDate || "";
   form.elements.contactName.value = investment.contactName || "";
   form.elements.contactPosition.value = investment.contactPosition || "";
   form.elements.contactEmail.value = investment.contactEmail || "";
@@ -2357,6 +2376,14 @@ async function loadConfig() {
   recipientStatus.textContent = config.defaultRecipients.length
     ? `Default team emails: ${config.defaultRecipients.join(", ")}`
     : "No default team emails set";
+  digestStatus = {
+    lastDigestSentAt: config.lastDigestSentAt || "",
+    nextDigestDueAt: config.nextDigestDueAt || "",
+    openReminderCount: Number(config.openReminderCount || 0)
+  };
+  if (digestStatus.lastDigestSentAt) {
+    recipientStatus.textContent += ` • Last digest sent ${formatDisplayDate(digestStatus.lastDigestSentAt)}`;
+  }
   configuredEntities = Array.isArray(config.entities) ? config.entities : [];
 
   loginCopy.textContent =
@@ -2398,6 +2425,22 @@ async function loadTasks() {
 
     throw error;
   }
+}
+
+function renderDigestPreview(digest) {
+  if (!digest) {
+    digestPreview.classList.add("hidden");
+    digestPreview.innerHTML = "";
+    return;
+  }
+
+  digestPreview.classList.remove("hidden");
+  digestPreview.innerHTML = `
+    <p class="dashboard-label">Window ${escapeHtml(formatDisplayDate(digest.windowStart))} to ${escapeHtml(formatDisplayDate(digest.generatedAt))}</p>
+    <p class="highlight-value">${escapeHtml(digest.subject)}</p>
+    <p class="update-meta">Changed investments: ${escapeHtml(String(digest.counts.changedInvestments))} • Open reminders: ${escapeHtml(String(digest.counts.openNextStepTasks))} • Overdue reminders: ${escapeHtml(String(digest.counts.overdueTasks))}</p>
+    <pre class="digest-preview-text">${escapeHtml(digest.text)}</pre>
+  `;
 }
 
 function readFileAsBase64(file) {
@@ -2830,6 +2873,7 @@ form.addEventListener("submit", async (event) => {
     status: formData.get("status"),
     owner: formData.get("owner"),
     nextStep: formData.get("nextStep"),
+    nextStepDueDate: formData.get("nextStepDueDate"),
     contactName: formData.get("contactName"),
     contactPosition: formData.get("contactPosition"),
     contactEmail: formData.get("contactEmail"),
@@ -2962,6 +3006,58 @@ downloadFamilyOfficeWorkbookButton.addEventListener("click", () => {
 
 downloadBackupButton.addEventListener("click", () => {
   window.location.href = "/api/backup-export";
+});
+
+previewDigestButton.addEventListener("click", async () => {
+  digestMessage.textContent = "Building biweekly digest preview...";
+  previewDigestButton.disabled = true;
+
+  try {
+    const result = await fetchJson("/api/biweekly-digest");
+    renderDigestPreview(result.digest);
+    digestMessage.textContent = digestStatus.lastDigestSentAt
+      ? `Preview ready. Last digest sent ${formatDisplayDate(digestStatus.lastDigestSentAt)}.`
+      : "Preview ready.";
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      digestMessage.textContent = "Your session expired. Please sign in again.";
+      return;
+    }
+
+    digestMessage.textContent = error.message;
+  } finally {
+    previewDigestButton.disabled = false;
+  }
+});
+
+sendDigestButton.addEventListener("click", async () => {
+  digestMessage.textContent = "Sending biweekly digest...";
+  sendDigestButton.disabled = true;
+
+  try {
+    const result = await fetchJson("/api/biweekly-digest/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({})
+    });
+    digestMessage.textContent = result.message;
+    await loadConfig();
+    const preview = await fetchJson("/api/biweekly-digest");
+    renderDigestPreview(preview.digest);
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      digestMessage.textContent = "Your session expired. Please sign in again.";
+      return;
+    }
+
+    digestMessage.textContent = error.message;
+  } finally {
+    sendDigestButton.disabled = false;
+  }
 });
 
 importWorkbookFile.addEventListener("change", async () => {
@@ -3114,6 +3210,12 @@ dashboardCards.addEventListener("click", (event) => {
     renderEntityDetail();
     renderCompanyPanel();
     showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  if (action === "tasks") {
+    showWorkspaceView("tasks");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 });

@@ -53,6 +53,8 @@ const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_BODY_SIZE_BYTES = 20 * 1024 * 1024;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const DATA_SCHEMA_VERSION = 2;
+const NEXT_STEP_REMINDER_DAYS = Number(process.env.NEXT_STEP_REMINDER_DAYS || 14);
+const DIGEST_WINDOW_DAYS = 14;
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
@@ -80,6 +82,24 @@ function splitCsv(value) {
 function normalizeEntityName(value) {
   const raw = String(value || "").trim();
   return ENTITY_ALIASES[raw] || raw;
+}
+
+function entityKey(value) {
+  return normalizeCompanyKey(normalizeEntityName(value));
+}
+
+function companyEntityKey(company, entity) {
+  const normalizedCompany = normalizeCompanyKey(company);
+  if (!normalizedCompany) {
+    return "";
+  }
+
+  const normalizedEntity = entityKey(entity);
+  return normalizedEntity ? `${normalizedCompany}::${normalizedEntity}` : normalizedCompany;
+}
+
+function getInvestmentPositionKey(investment) {
+  return companyEntityKey(investment && investment.company, investment && investment.entity);
 }
 
 function parseTeamUsers(value) {
@@ -188,7 +208,13 @@ function readMetadata() {
     updatedAt: String(metadata.updatedAt || new Date().toISOString()),
     lastMigrationAt: String(metadata.lastMigrationAt || "").trim(),
     lastBackupAt: String(metadata.lastBackupAt || "").trim(),
-    lastBackupReason: String(metadata.lastBackupReason || "").trim()
+    lastBackupReason: String(metadata.lastBackupReason || "").trim(),
+    lastDigestSentAt: String(metadata.lastDigestSentAt || "").trim(),
+    lastDigestWindowStartedAt: String(metadata.lastDigestWindowStartedAt || "").trim(),
+    lastDigestChangeCount:
+      Number.isFinite(Number(metadata.lastDigestChangeCount)) && Number(metadata.lastDigestChangeCount) >= 0
+        ? Number(metadata.lastDigestChangeCount)
+        : 0
   };
 }
 
@@ -356,6 +382,7 @@ function normalizeInvestment(entry) {
   const createdAt = String(entry.createdAt || new Date().toISOString());
   const notes = String(entry.notes || "").trim();
   const deckSummary = String(entry.deckSummary || "").trim();
+  const updatedAt = String(entry.updatedAt || entry.createdAt || new Date().toISOString());
   const capitalCallDate = String(entry.capitalCallDate || "").trim();
   const capitalCallAmount = String(entry.capitalCallAmount || "").trim();
   const distributionDate = String(entry.distributionDate || "").trim();
@@ -488,6 +515,7 @@ function normalizeInvestment(entry) {
     status: String(entry.status || "").trim(),
     owner: String(entry.owner || "").trim(),
     nextStep: String(entry.nextStep || "").trim(),
+    nextStepDueDate: String(entry.nextStepDueDate || "").trim(),
     notes,
     deckSummary,
     capitalCallDate: capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
@@ -523,7 +551,8 @@ function normalizeInvestment(entry) {
       ? entry.recipients.map((value) => String(value).trim()).filter(Boolean)
       : [],
     submittedBy: String(entry.submittedBy || "").trim(),
-    createdAt
+    createdAt,
+    updatedAt
   };
 }
 
@@ -542,7 +571,12 @@ function normalizeTask(entry) {
     category: String(entry.category || "").trim(),
     createdBy: String(entry.createdBy || "").trim(),
     createdAt: String(entry.createdAt || new Date().toISOString()),
-    completedAt: String(entry.completedAt || "").trim()
+    completedAt: String(entry.completedAt || "").trim(),
+    updatedAt: String(entry.updatedAt || entry.createdAt || new Date().toISOString()).trim(),
+    autoManaged: Boolean(entry.autoManaged),
+    sourceKind: String(entry.sourceKind || "").trim(),
+    sourcePositionKey: String(entry.sourcePositionKey || "").trim(),
+    sourceInvestmentId: String(entry.sourceInvestmentId || "").trim()
   };
 }
 
@@ -631,7 +665,10 @@ function deleteCompanyDocument(id) {
 function saveTask(entry) {
   const tasks = readTasks();
   createBackupSnapshot("before-task-create");
-  const normalized = normalizeTask(entry);
+  const normalized = normalizeTask({
+    ...entry,
+    updatedAt: new Date().toISOString()
+  });
   tasks.unshift(normalized);
   writeTasks(tasks);
   return normalized;
@@ -657,7 +694,8 @@ function updateTask(id, updates) {
         ? new Date().toISOString()
         : updates.status && updates.status !== "Completed"
           ? ""
-          : tasks[index].completedAt
+          : tasks[index].completedAt,
+    updatedAt: new Date().toISOString()
   });
 
   tasks[index] = merged;
@@ -678,10 +716,276 @@ function deleteTask(id) {
   return true;
 }
 
+function parseDateValue(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateOnly(value) {
+  const parsed = value instanceof Date ? value : parseDateValue(value);
+  if (!parsed) {
+    return "";
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function addDays(value, days) {
+  const parsed = value instanceof Date ? new Date(value.getTime()) : parseDateValue(value);
+  const base = parsed || new Date();
+  base.setDate(base.getDate() + days);
+  return base;
+}
+
+function buildNextStepReminderTask(investment, existingTask) {
+  const dueDate =
+    String(investment.nextStepDueDate || "").trim() ||
+    formatDateOnly(addDays(investment.updatedAt || investment.createdAt, NEXT_STEP_REMINDER_DAYS));
+  const reminderChanged =
+    !existingTask ||
+    String(existingTask.title || "").trim() !== String(investment.nextStep || "").trim() ||
+    String(existingTask.dueDate || "").trim() !== dueDate;
+  const existingStatus = String((existingTask && existingTask.status) || "").trim();
+
+  return normalizeTask({
+    ...existingTask,
+    company: investment.company,
+    entity: investment.entity,
+    title: investment.nextStep,
+    description: `Auto-created from the current next step on ${investment.company}.`,
+    dueDate,
+    status:
+      reminderChanged && existingStatus === "Completed"
+        ? "Open"
+        : existingStatus || "Open",
+    priority: dueDate && parseDateValue(dueDate) && parseDateValue(dueDate) < new Date() ? "High" : "Medium",
+    assignee: investment.owner,
+    category: "Next step",
+    createdBy: investment.submittedBy,
+    createdAt: existingTask && existingTask.createdAt ? existingTask.createdAt : new Date().toISOString(),
+    completedAt:
+      reminderChanged && existingStatus === "Completed"
+        ? ""
+        : existingTask && existingTask.completedAt
+          ? existingTask.completedAt
+          : "",
+    updatedAt: new Date().toISOString(),
+    autoManaged: true,
+    sourceKind: "next-step",
+    sourcePositionKey: getInvestmentPositionKey(investment),
+    sourceInvestmentId: investment.id
+  });
+}
+
+function syncNextStepReminderTasks(investments = readInvestments(), tasks = readTasks()) {
+  const latestByPosition = new Map();
+  investments.forEach((investment) => {
+    const positionKey = getInvestmentPositionKey(investment);
+    if (positionKey && !latestByPosition.has(positionKey)) {
+      latestByPosition.set(positionKey, investment);
+    }
+  });
+
+  const nextTasks = tasks.map((task) => normalizeTask(task));
+  let changed = false;
+
+  latestByPosition.forEach((investment, positionKey) => {
+    const taskIndex = nextTasks.findIndex(
+      (task) => task.autoManaged && task.sourceKind === "next-step" && task.sourcePositionKey === positionKey
+    );
+    const existingTask = taskIndex >= 0 ? nextTasks[taskIndex] : null;
+    const needsReminder =
+      String(investment.nextStep || "").trim() &&
+      !["Passed", "Closed"].includes(String(investment.status || "").trim());
+
+    if (!needsReminder) {
+      if (existingTask && existingTask.status !== "Completed") {
+        nextTasks[taskIndex] = normalizeTask({
+          ...existingTask,
+          status: "Completed",
+          completedAt: existingTask.completedAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        changed = true;
+      }
+      return;
+    }
+
+    const nextTask = buildNextStepReminderTask(investment, existingTask);
+    if (taskIndex >= 0) {
+      if (JSON.stringify(existingTask) !== JSON.stringify(nextTask)) {
+        nextTasks[taskIndex] = nextTask;
+        changed = true;
+      }
+    } else {
+      nextTasks.unshift(nextTask);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    writeTasks(nextTasks);
+  }
+
+  return changed ? nextTasks : tasks;
+}
+
+function buildBiweeklyDigest(investments, tasks, metadata, recipients = DEFAULT_RECIPIENTS) {
+  const now = new Date();
+  const windowStart = metadata.lastDigestSentAt
+    ? parseDateValue(metadata.lastDigestSentAt)
+    : addDays(now, -DIGEST_WINDOW_DAYS);
+  const safeWindowStart = windowStart || addDays(now, -DIGEST_WINDOW_DAYS);
+  const changedInvestments = investments
+    .filter((investment) => {
+      const changedAt = parseDateValue(investment.updatedAt || investment.createdAt);
+      return changedAt && changedAt.getTime() >= safeWindowStart.getTime();
+    })
+    .sort(
+      (left, right) =>
+        new Date(right.updatedAt || right.createdAt || 0).getTime() -
+        new Date(left.updatedAt || left.createdAt || 0).getTime()
+    );
+  const openNextStepTasks = tasks
+    .filter(
+      (task) =>
+        task.autoManaged &&
+        task.sourceKind === "next-step" &&
+        String(task.status || "").trim() !== "Completed"
+    )
+    .sort(
+      (left, right) =>
+        new Date(left.dueDate || left.createdAt || 0).getTime() -
+        new Date(right.dueDate || right.createdAt || 0).getTime()
+    );
+  const overdueTasks = openNextStepTasks.filter((task) => {
+    const dueDate = parseDateValue(task.dueDate);
+    return dueDate && dueDate.getTime() < now.getTime();
+  });
+
+  const subject = `BVB biweekly digest • ${formatDateOnly(safeWindowStart)} to ${formatDateOnly(now)}`;
+  const changedLines = changedInvestments.length
+    ? changedInvestments.map((investment) =>
+        [
+          `${investment.company} (${investment.entity || "No entity"})`,
+          `Status: ${investment.status || "Not set"}`,
+          `Amount: ${formatAmount(investment)}`,
+          `Next step: ${investment.nextStep || "None"}`,
+          `Updated: ${investment.updatedAt || investment.createdAt}`,
+          investment.notes ? `Notes: ${investment.notes}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      )
+    : ["No investment updates were entered in this period."];
+  const taskLines = openNextStepTasks.length
+    ? openNextStepTasks.map(
+        (task) =>
+          `${task.company || "General"} (${task.entity || "No entity"}) • ${task.title} • Due ${task.dueDate || "not set"} • ${task.status}`
+      )
+    : ["No open next-step reminders."];
+
+  const text = [
+    "BVB biweekly digest",
+    "",
+    `Window: ${formatDateOnly(safeWindowStart)} to ${formatDateOnly(now)}`,
+    `Recipients: ${recipients.join(", ") || "No recipients configured"}`,
+    `Changed investments: ${changedInvestments.length}`,
+    `Open next-step reminders: ${openNextStepTasks.length}`,
+    `Overdue next-step reminders: ${overdueTasks.length}`,
+    "",
+    "New or updated investments",
+    ...changedLines.flatMap((line) => [line, ""]),
+    "Open next steps",
+    ...taskLines
+  ].join("\n");
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6; max-width: 760px; margin: 0 auto;">
+      <div style="padding: 24px; border-radius: 20px; background: #fffaf2; border: 1px solid #eadfd0;">
+        <p style="margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.12em; color: #8f411f; font-size: 12px;">BVB biweekly digest</p>
+        <h2 style="margin: 0 0 8px;">Stewarding assets, growing wealth, and pursuing bold ideas.</h2>
+        <p style="margin: 0; color: #6b7280;">Window: ${escapeHtml(formatDateOnly(safeWindowStart))} to ${escapeHtml(formatDateOnly(now))}</p>
+      </div>
+      <div style="padding: 20px 8px 0;">
+        <h3 style="margin-bottom: 8px;">Digest summary</h3>
+        <ul>
+          <li>Changed investments: ${changedInvestments.length}</li>
+          <li>Open next-step reminders: ${openNextStepTasks.length}</li>
+          <li>Overdue next-step reminders: ${overdueTasks.length}</li>
+        </ul>
+        <h3 style="margin-bottom: 8px;">New or updated investments</h3>
+        ${
+          changedInvestments.length
+            ? changedInvestments
+                .map(
+                  (investment) => `
+                    <div style="padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                      <p style="margin: 0; font-weight: bold;">${escapeHtml(investment.company)} (${escapeHtml(
+                        investment.entity || "No entity"
+                      )})</p>
+                      <p style="margin: 4px 0 0;">Status: ${escapeHtml(investment.status || "Not set")} • Amount: ${escapeHtml(
+                        formatAmount(investment)
+                      )}</p>
+                      <p style="margin: 4px 0 0;">Next step: ${escapeHtml(
+                        investment.nextStep || "None"
+                      )}</p>
+                      <p style="margin: 4px 0 0; white-space: pre-wrap;">${escapeHtml(
+                        investment.notes || "No notes provided."
+                      )}</p>
+                    </div>
+                  `
+                )
+                .join("")
+            : '<p style="margin-top: 0;">No investment updates were entered in this period.</p>'
+        }
+        <h3 style="margin: 20px 0 8px;">Open next steps</h3>
+        ${
+          openNextStepTasks.length
+            ? `<ul>${openNextStepTasks
+                .map(
+                  (task) =>
+                    `<li>${escapeHtml(task.company || "General")} (${escapeHtml(
+                      task.entity || "No entity"
+                    )}) • ${escapeHtml(task.title)} • Due ${escapeHtml(task.dueDate || "not set")} • ${escapeHtml(task.status)}</li>`
+                )
+                .join("")}</ul>`
+            : '<p style="margin-top: 0;">No open next-step reminders.</p>'
+        }
+      </div>
+    </div>
+  `;
+
+  return {
+    subject,
+    text,
+    html,
+    recipients,
+    generatedAt: now.toISOString(),
+    windowStart: safeWindowStart.toISOString(),
+    changedInvestments,
+    openNextStepTasks,
+    overdueTasks,
+    counts: {
+      changedInvestments: changedInvestments.length,
+      openNextStepTasks: openNextStepTasks.length,
+      overdueTasks: overdueTasks.length
+    }
+  };
+}
+
 function saveInvestment(entry) {
   const investments = readInvestments();
   createBackupSnapshot("before-investment-create");
-  const normalizedEntry = normalizeInvestment(entry);
+  const normalizedEntry = normalizeInvestment({
+    ...entry,
+    updatedAt: new Date().toISOString()
+  });
   const latestMatch = findLatestByCompanyKey(normalizedEntry.companyKey, investments);
 
   if (latestMatch && latestMatch.company) {
@@ -690,6 +994,7 @@ function saveInvestment(entry) {
 
   investments.unshift(normalizedEntry);
   writeInvestments(investments);
+  syncNextStepReminderTasks(investments);
 }
 
 function updateInvestment(id, updates) {
@@ -707,7 +1012,8 @@ function updateInvestment(id, updates) {
     id: investments[index].id,
     companyKey: normalizeCompanyKey(updates.company || investments[index].company),
     createdAt: investments[index].createdAt,
-    submittedBy: investments[index].submittedBy
+    submittedBy: investments[index].submittedBy,
+    updatedAt: new Date().toISOString()
   });
 
   const latestMatch = findLatestByCompanyKey(
@@ -721,6 +1027,7 @@ function updateInvestment(id, updates) {
 
   investments[index] = merged;
   writeInvestments(investments);
+  syncNextStepReminderTasks(investments);
   return merged;
 }
 
@@ -734,6 +1041,7 @@ function deleteInvestment(id) {
 
   createBackupSnapshot("before-investment-delete");
   writeInvestments(remaining);
+  syncNextStepReminderTasks(remaining);
   return true;
 }
 
@@ -1183,6 +1491,7 @@ function buildInvestmentsCsv(investments) {
     "Status",
     "Owner",
     "Next Step",
+    "Next Step Due Date",
     "Notes",
     "Deck Summary",
     "Capital Call Date",
@@ -1223,6 +1532,7 @@ function buildInvestmentsCsv(investments) {
       investment.status,
       investment.owner,
       investment.nextStep,
+      investment.nextStepDueDate,
       investment.notes,
       investment.deckSummary,
       investment.capitalCallDate,
@@ -1270,6 +1580,7 @@ function buildInvestmentsWorkbookBuffer(investments) {
     Status: investment.status,
     Owner: investment.owner,
     "Next Step": investment.nextStep,
+    "Next Step Due Date": investment.nextStepDueDate,
     Notes: investment.notes,
     "Deck Summary": investment.deckSummary,
     "Capital Call Date": investment.capitalCallDate,
@@ -1605,6 +1916,7 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
           status: String(row.Status || "Investment update").trim() || "Investment update",
           owner: String(row.Owner || "Workbook import").trim(),
           nextStep: String(row["Next Step"] || "").trim(),
+          nextStepDueDate: String(row["Next Step Due Date"] || "").trim(),
           notes,
           deckSummary: String(row["Deck Summary"] || "").trim(),
           capitalCallDate: String(row["Capital Call Date"] || "").trim(),
@@ -2330,6 +2642,7 @@ function buildSummary(entry) {
   const stageLine = entry.stage || "Stage not specified";
   const ownerLine = entry.owner || "No owner listed";
   const nextStepLine = entry.nextStep || "No next step provided";
+  const nextStepDueLine = entry.nextStepDueDate || "No reminder date set";
   const noteLine = entry.notes || "No additional notes.";
   const deckSummaryLine = entry.deckSummary || "No deck summary attached.";
   const capitalCallLine = entry.capitalCallAmount
@@ -2384,6 +2697,7 @@ function buildSummary(entry) {
     `Owner: ${ownerLine}`,
     `Submitted by: ${entry.submittedBy}`,
     `Next step: ${nextStepLine}`,
+    `Next step due: ${nextStepDueLine}`,
     `Capital call: ${capitalCallLine}`,
     `Distribution: ${distributionLine}`,
     `Valuation date: ${valuationDateLine}`,
@@ -2450,6 +2764,7 @@ function buildSummary(entry) {
           <tr><td style="padding: 8px 0; font-weight: bold;">Owner</td><td>${escapeHtml(ownerLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Submitted by</td><td>${escapeHtml(entry.submittedBy)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Next step</td><td>${escapeHtml(nextStepLine)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold;">Next step due</td><td>${escapeHtml(nextStepDueLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Capital call</td><td>${escapeHtml(capitalCallLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Distribution</td><td>${escapeHtml(distributionLine)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold;">Valuation date</td><td>${escapeHtml(valuationDateLine)}</td></tr>
@@ -2619,6 +2934,7 @@ function validateSubmission(payload, sessionUser) {
     status: payload.status,
     owner: payload.owner,
     nextStep: payload.nextStep,
+    nextStepDueDate: payload.nextStepDueDate,
     notes: payload.notes,
     deckSummary: payload.deckSummary,
     capitalActivity: payload.capitalActivity,
@@ -2675,6 +2991,7 @@ function validateInvestmentPatch(payload) {
     status: String(payload.status || "").trim(),
     owner: String(payload.owner || "").trim(),
     nextStep: String(payload.nextStep || "").trim(),
+    nextStepDueDate: String(payload.nextStepDueDate || "").trim(),
     notes: String(payload.notes || "").trim(),
     deckSummary: String(payload.deckSummary || "").trim(),
     capitalActivity: normalizeStructuredRows(payload.capitalActivity),
@@ -2773,6 +3090,13 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/api/config") {
     const user = getSessionUser(request);
     const metadata = readMetadata();
+    const tasks = syncNextStepReminderTasks();
+    const openReminderCount = tasks.filter(
+      (task) =>
+        task.autoManaged &&
+        task.sourceKind === "next-step" &&
+        String(task.status || "").trim() !== "Completed"
+    ).length;
     sendJson(response, 200, {
       defaultRecipients: DEFAULT_RECIPIENTS,
       emailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL),
@@ -2786,6 +3110,11 @@ const server = http.createServer(async (request, response) => {
       teamUserCount: Object.keys(TEAM_USERS).length,
       schemaVersion: metadata.schemaVersion,
       lastBackupAt: metadata.lastBackupAt,
+      lastDigestSentAt: metadata.lastDigestSentAt,
+      nextDigestDueAt: metadata.lastDigestSentAt
+        ? addDays(metadata.lastDigestSentAt, DIGEST_WINDOW_DAYS).toISOString()
+        : addDays(new Date(), DIGEST_WINDOW_DAYS).toISOString(),
+      openReminderCount,
       canEdit: canEdit(user),
       user
     });
@@ -2851,7 +3180,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investments = readInvestments();
-    const tasks = readTasks();
+    const tasks = syncNextStepReminderTasks(investments, readTasks());
     const companyDocuments = readCompanyDocuments();
     sendJson(response, 200, {
       investments,
@@ -2867,7 +3196,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    sendJson(response, 200, { tasks: readTasks(), user });
+    sendJson(response, 200, { tasks: syncNextStepReminderTasks(readInvestments(), readTasks()), user });
     return;
   }
 
@@ -2920,6 +3249,75 @@ const server = http.createServer(async (request, response) => {
     });
     response.end(JSON.stringify(backup, null, 2));
     return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/biweekly-digest") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    const investments = readInvestments();
+    const tasks = syncNextStepReminderTasks(investments, readTasks());
+    const metadata = readMetadata();
+    const digest = buildBiweeklyDigest(investments, tasks, metadata);
+    sendJson(response, 200, {
+      digest: {
+        subject: digest.subject,
+        text: digest.text,
+        counts: digest.counts,
+        generatedAt: digest.generatedAt,
+        windowStart: digest.windowStart
+      }
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/biweekly-digest/send") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const recipients = Array.isArray(payload.recipients)
+        ? payload.recipients.map((item) => String(item).trim()).filter(Boolean)
+        : DEFAULT_RECIPIENTS;
+      const investments = readInvestments();
+      const tasks = syncNextStepReminderTasks(investments, readTasks());
+      const metadata = readMetadata();
+      const digest = buildBiweeklyDigest(investments, tasks, metadata, recipients);
+      const email = await sendEmail(
+        {
+          subject: digest.subject,
+          text: digest.text,
+          html: digest.html
+        },
+        recipients
+      );
+
+      writeMetadata({
+        lastDigestSentAt: digest.generatedAt,
+        lastDigestWindowStartedAt: digest.windowStart,
+        lastDigestChangeCount: digest.counts.changedInvestments
+      });
+
+      sendJson(response, 200, {
+        message: "Biweekly digest sent.",
+        email,
+        digest: {
+          subject: digest.subject,
+          counts: digest.counts,
+          generatedAt: digest.generatedAt,
+          windowStart: digest.windowStart
+        }
+      });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Biweekly digest failed." });
+      return;
+    }
   }
 
   if (request.method === "GET" && url.pathname === "/api/family-office-workbook.xlsx") {

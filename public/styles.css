@@ -871,6 +871,17 @@ button:disabled {
   font: inherit;
 }
 
+.digest-preview-text {
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(23, 50, 77, 0.05);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  font: 0.92rem/1.55 "SFMono-Regular", ui-monospace, "Menlo", monospace;
+}
+
 a.secondary-button.inline-action-button {
   display: inline-flex;
   align-items: center;

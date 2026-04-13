@@ -296,10 +296,17 @@
               <input name="owner" type="text" placeholder="Tashie" />
             </label>
 
-            <label>
-              Next step
-              <input name="nextStep" type="text" placeholder="Schedule partner review call" />
-            </label>
+            <div class="two-up">
+              <label>
+                Next step
+                <input name="nextStep" type="text" placeholder="Schedule partner review call" />
+              </label>
+
+              <label>
+                Next step reminder date
+                <input id="nextStepDueDateField" name="nextStepDueDate" type="date" />
+              </label>
+            </div>
 
             <section class="subsection-card">
               <div class="subsection-copy">
@@ -805,6 +812,25 @@
             </div>
           </div>
           <p id="importWorkbookMessage" class="form-message" aria-live="polite"></p>
+          <section class="subsection-card">
+            <div class="subsection-copy">
+              <p class="feature-kicker">Biweekly digest</p>
+              <h3>Keep the team-ready update current</h3>
+              <p class="section-copy">
+                Preview the last two weeks of changes and send the digest email when it is ready.
+              </p>
+            </div>
+            <div class="panel-actions">
+              <button id="previewDigestButton" type="button" class="secondary-button">
+                Preview biweekly digest
+              </button>
+              <button id="sendDigestButton" type="button" class="secondary-button">
+                Send biweekly digest
+              </button>
+            </div>
+            <p id="digestMessage" class="form-message" aria-live="polite"></p>
+            <div id="digestPreview" class="timeline-card timeline-card-compact hidden"></div>
+          </section>
         </section>
 
         <section id="reconciliationSection" class="panel workspace-view hidden" data-view="reconciliation">
