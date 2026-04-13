@@ -754,17 +754,48 @@ function pickLatestNumericValue(updates, fieldName) {
 }
 
 function buildPerformanceInputs(updates) {
-  const normalizedActivities = updates.flatMap((update) => {
+  const updateActivities = updates.map((update) => {
     const activityRows = normalizeCapitalActivityRows(
       update.capitalActivity && update.capitalActivity.length
         ? update.capitalActivity
         : buildLegacyCapitalActivityRows(update)
     );
 
-    return activityRows.map((activity) => ({
-      ...activity,
-      fallbackDate: parseDateValue(update.createdAt, null)
-    }));
+    return {
+      update,
+      activities: activityRows.map((activity) => ({
+        ...activity,
+        fallbackDate: parseDateValue(update.createdAt, null)
+      }))
+    };
+  });
+
+  const reconciliationOverride = updateActivities.find(({ activities }) =>
+    activities.some((activity) => {
+      const type = String(activity.type || "").toLowerCase();
+      const notes = String(activity.notes || "").trim();
+      return (
+        (type.includes("capital call") ||
+          type.includes("investment amount") ||
+          type.includes("fee")) &&
+        notes === "Updated from entity reconciliation"
+      );
+    })
+  );
+
+  const normalizedActivities = updateActivities.flatMap(({ update, activities }) => {
+    if (!reconciliationOverride || reconciliationOverride.update.id === update.id) {
+      return activities;
+    }
+
+    return activities.filter((activity) => {
+      const type = String(activity.type || "").toLowerCase();
+      return !(
+        type.includes("capital call") ||
+        type.includes("investment amount") ||
+        type.includes("fee")
+      );
+    });
   });
 
   const investedCapital = normalizedActivities.reduce((sum, activity) => {
