@@ -1780,8 +1780,8 @@ function buildFamilyOfficeWorkbookBuffer(investments) {
         return result;
       }, {});
       const commitmentAmount =
-        performance.totalInvestedCapital ||
         toPositiveNumber(latest.amount) ||
+        performance.totalInvestedCapital ||
         toPositiveNumber(latest.capitalCallAmount) ||
         "";
       const initialInvestmentDate =
