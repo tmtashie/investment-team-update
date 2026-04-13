@@ -1018,19 +1018,7 @@ function buildAggregatePerformance(companyCollections) {
     const latestReportedAmount = toNumber(latest && latest.amount);
     const includeInReportedAmount = !["Passed", "Written Off"].includes(latestStatus);
 
-    if (includeInReportedAmount && latestReportedAmount > 0) {
-      return sum + latestReportedAmount;
-    }
-
-    if (includeInReportedAmount && inputs.committedCapital > 0) {
-      return sum + inputs.committedCapital;
-    }
-
-    if (includeInReportedAmount) {
-      return sum + inputs.investedCapital;
-    }
-
-    return sum;
+    return includeInReportedAmount ? sum + latestReportedAmount : sum;
   }, 0);
   const investedCapital = companyInputs.reduce(
     (sum, { inputs }) => sum + inputs.investedCapital,
@@ -1156,15 +1144,10 @@ function buildDashboardCards(investments) {
   ).length;
   const totalCommittedCapital = companySummaries.reduce((sum, summary) => {
     const latestReportedAmount = toNumber(summary.latest && summary.latest.amount);
-    if (latestReportedAmount > 0) {
-      return sum + latestReportedAmount;
-    }
-
-    if (summary.performance.committedCapital > 0) {
-      return sum + summary.performance.committedCapital;
-    }
-
-    return sum + summary.performance.investedCapital;
+    const latestStatus = String(summary.latest && summary.latest.status).trim();
+    return !["Passed", "Written Off"].includes(latestStatus)
+      ? sum + latestReportedAmount
+      : sum;
   }, 0);
   const totalInvestedCapital = companySummaries.reduce(
     (sum, summary) => sum + summary.performance.investedCapital,
