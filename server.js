@@ -811,7 +811,9 @@ function syncNextStepReminderTasks(investments = readInvestments(), tasks = read
     const existingTask = taskIndex >= 0 ? nextTasks[taskIndex] : null;
     const needsReminder =
       String(investment.nextStep || "").trim() &&
-      !["Passed", "Closed"].includes(String(investment.status || "").trim());
+      !["Passed", "Closed", "Closed / Archived", "Realized", "Written Off"].includes(
+        String(investment.status || "").trim()
+      );
 
     if (!needsReminder) {
       if (existingTask && existingTask.status !== "Completed") {
@@ -2150,10 +2152,10 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
 
       const status =
         transactionType === "Full Exit"
-          ? "Closed"
+          ? "Realized"
           : transactionType === "Write-off adjustment"
-            ? "Passed"
-            : "Investment update";
+            ? "Written Off"
+            : "Active";
 
       pushImported(
         {
@@ -2313,15 +2315,15 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
         const normalizedStatus = (() => {
           const lowered = statusText.toLowerCase();
           if (lowered.includes("exit")) {
-            return "Closed";
+            return "Realized";
           }
           if (lowered.includes("lost") || lowered.includes("written")) {
-            return "Passed";
+            return "Written Off";
           }
           if (lowered.includes("active")) {
-            return "Investment update";
+            return "Active";
           }
-          return statusText || "Investment update";
+          return statusText || "Active";
         })();
 
         pushImported(
@@ -2759,11 +2761,15 @@ function buildSummary(entry) {
   ].join("\n");
 
   const statusColor = {
-    "New lead": "#805500",
-    "Under review": "#144a7c",
+    Pipeline: "#144a7c",
     Approved: "#13613e",
+    Funded: "#166534",
+    Active: "#0f766e",
+    "Partially Realized": "#7c3aed",
+    Realized: "#0f4c81",
+    "Written Off": "#7c1d1d",
     Passed: "#7c1d1d",
-    Closed: "#5c3b00"
+    "Closed / Archived": "#5c3b00"
   }[entry.status] || "#44403c";
 
   const html = `

@@ -986,7 +986,9 @@ function buildAggregatePerformance(companyCollections) {
     const latest = company && company.latest ? company.latest : null;
     const latestStatus = String((latest && latest.status) || "").trim();
     const latestReportedAmount = toNumber(latest && latest.amount);
-    const includeInReportedAmount = ["Approved", "Closed"].includes(latestStatus);
+    const includeInReportedAmount = ["Approved", "Closed", "Closed / Archived", "Realized"].includes(
+      latestStatus
+    );
 
     if (includeInReportedAmount && latestReportedAmount > 0) {
       return sum + latestReportedAmount;
@@ -1100,23 +1102,34 @@ function buildEntityPerformanceMap(investments) {
 
 function buildDashboardCards(investments) {
   const companySummaries = getCompanyCollections(investments);
+  const inactiveStatuses = ["Passed", "Closed", "Closed / Archived", "Realized", "Written Off"];
   const openCount = companySummaries.filter(
-    (summary) => !["Passed", "Closed"].includes(summary.latest && summary.latest.status)
+    (summary) => !inactiveStatuses.includes(summary.latest && summary.latest.status)
   ).length;
   const openPipelineAmount = companySummaries.reduce((sum, summary) => {
-    if (["Passed", "Closed"].includes(summary.latest && summary.latest.status)) {
+    if (inactiveStatuses.includes(summary.latest && summary.latest.status)) {
       return sum;
     }
 
     return sum + summary.performance.investedCapital;
   }, 0);
-  const approvedCount = investments.filter((investment) => investment.status === "Approved").length;
+  const approvedCount = companySummaries.filter(
+    (summary) => String(summary.latest && summary.latest.status) === "Approved"
+  ).length;
   const openReminderCount = allTasks.filter(
     (task) =>
       task.autoManaged &&
       task.sourceKind === "next-step" &&
       String(task.status || "").trim() !== "Completed"
   ).length;
+  const totalCommittedCapital = companySummaries.reduce((sum, summary) => {
+    const latestReportedAmount = toNumber(summary.latest && summary.latest.amount);
+    if (latestReportedAmount > 0) {
+      return sum + latestReportedAmount;
+    }
+
+    return sum + summary.performance.investedCapital;
+  }, 0);
   const totalInvestedCapital = companySummaries.reduce(
     (sum, summary) => sum + summary.performance.investedCapital,
     0
@@ -1146,6 +1159,7 @@ function buildDashboardCards(investments) {
       status: "Approved"
     },
     { label: "Open reminders", value: String(openReminderCount), action: "tasks" },
+    { label: "Total committed capital", value: formatMoney(totalCommittedCapital), action: "portfolio" },
     { label: "Invested capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
     { label: "Official NAV", value: formatMoney(officialNav), action: "portfolio" },
     { label: "Internal NAV", value: formatMoney(internalNav), action: "portfolio" }
