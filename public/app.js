@@ -1016,9 +1016,7 @@ function buildAggregatePerformance(companyCollections) {
     const latest = company && company.latest ? company.latest : null;
     const latestStatus = String((latest && latest.status) || "").trim();
     const latestReportedAmount = toNumber(latest && latest.amount);
-    const includeInReportedAmount = ["Approved", "Closed", "Closed / Archived", "Realized"].includes(
-      latestStatus
-    );
+    const includeInReportedAmount = !["Passed", "Written Off"].includes(latestStatus);
 
     if (includeInReportedAmount && latestReportedAmount > 0) {
       return sum + latestReportedAmount;
@@ -1250,7 +1248,7 @@ function renderDashboard(investments) {
         <article class="dashboard-card entity-performance-card" data-entity="${escapeHtml(entity)}">
           <p class="dashboard-label">${escapeHtml(entity)}</p>
           <p class="dashboard-value">${escapeHtml(formatMoney(performance.reportedAmount))}</p>
-          <p class="update-meta">Reported amount (approved + closed)</p>
+          <p class="update-meta">Total committed capital</p>
           <p class="update-meta">Invested capital: ${escapeHtml(formatMoney(performance.investedCapital))}</p>
           <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(performance.officialValue))}</p>
           <p class="update-meta">Internal NAV: ${escapeHtml(formatMoney(performance.internalValue))}</p>
@@ -1286,7 +1284,7 @@ function renderEntityDetail() {
   ).size;
   entityDetailCopy.textContent = `${investmentCount} investment${investmentCount === 1 ? "" : "s"} tracked under this entity.`;
   entityDetailSummary.innerHTML = [
-    { label: "Reported amount", value: formatMoney(performance.reportedAmount) },
+    { label: "Total committed capital", value: formatMoney(performance.reportedAmount) },
     { label: "Invested capital", value: formatMoney(performance.investedCapital) },
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official NAV", value: formatMoney(performance.officialValue) },
