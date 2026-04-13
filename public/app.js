@@ -982,15 +982,17 @@ function buildAggregatePerformance(companyCollections) {
     inputs: buildPerformanceInputs(company.updates)
   }));
 
-  const approvedReportedAmount = companyInputs.reduce((sum, { company, inputs }) => {
+  const reportedAmount = companyInputs.reduce((sum, { company, inputs }) => {
     const latest = company && company.latest ? company.latest : null;
     const latestStatus = String((latest && latest.status) || "").trim();
     const latestReportedAmount = toNumber(latest && latest.amount);
-    if (latestStatus === "Approved" && latestReportedAmount > 0) {
+    const includeInReportedAmount = ["Approved", "Closed"].includes(latestStatus);
+
+    if (includeInReportedAmount && latestReportedAmount > 0) {
       return sum + latestReportedAmount;
     }
 
-    if (latestStatus === "Approved") {
+    if (includeInReportedAmount) {
       return sum + inputs.investedCapital;
     }
 
@@ -1038,7 +1040,7 @@ function buildAggregatePerformance(companyCollections) {
   };
 
   return {
-    approvedReportedAmount,
+    reportedAmount,
     investedCapital,
     distributions,
     officialValue,
@@ -1195,8 +1197,8 @@ function renderDashboard(investments) {
       ({ entity, performance }) => `
         <article class="dashboard-card entity-performance-card" data-entity="${escapeHtml(entity)}">
           <p class="dashboard-label">${escapeHtml(entity)}</p>
-          <p class="dashboard-value">${escapeHtml(formatMoney(performance.approvedReportedAmount))}</p>
-          <p class="update-meta">Approved reported amount</p>
+          <p class="dashboard-value">${escapeHtml(formatMoney(performance.reportedAmount))}</p>
+          <p class="update-meta">Reported amount (approved + closed)</p>
           <p class="update-meta">Invested capital: ${escapeHtml(formatMoney(performance.investedCapital))}</p>
           <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(performance.officialValue))}</p>
           <p class="update-meta">Internal NAV: ${escapeHtml(formatMoney(performance.internalValue))}</p>
@@ -1232,7 +1234,7 @@ function renderEntityDetail() {
   ).size;
   entityDetailCopy.textContent = `${investmentCount} investment${investmentCount === 1 ? "" : "s"} tracked under this entity.`;
   entityDetailSummary.innerHTML = [
-    { label: "Approved reported amount", value: formatMoney(performance.approvedReportedAmount) },
+    { label: "Reported amount", value: formatMoney(performance.reportedAmount) },
     { label: "Invested capital", value: formatMoney(performance.investedCapital) },
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official NAV", value: formatMoney(performance.officialValue) },
