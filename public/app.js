@@ -798,7 +798,21 @@ function buildPerformanceInputs(updates) {
     });
   });
 
-  const investedCapital = normalizedActivities.reduce((sum, activity) => {
+  const hasActualCalledCapital = normalizedActivities.some((activity) => {
+    const type = String(activity.type || "").toLowerCase();
+    return type.includes("capital call") || type.includes("fee");
+  });
+
+  const effectiveActivities = normalizedActivities.filter((activity) => {
+    const type = String(activity.type || "").toLowerCase();
+    if (hasActualCalledCapital && type.includes("investment amount")) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const investedCapital = effectiveActivities.reduce((sum, activity) => {
     const type = String(activity.type || "").toLowerCase();
     const amount = toNumber(activity.amount);
     return type.includes("capital call") ||
@@ -807,7 +821,7 @@ function buildPerformanceInputs(updates) {
       ? sum + amount
       : sum;
   }, 0);
-  const distributions = normalizedActivities.reduce((sum, activity) => {
+  const distributions = effectiveActivities.reduce((sum, activity) => {
     const type = String(activity.type || "").toLowerCase();
     const amount = toNumber(activity.amount);
     return !type.includes("capital call") &&
@@ -821,7 +835,7 @@ function buildPerformanceInputs(updates) {
   const exitMark = pickLatestNumericValue(updates, "exitValue");
 
   const baseCashFlows = [];
-  normalizedActivities.forEach((activity) => {
+  effectiveActivities.forEach((activity) => {
     const amount = toNumber(activity.amount);
     const date = parseDateValue(activity.date, activity.fallbackDate);
     const type = String(activity.type || "").toLowerCase();
