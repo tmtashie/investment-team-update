@@ -951,6 +951,16 @@ function buildAggregatePerformance(companyCollections) {
     inputs: buildPerformanceInputs(company.updates)
   }));
 
+  const reportedAmount = companyInputs.reduce((sum, { company, inputs }) => {
+    const latest = company && company.latest ? company.latest : null;
+    const latestStatus = String((latest && latest.status) || "").trim();
+    const latestReportedAmount = toNumber(latest && latest.amount);
+    if (latestStatus === "Approved" && latestReportedAmount > 0) {
+      return sum + latestReportedAmount;
+    }
+
+    return sum + inputs.investedCapital;
+  }, 0);
   const investedCapital = companyInputs.reduce(
     (sum, { inputs }) => sum + inputs.investedCapital,
     0
@@ -993,6 +1003,7 @@ function buildAggregatePerformance(companyCollections) {
   };
 
   return {
+    reportedAmount,
     investedCapital,
     distributions,
     officialValue,
@@ -1149,7 +1160,9 @@ function renderDashboard(investments) {
       ({ entity, performance }) => `
         <article class="dashboard-card entity-performance-card" data-entity="${escapeHtml(entity)}">
           <p class="dashboard-label">${escapeHtml(entity)}</p>
-          <p class="dashboard-value">${escapeHtml(formatMoney(performance.investedCapital))}</p>
+          <p class="dashboard-value">${escapeHtml(formatMoney(performance.reportedAmount || performance.investedCapital))}</p>
+          <p class="update-meta">Reported amount for approved deals</p>
+          <p class="update-meta">Invested capital: ${escapeHtml(formatMoney(performance.investedCapital))}</p>
           <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(performance.officialValue))}</p>
           <p class="update-meta">Internal NAV: ${escapeHtml(formatMoney(performance.internalValue))}</p>
           <p class="update-meta">Internal XIRR: ${escapeHtml(formatPercent(performance.internal.xirr))}</p>
@@ -1184,6 +1197,7 @@ function renderEntityDetail() {
   ).size;
   entityDetailCopy.textContent = `${investmentCount} investment${investmentCount === 1 ? "" : "s"} tracked under this entity.`;
   entityDetailSummary.innerHTML = [
+    { label: "Reported amount", value: formatMoney(performance.reportedAmount || performance.investedCapital) },
     { label: "Invested capital", value: formatMoney(performance.investedCapital) },
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official NAV", value: formatMoney(performance.officialValue) },
