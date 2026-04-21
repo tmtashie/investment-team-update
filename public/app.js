@@ -23,6 +23,7 @@ const downloadBackupButton = document.getElementById("downloadBackupButton");
 const downloadFamilyOfficeWorkbookButton = document.getElementById(
   "downloadFamilyOfficeWorkbookButton"
 );
+const downloadReconciliationButton = document.getElementById("downloadReconciliationButton");
 const previewDigestButton = document.getElementById("previewDigestButton");
 const sendDigestButton = document.getElementById("sendDigestButton");
 const digestMessage = document.getElementById("digestMessage");
@@ -1124,6 +1125,99 @@ function buildEntityRowTotals(rows) {
     internal: aggregatePerformance.internal,
     exit: aggregatePerformance.exit
   };
+}
+
+function csvEscape(value) {
+  const text = String(value === null || value === undefined ? "" : value);
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+}
+
+function downloadTextFile(filename, content, mimeType = "text/csv;charset=utf-8") {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildReconciliationCsv() {
+  const headers = [
+    "Entity",
+    "Company",
+    "Stage",
+    "Status",
+    "Reported amount field",
+    "Included committed capital",
+    "Included in committed total?",
+    "Invested capital",
+    "Official NAV",
+    "Internal NAV",
+    "Latest update date",
+    "Latest update id"
+  ];
+  const rows = [];
+  const entities = Array.from(
+    new Set(
+      configuredEntities
+        .concat(
+          getCompanyCollections(allInvestments)
+            .map((company) => normalizeEntityName(company.latest.entity))
+            .filter(Boolean)
+        )
+        .map(normalizeEntityName)
+    )
+  ).filter(Boolean);
+
+  entities.forEach((entity) => {
+    const entityRows = buildEntityRows(allInvestments, entity).sort((left, right) =>
+      String(left.latest.company || "").localeCompare(String(right.latest.company || ""), undefined, {
+        sensitivity: "base"
+      })
+    );
+
+    entityRows.forEach((row) => {
+      rows.push([
+        entity,
+        row.latest.company || "",
+        row.latest.stage || "",
+        row.latest.status || "",
+        row.reportedAmount,
+        row.includedReportedAmount,
+        row.includeReportedAmount ? "Yes" : "No",
+        row.performance.investedCapital,
+        row.performance.officialValue,
+        row.performance.internalValue,
+        row.latest.updatedAt || row.latest.createdAt || "",
+        row.latest.id || ""
+      ]);
+    });
+
+    const totals = buildEntityRowTotals(entityRows);
+    rows.push([
+      entity,
+      "SUBTOTAL",
+      "",
+      "",
+      "",
+      totals.reportedAmount,
+      "",
+      totals.investedCapital,
+      totals.officialValue,
+      totals.internalValue,
+      "",
+      ""
+    ]);
+  });
+
+  return [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
 }
 
 function buildCompanyPerformanceMap(investments) {
@@ -2353,6 +2447,7 @@ function renderReconciliation() {
                 <th>Stage</th>
                 <th>Status</th>
                 <th>Reported amount</th>
+                <th>Included committed</th>
                 <th>Invested capital</th>
                 <th>Official NAV</th>
                 <th>Internal NAV</th>
@@ -2363,7 +2458,7 @@ function renderReconciliation() {
               ${entityRows.length
                 ? entityRows
                     .map(
-                      ({ latest, performance, includedReportedAmount }) => `
+                      ({ latest, performance, includedReportedAmount, includeReportedAmount }) => `
                         <tr>
                           <td>
                             <button class="link-button company-link" type="button" data-company="${escapeHtml(latest.company)}" data-entity="${escapeHtml(latest.entity || "")}">
@@ -2423,6 +2518,14 @@ function renderReconciliation() {
                             }
                           </td>
                           <td>
+                            <span class="dashboard-label">${escapeHtml(formatMoney(includedReportedAmount))}</span>
+                            ${
+                              includeReportedAmount
+                                ? ""
+                                : '<p class="update-meta">Excluded from committed total</p>'
+                            }
+                          </td>
+                          <td>
                             ${
                               canEditWorkspace()
                                 ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
@@ -2460,11 +2563,12 @@ function renderReconciliation() {
                       `
                     )
                     .join("")
-                : `<tr><td colspan="${canEditWorkspace() ? "9" : "8"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
+                : `<tr><td colspan="${canEditWorkspace() ? "10" : "9"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
             </tbody>
             <tfoot>
               <tr>
                 <td colspan="4">Subtotal</td>
+                <td></td>
                 <td>${escapeHtml(formatMoney(entityPerformance.reportedAmount))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.investedCapital))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.officialValue))}</td>
@@ -3132,6 +3236,10 @@ downloadExcelButton.addEventListener("click", () => {
 
 downloadFamilyOfficeWorkbookButton.addEventListener("click", () => {
   window.location.href = "/api/family-office-workbook.xlsx";
+});
+
+downloadReconciliationButton.addEventListener("click", () => {
+  downloadTextFile("entity-reconciliation.csv", buildReconciliationCsv());
 });
 
 downloadBackupButton.addEventListener("click", () => {
