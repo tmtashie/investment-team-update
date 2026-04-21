@@ -1078,6 +1078,54 @@ function calculateReportedAmountTotal(companyInputs) {
   }, 0);
 }
 
+function buildEntityRows(investments, entity) {
+  const normalizedEntity = normalizeEntityName(entity);
+  return getCompanyCollections(investments)
+    .filter((company) => {
+      if (!normalizedEntity) {
+        return true;
+      }
+
+      return normalizeEntityName(company.latest.entity) === normalizedEntity;
+    })
+    .map((company) => {
+      const performance = company.performance || buildCompanyPerformance(company.updates);
+      const status = String((company.latest && company.latest.status) || "").trim();
+      const reportedAmount = toNumber(company.latest && company.latest.amount);
+      const includeReportedAmount = !["Passed", "Written Off"].includes(status);
+
+      return {
+        company,
+        latest: company.latest,
+        performance,
+        reportedAmount,
+        includedReportedAmount: includeReportedAmount ? reportedAmount : 0,
+        includeReportedAmount
+      };
+    });
+}
+
+function sumEntityRows(rows, selector) {
+  return rows.reduce((sum, row) => sum + selector(row), 0);
+}
+
+function buildEntityRowTotals(rows) {
+  const entityCompanies = rows.map((row) => row.company);
+  const aggregatePerformance = buildAggregatePerformance(entityCompanies);
+
+  return {
+    reportedAmount: sumEntityRows(rows, (row) => row.includedReportedAmount),
+    investedCapital: sumEntityRows(rows, (row) => row.performance.investedCapital),
+    distributions: sumEntityRows(rows, (row) => row.performance.distributions),
+    officialValue: sumEntityRows(rows, (row) => row.performance.officialValue),
+    internalValue: sumEntityRows(rows, (row) => row.performance.internalValue),
+    exitValue: sumEntityRows(rows, (row) => row.performance.exitValue),
+    official: aggregatePerformance.official,
+    internal: aggregatePerformance.internal,
+    exit: aggregatePerformance.exit
+  };
+}
+
 function buildCompanyPerformanceMap(investments) {
   const grouped = new Map();
 
@@ -1126,6 +1174,7 @@ function buildEntityPerformanceMap(investments) {
 
 function buildDashboardCards(investments) {
   const companySummaries = getCompanyCollections(investments);
+  const allEntityRows = buildEntityRows(investments);
   const inactiveStatuses = ["Passed", "Closed", "Closed / Archived", "Realized", "Written Off"];
   const openCount = companySummaries.filter(
     (summary) => !inactiveStatuses.includes(summary.latest && summary.latest.status)
@@ -1146,25 +1195,16 @@ function buildDashboardCards(investments) {
       task.sourceKind === "next-step" &&
       String(task.status || "").trim() !== "Completed"
   ).length;
-  const totalCommittedCapital = companySummaries.reduce((sum, summary) => {
-    const latestReportedAmount = toNumber(summary.latest && summary.latest.amount);
-    const latestStatus = String(summary.latest && summary.latest.status).trim();
-    return !["Passed", "Written Off"].includes(latestStatus)
-      ? sum + latestReportedAmount
-      : sum;
-  }, 0);
-  const totalInvestedCapital = companySummaries.reduce(
-    (sum, summary) => sum + summary.performance.investedCapital,
-    0
+  const totalCommittedCapital = sumEntityRows(
+    allEntityRows,
+    (row) => row.includedReportedAmount
   );
-  const officialNav = companySummaries.reduce(
-    (sum, summary) => sum + summary.performance.officialValue,
-    0
+  const totalInvestedCapital = sumEntityRows(
+    allEntityRows,
+    (row) => row.performance.investedCapital
   );
-  const internalNav = companySummaries.reduce(
-    (sum, summary) => sum + summary.performance.internalValue,
-    0
-  );
+  const officialNav = sumEntityRows(allEntityRows, (row) => row.performance.officialValue);
+  const internalNav = sumEntityRows(allEntityRows, (row) => row.performance.internalValue);
 
   const cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
@@ -1222,7 +1262,7 @@ function renderDashboard(investments) {
     .join("");
 
   const entityCards = Array.from(entityPerformanceMap.entries())
-    .map(([entity, performance]) => ({ entity, performance }))
+    .map(([entity]) => ({ entity, rows: buildEntityRows(allInvestments, entity) }))
     .filter(
       ({ entity }) =>
         !currentFilters().entity ||
@@ -1231,26 +1271,18 @@ function renderDashboard(investments) {
 
   entityPerformanceCards.innerHTML = entityCards
     .map(
-      ({ entity, performance }) => {
-        const entityCompanies = getCompanyCollections(allInvestments).filter(
-          (company) => normalizeEntityName(company.latest.entity) === normalizeEntityName(entity)
-        );
-        const reportedAmount = calculateReportedAmountTotal(
-          entityCompanies.map((company) => ({
-            company,
-            inputs: company.performance || buildCompanyPerformance(company.updates)
-          }))
-        );
+      ({ entity, rows }) => {
+        const totals = buildEntityRowTotals(rows);
         return `
         <article class="dashboard-card entity-performance-card" data-entity="${escapeHtml(entity)}">
           <p class="dashboard-label">${escapeHtml(entity)}</p>
-          <p class="dashboard-value">${escapeHtml(formatMoney(reportedAmount))}</p>
+          <p class="dashboard-value">${escapeHtml(formatMoney(totals.reportedAmount))}</p>
           <p class="update-meta">Total committed capital</p>
-          <p class="update-meta">Invested capital: ${escapeHtml(formatMoney(performance.investedCapital))}</p>
-          <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(performance.officialValue))}</p>
-          <p class="update-meta">Internal NAV: ${escapeHtml(formatMoney(performance.internalValue))}</p>
-          <p class="update-meta">Internal XIRR: ${escapeHtml(formatPercent(performance.internal.xirr))}</p>
-          <p class="update-meta">Internal MOIC: ${escapeHtml(formatTurns(performance.internal.moic))}</p>
+          <p class="update-meta">Invested capital: ${escapeHtml(formatMoney(totals.investedCapital))}</p>
+          <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(totals.officialValue))}</p>
+          <p class="update-meta">Internal NAV: ${escapeHtml(formatMoney(totals.internalValue))}</p>
+          <p class="update-meta">Internal XIRR: ${escapeHtml(formatPercent(totals.internal.xirr))}</p>
+          <p class="update-meta">Internal MOIC: ${escapeHtml(formatTurns(totals.internal.moic))}</p>
         </article>
       `;
       }
@@ -1273,23 +1305,15 @@ function renderEntityDetail() {
       (investment) => normalizeEntityName(investment.entity) === normalizeEntityName(selectedEntity)
     )
   );
-  const companyCollections = getCompanyCollections(investments);
-  const performance = entityPerformanceMap.get(selectedEntity) || buildAggregatePerformance(companyCollections);
-  const reportedAmount = calculateReportedAmountTotal(
-    companyCollections.map((company) => ({
-      company,
-      inputs: company.performance || buildCompanyPerformance(company.updates)
-    }))
-  );
+  const entityRows = buildEntityRows(allInvestments, selectedEntity);
+  const performance = buildEntityRowTotals(entityRows);
 
   entityDetailSection.classList.remove("hidden");
   entityDetailTitle.textContent = selectedEntity;
-  const investmentCount = new Set(
-    investments.map((investment) => getInvestmentPositionKey(investment)).filter(Boolean)
-  ).size;
+  const investmentCount = entityRows.length;
   entityDetailCopy.textContent = `${investmentCount} investment${investmentCount === 1 ? "" : "s"} tracked under this entity.`;
   entityDetailSummary.innerHTML = [
-    { label: "Total committed capital", value: formatMoney(reportedAmount) },
+    { label: "Total committed capital", value: formatMoney(performance.reportedAmount) },
     { label: "Invested capital", value: formatMoney(performance.investedCapital) },
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official NAV", value: formatMoney(performance.officialValue) },
@@ -2305,27 +2329,20 @@ function renderReconciliation() {
 
   reconciliationList.innerHTML = entities
     .map((entity) => {
-      const entityCompanies = companySummaries
-        .filter((company) => normalizeEntityName(company.latest.entity) === normalizeEntityName(entity))
+      const entityRows = buildEntityRows(allInvestments, entity)
         .sort((left, right) =>
           String(left.latest.company || "").localeCompare(String(right.latest.company || ""), undefined, {
             sensitivity: "base"
           })
         );
-      const entityPerformance = entityPerformanceMap.get(entity) || buildAggregatePerformance(entityCompanies);
-      const reportedSubtotal = calculateReportedAmountTotal(
-        entityCompanies.map((company) => ({
-          company,
-          inputs: company.performance || buildCompanyPerformance(company.updates)
-        }))
-      );
+      const entityPerformance = buildEntityRowTotals(entityRows);
 
       return `
         <section class="reconciliation-card">
           <div class="panel-header">
             <div>
               <h3>${escapeHtml(entity)}</h3>
-              <p class="section-copy">${entityCompanies.length} investment${entityCompanies.length === 1 ? "" : "s"} included in this entity total.</p>
+              <p class="section-copy">${entityRows.length} investment${entityRows.length === 1 ? "" : "s"} included in this entity total.</p>
             </div>
           </div>
           <table class="reconciliation-table">
@@ -2343,10 +2360,10 @@ function renderReconciliation() {
               </tr>
             </thead>
             <tbody>
-              ${entityCompanies.length
-                ? entityCompanies
+              ${entityRows.length
+                ? entityRows
                     .map(
-                      ({ latest, performance }) => `
+                      ({ latest, performance, includedReportedAmount }) => `
                         <tr>
                           <td>
                             <button class="link-button company-link" type="button" data-company="${escapeHtml(latest.company)}" data-entity="${escapeHtml(latest.entity || "")}">
@@ -2448,7 +2465,7 @@ function renderReconciliation() {
             <tfoot>
               <tr>
                 <td colspan="4">Subtotal</td>
-                <td>${escapeHtml(formatMoney(reportedSubtotal))}</td>
+                <td>${escapeHtml(formatMoney(entityPerformance.reportedAmount))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.investedCapital))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.officialValue))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.internalValue))}</td>
