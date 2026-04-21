@@ -1087,6 +1087,13 @@ function isPipelineStatus(status) {
   return ["New Lead", "Under Review"].includes(String(status || "").trim());
 }
 
+function isPipelineRow(row) {
+  return (
+    isPipelineStatus(row && row.latest && row.latest.status) ||
+    isPipelineStatus(row && row.latest && row.latest.stage)
+  );
+}
+
 function buildEntityRows(investments, entity) {
   const normalizedEntity = normalizeEntityName(entity);
   return getCompanyCollections(investments)
@@ -1165,7 +1172,7 @@ function buildReconciliationCsv() {
     "Reported amount field",
     "Included committed capital",
     "Included in committed total?",
-    "Invested capital",
+    "Called capital",
     "Official NAV",
     "Internal NAV",
     "Latest update date",
@@ -1277,7 +1284,7 @@ function buildEntityPerformanceMap(investments) {
 function buildDashboardCards(investments) {
   const companySummaries = getCompanyCollections(investments);
   const allEntityRows = buildEntityRows(investments);
-  const pipelineRows = allEntityRows.filter((row) => isPipelineStatus(row.latest.status));
+  const pipelineRows = allEntityRows.filter(isPipelineRow);
   const openCount = pipelineRows.length;
   const openPipelineAmount = sumEntityRows(pipelineRows, (row) => row.reportedAmount);
   const approvedCount = companySummaries.filter(
@@ -1317,7 +1324,7 @@ function buildDashboardCards(investments) {
     },
     { label: "Open reminders", value: String(openReminderCount), action: "tasks" },
     { label: "Total committed capital", value: formatMoney(totalCommittedCapital), action: "portfolio" },
-    { label: "Invested capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
+    { label: "Called capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
     { label: "Official NAV", value: formatMoney(officialNav), action: "portfolio" },
     { label: "Internal NAV", value: formatMoney(internalNav), action: "portfolio" }
   ];
@@ -1372,7 +1379,10 @@ function renderDashboard(investments) {
           <p class="dashboard-label">${escapeHtml(entity)}</p>
           <p class="dashboard-value">${escapeHtml(formatMoney(totals.reportedAmount))}</p>
           <p class="update-meta">Total committed capital</p>
-          <p class="update-meta">Invested capital: ${escapeHtml(formatMoney(totals.investedCapital))}</p>
+          <p class="update-meta">Called capital: ${escapeHtml(formatMoney(totals.investedCapital))}</p>
+          <p class="update-meta">Unfunded commitment: ${escapeHtml(
+            formatMoney(Math.max(totals.reportedAmount - totals.investedCapital, 0))
+          )}</p>
           <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(totals.officialValue))}</p>
           <p class="update-meta">Internal NAV: ${escapeHtml(formatMoney(totals.internalValue))}</p>
           <p class="update-meta">Internal XIRR: ${escapeHtml(formatPercent(totals.internal.xirr))}</p>
@@ -1408,7 +1418,11 @@ function renderEntityDetail() {
   entityDetailCopy.textContent = `${investmentCount} investment${investmentCount === 1 ? "" : "s"} tracked under this entity.`;
   entityDetailSummary.innerHTML = [
     { label: "Total committed capital", value: formatMoney(performance.reportedAmount) },
-    { label: "Invested capital", value: formatMoney(performance.investedCapital) },
+    { label: "Called capital", value: formatMoney(performance.investedCapital) },
+    {
+      label: "Unfunded commitment",
+      value: formatMoney(Math.max(performance.reportedAmount - performance.investedCapital, 0))
+    },
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official NAV", value: formatMoney(performance.officialValue) },
     { label: "Internal NAV", value: formatMoney(performance.internalValue) },
@@ -1933,7 +1947,7 @@ function renderCompanyPanel() {
     .join("");
 
   companyPerformanceSummary.innerHTML = [
-    { label: "Invested capital", value: formatMoney(performance.investedCapital) },
+    { label: "Called capital", value: formatMoney(performance.investedCapital) },
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official value", value: formatMoney(performance.officialValue) },
     { label: "Internal value", value: formatMoney(performance.internalValue) },
@@ -2448,7 +2462,7 @@ function renderReconciliation() {
                 <th>Status</th>
                 <th>Reported amount</th>
                 <th>Included committed</th>
-                <th>Invested capital</th>
+                <th>Called capital</th>
                 <th>Official NAV</th>
                 <th>Internal NAV</th>
                 ${canEditWorkspace() ? "<th>Edit</th>" : ""}
@@ -2530,7 +2544,7 @@ function renderReconciliation() {
                               canEditWorkspace()
                                 ? `<input class="reconciliation-amount-input" type="text" inputmode="decimal" value="${escapeHtml(
                                     normalizeMoneyString(performance.investedCapital)
-                                  )}" data-edit-input="true" data-money-input="true" data-field="investedCapital" data-id="${escapeHtml(latest.id)}" aria-label="Invested capital for ${escapeHtml(latest.company)}" />`
+                                  )}" data-edit-input="true" data-money-input="true" data-field="investedCapital" data-id="${escapeHtml(latest.id)}" aria-label="Called capital for ${escapeHtml(latest.company)}" />`
                                 : escapeHtml(formatMoney(performance.investedCapital))
                             }
                           </td>
