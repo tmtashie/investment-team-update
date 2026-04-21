@@ -123,6 +123,42 @@ const moneyFieldNames = [
   "followOnCapitalAmount"
 ];
 
+const CANONICAL_STATUSES = [
+  "New Lead",
+  "Under Review",
+  "Approved",
+  "Funded",
+  "Active",
+  "Partially Realized",
+  "Realized",
+  "Written Off",
+  "Passed",
+  "Closed / Archived"
+];
+
+const STATUS_ALIASES = {
+  "new lead": "New Lead",
+  newlead: "New Lead",
+  pipeline: "New Lead",
+  "under review": "Under Review",
+  underreview: "Under Review",
+  approved: "Approved",
+  funded: "Funded",
+  active: "Active",
+  "partially realized": "Partially Realized",
+  partiallyrealized: "Partially Realized",
+  "partial realized": "Partially Realized",
+  realized: "Realized",
+  "written off": "Written Off",
+  writtenoff: "Written Off",
+  passed: "Passed",
+  closed: "Closed / Archived",
+  archived: "Closed / Archived",
+  "closed archived": "Closed / Archived",
+  "closed/archived": "Closed / Archived",
+  "closed / archived": "Closed / Archived"
+};
+
 const ENTITY_ALIASES = {
   "Beaman Ventures": "Beaman Ventures",
   "Lee Beaman": "Lee Beaman",
@@ -137,6 +173,26 @@ function companyKey(value) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
+}
+
+function normalizeStatusName(value) {
+  const rawStatus = String(value || "").trim();
+  if (!rawStatus) {
+    return "";
+  }
+
+  const normalizedKey = rawStatus
+    .toLowerCase()
+    .replace(/[-_]+/g, " ")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return STATUS_ALIASES[normalizedKey] || STATUS_ALIASES[normalizedKey.replace(/\s+/g, "")] || rawStatus;
+}
+
+function statusEquals(left, right) {
+  return normalizeStatusName(left) === normalizeStatusName(right);
 }
 
 function normalizeEntityName(value) {
@@ -524,7 +580,7 @@ function hydrateFormFromCompanyRecord(company) {
   assignIfBlank("entity", latest.entity || "");
   assignIfBlank("currency", latest.currency || "USD");
   assignIfBlank("stage", latest.stage || "");
-  assignIfBlank("status", latest.status || "");
+  assignIfBlank("status", normalizeStatusName(latest.status) || "");
   assignIfBlank("owner", latest.owner || "");
   assignIfBlank("nextStep", latest.nextStep || "");
   assignIfBlank("nextStepDueDate", latest.nextStepDueDate || "");
@@ -600,7 +656,7 @@ function filterInvestments(investments) {
     const matchesSearch = !filters.search || searchHaystack.includes(filters.search);
     const matchesEntity =
       !filters.entity || normalizeEntityName(investment.entity) === normalizeEntityName(filters.entity);
-    const matchesStatus = !filters.status || investment.status === filters.status;
+    const matchesStatus = !filters.status || statusEquals(investment.status, filters.status);
     const matchesStage = !filters.stage || investment.stage === filters.stage;
     const matchesOwner = !filters.owner || investment.owner === filters.owner;
 
@@ -1080,11 +1136,11 @@ function calculateReportedAmountTotal(companyInputs) {
 }
 
 function isCommittedStatus(status) {
-  return ["Approved", "Closed", "Closed / Archived"].includes(String(status || "").trim());
+  return ["Approved", "Closed / Archived"].includes(normalizeStatusName(status));
 }
 
 function isPipelineStatus(status) {
-  return ["New Lead", "Under Review"].includes(String(status || "").trim());
+  return ["New Lead", "Under Review"].includes(normalizeStatusName(status));
 }
 
 function isPipelineRow(row) {
@@ -1106,7 +1162,7 @@ function buildEntityRows(investments, entity) {
     })
     .map((company) => {
       const performance = company.performance || buildCompanyPerformance(company.updates);
-      const status = String((company.latest && company.latest.status) || "").trim();
+      const status = normalizeStatusName(company.latest && company.latest.status);
       const reportedAmount = toNumber(company.latest && company.latest.amount);
       const includeReportedAmount = isCommittedStatus(status);
 
@@ -1169,6 +1225,7 @@ function buildReconciliationCsv() {
     "Company",
     "Stage",
     "Status",
+    "Owner",
     "Reported amount field",
     "Included committed capital",
     "Included in committed total?",
@@ -1203,7 +1260,8 @@ function buildReconciliationCsv() {
         entity,
         row.latest.company || "",
         row.latest.stage || "",
-        row.latest.status || "",
+        normalizeStatusName(row.latest.status) || "",
+        row.latest.owner || "",
         row.reportedAmount,
         row.includedReportedAmount,
         row.includeReportedAmount ? "Yes" : "No",
@@ -1219,6 +1277,7 @@ function buildReconciliationCsv() {
     rows.push([
       entity,
       "SUBTOTAL",
+      "",
       "",
       "",
       "",
@@ -1287,8 +1346,8 @@ function buildDashboardCards(investments) {
   const pipelineRows = allEntityRows.filter(isPipelineRow);
   const openCount = pipelineRows.length;
   const openPipelineAmount = sumEntityRows(pipelineRows, (row) => row.reportedAmount);
-  const approvedCount = companySummaries.filter(
-    (summary) => String(summary.latest && summary.latest.status) === "Approved"
+  const approvedCount = companySummaries.filter((summary) =>
+    statusEquals(summary.latest && summary.latest.status, "Approved")
   ).length;
   const openReminderCount = allTasks.filter(
     (task) =>
@@ -1452,7 +1511,7 @@ function renderEntityDetail() {
                 <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
                   ${escapeHtml(investment.company)}
                 </button>
-                <span class="status-chip">${escapeHtml(investment.status || "Update")}</span>
+                <span class="status-chip">${escapeHtml(normalizeStatusName(investment.status) || "Update")}</span>
               </div>
               <p class="update-meta">${escapeHtml(investment.stage || "Stage not set")} • Owner: ${escapeHtml(investment.owner || "Not set")}</p>
               <p class="update-meta">Official NAV ${escapeHtml(formatMoney(companyPerformance.officialValue))} • XIRR ${escapeHtml(formatPercent(companyPerformance.official.xirr))}</p>
@@ -1476,7 +1535,7 @@ function renderFilterOptions() {
         .map(normalizeEntityName)
     )
   ).sort();
-  const statuses = Array.from(new Set(allInvestments.map((item) => item.status).filter(Boolean))).sort();
+  const statuses = CANONICAL_STATUSES;
   const stages = Array.from(new Set(allInvestments.map((item) => item.stage).filter(Boolean))).sort();
   const owners = Array.from(new Set(allInvestments.map((item) => item.owner).filter(Boolean))).sort();
 
@@ -1485,6 +1544,12 @@ function renderFilterOptions() {
     element.innerHTML = [`<option value="">${placeholder}</option>`]
       .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
       .join("");
+    if (element === statusFilter) {
+      const normalizedCurrentValue = normalizeStatusName(currentValue);
+      element.value = values.includes(normalizedCurrentValue) ? normalizedCurrentValue : "";
+      return;
+    }
+
     element.value = values.includes(currentValue) ? currentValue : "";
   };
 
@@ -1537,7 +1602,7 @@ function beginEditInvestment(investmentId) {
   form.elements.amount.value = investment.amount || "";
   form.elements.currency.value = investment.currency || "USD";
   form.elements.stage.value = investment.stage || "";
-  form.elements.status.value = investment.status || "";
+  form.elements.status.value = normalizeStatusName(investment.status) || "";
   form.elements.owner.value = investment.owner || "";
   form.elements.nextStep.value = investment.nextStep || "";
   form.elements.nextStepDueDate.value = investment.nextStepDueDate || "";
@@ -1719,13 +1784,13 @@ async function saveReconciliationRow(investmentId, values) {
   const internalValue = normalizeMoneyString(values.internalValue);
 
   const payload = {
-    company: investment.company,
+    company: String(values.company || investment.company || "").trim(),
     entity: values.entity || investment.entity,
     amount: reportedAmount,
     currency: investment.currency || "USD",
     stage: values.stage || "",
-    status: values.status || "",
-    owner: investment.owner || "",
+    status: normalizeStatusName(values.status) || "",
+    owner: values.owner || investment.owner || "",
     nextStep: investment.nextStep || "",
     notes: investment.notes || "",
     deckSummary: investment.deckSummary || "",
@@ -1812,7 +1877,7 @@ function renderCompanyPanel() {
     new Set(companyUpdates.map((investment) => investment.owner).filter(Boolean))
   );
   const uniqueStatuses = Array.from(
-    new Set(companyUpdates.map((investment) => investment.status).filter(Boolean))
+    new Set(companyUpdates.map((investment) => normalizeStatusName(investment.status)).filter(Boolean))
   );
   const nextSteps = Array.from(
     new Set(companyUpdates.map((investment) => investment.nextStep).filter(Boolean))
@@ -1885,7 +1950,7 @@ function renderCompanyPanel() {
     ? `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} organized into structured research, capital, valuation, decision, and document records.`
     : `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
   companySummary.innerHTML = [
-    { label: "Latest status", value: latest.status || "Not set" },
+    { label: "Latest status", value: normalizeStatusName(latest.status) || "Not set" },
     { label: "Latest entity", value: normalizeEntityName(latest.entity) || "Not set" },
     { label: "Latest stage", value: latest.stage || "Not set" },
     { label: "Latest owner", value: latest.owner || "Not set" },
@@ -2116,7 +2181,7 @@ function renderCompanyPanel() {
       (investment) => `
         <article class="timeline-card">
           <div class="update-head">
-            <h3>${escapeHtml(investment.status || "Update")}</h3>
+            <h3>${escapeHtml(normalizeStatusName(investment.status) || "Update")}</h3>
             <span class="status-chip">${escapeHtml(investment.stage || "No stage")}</span>
           </div>
           <p class="update-meta">
@@ -2228,7 +2293,7 @@ function renderUpdates(investments) {
             <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
               ${escapeHtml(investment.company)}
             </button>
-            <span class="status-chip">${escapeHtml(investment.status)}</span>
+            <span class="status-chip">${escapeHtml(normalizeStatusName(investment.status) || "Update")}</span>
           </div>
           <p class="update-meta">
             ${escapeHtml(investment.entity || "Entity not specified")} • ${amount} • ${escapeHtml(investment.stage || "Stage not specified")}
@@ -2366,7 +2431,7 @@ function renderResearchLibrary(investments) {
         .map(
           (investment) => `
             <article class="timeline-card timeline-card-compact">
-              <p class="dashboard-label">${escapeHtml(investment.company)} • ${escapeHtml(investment.status || "Update")}</p>
+              <p class="dashboard-label">${escapeHtml(investment.company)} • ${escapeHtml(normalizeStatusName(investment.status) || "Update")}</p>
               <p class="highlight-value">${escapeHtml(summarizeText(investment.notes, "No notes"))}</p>
             </article>
           `
@@ -2425,9 +2490,7 @@ function renderReconciliation() {
     return;
   }
 
-  const statusOptions = Array.from(
-    new Set(allInvestments.map((investment) => investment.status).filter(Boolean))
-  ).sort((left, right) => left.localeCompare(right));
+  const statusOptions = CANONICAL_STATUSES;
   const entityOptions = Array.from(
     new Set(configuredEntities.concat(allInvestments.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean)))
   )
@@ -2460,6 +2523,7 @@ function renderReconciliation() {
                 <th>Entity</th>
                 <th>Stage</th>
                 <th>Status</th>
+                <th>Owner</th>
                 <th>Reported amount</th>
                 <th>Included committed</th>
                 <th>Called capital</th>
@@ -2475,9 +2539,16 @@ function renderReconciliation() {
                       ({ latest, performance, includedReportedAmount, includeReportedAmount }) => `
                         <tr>
                           <td>
-                            <button class="link-button company-link" type="button" data-company="${escapeHtml(latest.company)}" data-entity="${escapeHtml(latest.entity || "")}">
-                              ${escapeHtml(latest.company)}
-                            </button>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="text" value="${escapeHtml(
+                                    latest.company || ""
+                                  )}" data-edit-input="true" data-field="company" data-id="${escapeHtml(latest.id)}" aria-label="Company name for ${escapeHtml(latest.company)}" />
+                                  <button class="link-button company-link" type="button" data-company="${escapeHtml(latest.company)}" data-entity="${escapeHtml(latest.entity || "")}">Open</button>`
+                                : `<button class="link-button company-link" type="button" data-company="${escapeHtml(latest.company)}" data-entity="${escapeHtml(latest.entity || "")}">
+                                    ${escapeHtml(latest.company)}
+                                  </button>`
+                            }
                           </td>
                           <td>
                             ${
@@ -2514,12 +2585,21 @@ function renderReconciliation() {
                                       .map(
                                         (status) =>
                                           `<option value="${escapeHtml(status)}" ${
-                                            status === (latest.status || "") ? "selected" : ""
+                                            statusEquals(status, latest.status || "") ? "selected" : ""
                                           }>${escapeHtml(status || "Select status")}</option>`
                                       )
                                       .join("")}
                                   </select>`
-                                : escapeHtml(latest.status || "Not set")
+                                : escapeHtml(normalizeStatusName(latest.status) || "Not set")
+                            }
+                          </td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="text" value="${escapeHtml(
+                                    latest.owner || ""
+                                  )}" data-edit-input="true" data-field="owner" data-id="${escapeHtml(latest.id)}" aria-label="Owner for ${escapeHtml(latest.company)}" />`
+                                : escapeHtml(latest.owner || "Not set")
                             }
                           </td>
                           <td>
@@ -2577,11 +2657,11 @@ function renderReconciliation() {
                       `
                     )
                     .join("")
-                : `<tr><td colspan="${canEditWorkspace() ? "10" : "9"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
+                : `<tr><td colspan="${canEditWorkspace() ? "11" : "10"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="4">Subtotal</td>
+                <td colspan="5">Subtotal</td>
                 <td></td>
                 <td>${escapeHtml(formatMoney(entityPerformance.reportedAmount))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.investedCapital))}</td>
