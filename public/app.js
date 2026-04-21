@@ -1073,10 +1073,18 @@ function calculateReportedAmountTotal(companyInputs) {
     const latest = company && company.latest ? company.latest : null;
     const latestStatus = String((latest && latest.status) || "").trim();
     const latestReportedAmount = toNumber(latest && latest.amount);
-    const includeInReportedAmount = !["Passed", "Written Off"].includes(latestStatus);
+    const includeInReportedAmount = isCommittedStatus(latestStatus);
 
     return includeInReportedAmount ? sum + latestReportedAmount : sum;
   }, 0);
+}
+
+function isCommittedStatus(status) {
+  return ["Approved", "Closed", "Closed / Archived"].includes(String(status || "").trim());
+}
+
+function isPipelineStatus(status) {
+  return ["New Lead", "Under Review"].includes(String(status || "").trim());
 }
 
 function buildEntityRows(investments, entity) {
@@ -1093,7 +1101,7 @@ function buildEntityRows(investments, entity) {
       const performance = company.performance || buildCompanyPerformance(company.updates);
       const status = String((company.latest && company.latest.status) || "").trim();
       const reportedAmount = toNumber(company.latest && company.latest.amount);
-      const includeReportedAmount = !["Passed", "Written Off"].includes(status);
+      const includeReportedAmount = isCommittedStatus(status);
 
       return {
         company,
@@ -1269,17 +1277,9 @@ function buildEntityPerformanceMap(investments) {
 function buildDashboardCards(investments) {
   const companySummaries = getCompanyCollections(investments);
   const allEntityRows = buildEntityRows(investments);
-  const inactiveStatuses = ["Passed", "Closed", "Closed / Archived", "Realized", "Written Off"];
-  const openCount = companySummaries.filter(
-    (summary) => !inactiveStatuses.includes(summary.latest && summary.latest.status)
-  ).length;
-  const openPipelineAmount = companySummaries.reduce((sum, summary) => {
-    if (inactiveStatuses.includes(summary.latest && summary.latest.status)) {
-      return sum;
-    }
-
-    return sum + summary.performance.investedCapital;
-  }, 0);
+  const pipelineRows = allEntityRows.filter((row) => isPipelineStatus(row.latest.status));
+  const openCount = pipelineRows.length;
+  const openPipelineAmount = sumEntityRows(pipelineRows, (row) => row.reportedAmount);
   const approvedCount = companySummaries.filter(
     (summary) => String(summary.latest && summary.latest.status) === "Approved"
   ).length;
@@ -1303,9 +1303,9 @@ function buildDashboardCards(investments) {
   const cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
     { label: "Companies", value: String(companySummaries.length), action: "portfolio" },
-    { label: "Active pipeline", value: String(openCount), action: "portfolio" },
+    { label: "Pipeline deals", value: String(openCount), action: "portfolio" },
     {
-      label: "Active pipeline $",
+      label: "Pipeline amount",
       value: formatMoney(openPipelineAmount),
       action: "portfolio"
     },
