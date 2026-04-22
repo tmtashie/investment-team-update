@@ -1433,19 +1433,40 @@ function renderDashboard(investments) {
     .map(
       ({ entity, rows }) => {
         const totals = buildEntityRowTotals(rows);
+        const metrics = [
+          { label: "Total committed capital", value: formatMoney(totals.reportedAmount) },
+          { label: "Called capital", value: formatMoney(totals.investedCapital) },
+          {
+            label: "Unfunded commitment",
+            value: formatMoney(Math.max(totals.reportedAmount - totals.investedCapital, 0))
+          },
+          { label: "Official NAV", value: formatMoney(totals.officialValue) },
+          { label: "Internal NAV", value: formatMoney(totals.internalValue) },
+          { label: "Internal XIRR", value: formatPercent(totals.internal.xirr) },
+          { label: "Internal MOIC", value: formatTurns(totals.internal.moic) }
+        ];
+
         return `
         <article class="dashboard-card entity-performance-card" data-entity="${escapeHtml(entity)}">
-          <p class="dashboard-label">${escapeHtml(entity)}</p>
-          <p class="dashboard-value">${escapeHtml(formatMoney(totals.reportedAmount))}</p>
-          <p class="update-meta">Total committed capital</p>
-          <p class="update-meta">Called capital: ${escapeHtml(formatMoney(totals.investedCapital))}</p>
-          <p class="update-meta">Unfunded commitment: ${escapeHtml(
-            formatMoney(Math.max(totals.reportedAmount - totals.investedCapital, 0))
-          )}</p>
-          <p class="update-meta">Official NAV: ${escapeHtml(formatMoney(totals.officialValue))}</p>
-          <p class="update-meta">Internal NAV: ${escapeHtml(formatMoney(totals.internalValue))}</p>
-          <p class="update-meta">Internal XIRR: ${escapeHtml(formatPercent(totals.internal.xirr))}</p>
-          <p class="update-meta">Internal MOIC: ${escapeHtml(formatTurns(totals.internal.moic))}</p>
+          <div class="entity-performance-header">
+            <div>
+              <p class="dashboard-label">Entity</p>
+              <h3>${escapeHtml(entity)}</h3>
+            </div>
+            <span class="entity-open-pill">Open entity</span>
+          </div>
+          <div class="entity-metric-grid">
+            ${metrics
+              .map(
+                (metric) => `
+                  <div class="entity-metric-box">
+                    <p class="dashboard-label">${escapeHtml(metric.label)}</p>
+                    <p class="dashboard-value">${escapeHtml(metric.value)}</p>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
         </article>
       `;
       }

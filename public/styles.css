@@ -554,6 +554,8 @@ button:disabled {
 
 .entity-performance-card {
   cursor: pointer;
+  display: grid;
+  gap: 14px;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
@@ -561,6 +563,41 @@ button:disabled {
   transform: translateY(-2px);
   border-color: rgba(186, 104, 55, 0.28);
   box-shadow: var(--shadow-soft);
+}
+
+.entity-performance-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.entity-open-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(23, 50, 77, 0.08);
+  color: var(--navy);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.entity-metric-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.entity-metric-box {
+  min-height: 104px;
+  padding: 14px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.9));
+  border: 1px solid rgba(19, 32, 51, 0.08);
+  box-shadow: 0 10px 24px rgba(23, 50, 77, 0.06);
 }
 
 .timeline-card-compact {
@@ -994,6 +1031,14 @@ a.secondary-button.inline-action-button {
 
   .dashboard-grid,
   .company-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .entity-performance-card {
+    grid-column: 1 / -1;
+  }
+
+  .entity-metric-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
