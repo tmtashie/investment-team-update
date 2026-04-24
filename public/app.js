@@ -24,10 +24,12 @@ const downloadFamilyOfficeWorkbookButton = document.getElementById(
   "downloadFamilyOfficeWorkbookButton"
 );
 const downloadReconciliationButton = document.getElementById("downloadReconciliationButton");
+const saveAllReconciliationButton = document.getElementById("saveAllReconciliationButton");
 const previewDigestButton = document.getElementById("previewDigestButton");
 const sendDigestButton = document.getElementById("sendDigestButton");
 const digestMessage = document.getElementById("digestMessage");
 const digestPreview = document.getElementById("digestPreview");
+const reconciliationMessage = document.getElementById("reconciliationMessage");
 const importWorkbookFile = document.getElementById("importWorkbookFile");
 const restoreBackupFile = document.getElementById("restoreBackupFile");
 const importWorkbookMessage = document.getElementById("importWorkbookMessage");
@@ -116,6 +118,8 @@ let digestStatus = {
   nextDigestDueAt: "",
   openReminderCount: 0
 };
+let dirtyReconciliationRows = new Set();
+let savingAllReconciliation = false;
 
 const moneyFieldNames = [
   "amount",
@@ -1948,7 +1952,85 @@ function buildReconciliationCapitalActivity(investment, investedCapitalValue) {
     : nonContributionRows;
 }
 
-async function saveReconciliationRow(investmentId, values) {
+function getReconciliationInputs(investmentId) {
+  return Array.from(
+    reconciliationList.querySelectorAll(
+      `[data-edit-input="true"][data-id="${CSS.escape(investmentId)}"]`
+    )
+  );
+}
+
+function getReconciliationValues(investmentId) {
+  const inputs = getReconciliationInputs(investmentId);
+  return inputs.reduce((result, input) => {
+    result[input.dataset.field] = input.value;
+    return result;
+  }, {});
+}
+
+function setReconciliationRowDirty(investmentId, isDirty = true) {
+  const row = reconciliationList.querySelector(`[data-reconciliation-row-id="${CSS.escape(investmentId)}"]`);
+  if (row) {
+    row.classList.toggle("reconciliation-dirty-row", isDirty);
+  }
+
+  if (isDirty) {
+    dirtyReconciliationRows.add(investmentId);
+  } else {
+    dirtyReconciliationRows.delete(investmentId);
+  }
+
+  if (saveAllReconciliationButton) {
+    saveAllReconciliationButton.disabled = !dirtyReconciliationRows.size || savingAllReconciliation;
+  }
+
+  if (reconciliationMessage && !savingAllReconciliation) {
+    reconciliationMessage.textContent = dirtyReconciliationRows.size
+      ? `${dirtyReconciliationRows.size} unsaved reconciliation change${dirtyReconciliationRows.size === 1 ? "" : "s"}.`
+      : "All reconciliation changes saved.";
+  }
+}
+
+async function saveReconciliationRows(investmentIds) {
+  const ids = Array.from(new Set(investmentIds)).filter(Boolean);
+  if (!ids.length) {
+    if (reconciliationMessage) {
+      reconciliationMessage.textContent = "No reconciliation changes to save.";
+    }
+    return;
+  }
+
+  savingAllReconciliation = true;
+  if (saveAllReconciliationButton) {
+    saveAllReconciliationButton.disabled = true;
+    saveAllReconciliationButton.textContent = "Saving...";
+  }
+  if (reconciliationMessage) {
+    reconciliationMessage.textContent = `Saving ${ids.length} reconciliation change${ids.length === 1 ? "" : "s"}...`;
+  }
+
+  try {
+    for (const investmentId of ids) {
+      const values = getReconciliationValues(investmentId);
+      await saveReconciliationRow(investmentId, values, { reload: false });
+    }
+
+    await loadUpdates();
+    ids.forEach((investmentId) => setReconciliationRowDirty(investmentId, false));
+
+    if (reconciliationMessage) {
+      reconciliationMessage.textContent = `${ids.length} reconciliation change${ids.length === 1 ? "" : "s"} saved.`;
+    }
+  } finally {
+    savingAllReconciliation = false;
+    if (saveAllReconciliationButton) {
+      saveAllReconciliationButton.textContent = "Save all changes";
+      saveAllReconciliationButton.disabled = !dirtyReconciliationRows.size;
+    }
+  }
+}
+
+async function saveReconciliationRow(investmentId, values, options = {}) {
   const investment = allInvestments.find((item) => item.id === investmentId);
   if (!investment) {
     return;
@@ -2005,7 +2087,9 @@ async function saveReconciliationRow(investmentId, values) {
     body: JSON.stringify(payload)
   });
 
-  await loadUpdates();
+  if (options.reload !== false) {
+    await loadUpdates();
+  }
 }
 
 function renderCompanyPanel() {
@@ -2651,6 +2735,16 @@ function renderResearchLibrary(investments) {
 }
 
 function renderReconciliation() {
+  dirtyReconciliationRows = new Set();
+  if (reconciliationMessage && !savingAllReconciliation) {
+    reconciliationMessage.textContent = canEditWorkspace()
+      ? "No unsaved reconciliation changes."
+      : "Review the rollup by entity.";
+  }
+  if (saveAllReconciliationButton) {
+    saveAllReconciliationButton.disabled = true;
+  }
+
   const companySummaries = getCompanyCollections(allInvestments);
   const entities = Array.from(
     new Set(
@@ -2713,7 +2807,7 @@ function renderReconciliation() {
                 ? entityRows
                     .map(
                       ({ latest, performance, includedReportedAmount, includeReportedAmount }) => `
-                        <tr>
+                        <tr data-reconciliation-row-id="${escapeHtml(latest.id)}">
                           <td>
                             ${
                               canEditWorkspace()
@@ -2826,7 +2920,7 @@ function renderReconciliation() {
                             canEditWorkspace()
                               ? `<td><button class="secondary-button card-action-button" type="button" data-action="save-reconciliation-amount" data-id="${escapeHtml(
                                   latest.id
-                                )}">Save</button></td>`
+                                )}">Save row</button></td>`
                               : ""
                           }
                         </tr>
@@ -2939,12 +3033,137 @@ function renderDigestPreview(digest) {
     return;
   }
 
+  const changedInvestments = Array.isArray(digest.changedInvestments)
+    ? digest.changedInvestments
+    : [];
+  const changedByEntity = Array.isArray(digest.changedByEntity) ? digest.changedByEntity : [];
+  const overdueTasks = Array.isArray(digest.overdueTasks) ? digest.overdueTasks : [];
+  const upcomingTasks = Array.isArray(digest.upcomingTasks) ? digest.upcomingTasks : [];
+  const dataAlerts = buildDataQualityAlerts(allInvestments);
+
   digestPreview.classList.remove("hidden");
   digestPreview.innerHTML = `
-    <p class="dashboard-label">Window ${escapeHtml(formatDisplayDate(digest.windowStart))} to ${escapeHtml(formatDisplayDate(digest.generatedAt))}</p>
-    <p class="highlight-value">${escapeHtml(digest.subject)}</p>
-    <p class="update-meta">Changed investments: ${escapeHtml(String(digest.counts.changedInvestments))} • Open reminders: ${escapeHtml(String(digest.counts.openNextStepTasks))} • Overdue reminders: ${escapeHtml(String(digest.counts.overdueTasks))}</p>
-    <pre class="digest-preview-text">${escapeHtml(digest.text)}</pre>
+    <div class="digest-preview-grid">
+      <div>
+        <p class="dashboard-label">Window ${escapeHtml(formatDisplayDate(digest.windowStart))} to ${escapeHtml(formatDisplayDate(digest.generatedAt))}</p>
+        <p class="highlight-value">${escapeHtml(digest.subject)}</p>
+        <p class="update-meta">Biweekly briefing for the family office team, with portfolio changes, reminder pressure, and data hygiene checks in one place.</p>
+      </div>
+
+      <div class="digest-preview-summary">
+        ${[
+          { label: "Changed investments", value: digest.counts.changedInvestments },
+          { label: "Open reminders", value: digest.counts.openNextStepTasks },
+          { label: "Overdue reminders", value: digest.counts.overdueTasks },
+          { label: "Upcoming reminders", value: digest.counts.upcomingTasks || 0 },
+          { label: "Data alerts", value: dataAlerts.length }
+        ]
+          .map(
+            (item) => `
+              <article class="digest-preview-kpi">
+                <p class="dashboard-label">${escapeHtml(item.label)}</p>
+                <p class="dashboard-value">${escapeHtml(String(item.value))}</p>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+
+      <section class="digest-preview-section">
+        <div>
+          <p class="dashboard-label">Activity by entity</p>
+          <p class="update-meta">A quick scan of where the latest motion happened.</p>
+        </div>
+        ${
+          changedByEntity.length
+            ? `<div class="digest-preview-list">${changedByEntity
+                .map(
+                  (group) => `
+                    <article class="digest-preview-item">
+                      <p class="highlight-value">${escapeHtml(group.entity)}</p>
+                      <p class="update-meta">${escapeHtml(String(group.count))} update${group.count === 1 ? "" : "s"} • ${escapeHtml(
+                        group.companies.slice(0, 4).join(", ") || "No companies listed"
+                      )}${group.companies.length > 4 ? "..." : ""}</p>
+                    </article>
+                  `
+                )
+                .join("")}</div>`
+            : '<div class="digest-preview-empty">No entity activity landed in this digest window.</div>'
+        }
+      </section>
+
+      <div class="digest-preview-columns">
+        <section class="digest-preview-section">
+          <div>
+            <p class="dashboard-label">Portfolio changes</p>
+            <p class="update-meta">Recent investment records that were added or materially updated.</p>
+          </div>
+          ${
+            changedInvestments.length
+              ? `<div class="digest-preview-list">${changedInvestments
+                  .slice(0, 8)
+                  .map(
+                    (investment) => `
+                      <article class="digest-preview-item">
+                        <p class="highlight-value">${escapeHtml(investment.company || "Unnamed investment")}</p>
+                        <p class="update-meta">${escapeHtml(normalizeEntityName(investment.entity) || "No entity")} • ${escapeHtml(
+                          normalizeStatusName(investment.status) || "Not set"
+                        )} • ${escapeHtml(formatAmount(investment))}</p>
+                        <p class="update-meta">Next step: ${escapeHtml(investment.nextStep || "None recorded")}</p>
+                      </article>
+                    `
+                  )
+                  .join("")}</div>`
+              : '<div class="digest-preview-empty">No investment updates were entered in this period.</div>'
+          }
+        </section>
+
+        <section class="digest-preview-section">
+          <div>
+            <p class="dashboard-label">Reminder pressure</p>
+            <p class="update-meta">Items that need attention now, plus what is coming due soon.</p>
+          </div>
+          ${
+            overdueTasks.length
+              ? `<div class="digest-preview-list">${overdueTasks
+                  .slice(0, 6)
+                  .map(
+                    (task) => `
+                      <article class="digest-preview-item">
+                        <p class="highlight-value">${escapeHtml(task.company || "General")}</p>
+                        <p class="update-meta">${escapeHtml(task.title)} • overdue since ${escapeHtml(task.dueDate || "no due date")}</p>
+                      </article>
+                    `
+                  )
+                  .join("")}</div>`
+              : '<div class="digest-preview-empty">No overdue next-step reminders.</div>'
+          }
+          ${
+            upcomingTasks.length
+              ? `<div class="digest-preview-list">${upcomingTasks
+                  .slice(0, 6)
+                  .map(
+                    (task) => `
+                      <article class="digest-preview-item">
+                        <p class="highlight-value">${escapeHtml(task.company || "General")}</p>
+                        <p class="update-meta">${escapeHtml(task.title)} • due ${escapeHtml(task.dueDate || "not set")}</p>
+                      </article>
+                    `
+                  )
+                  .join("")}</div>`
+              : '<div class="digest-preview-empty">No upcoming reminders due in the next two weeks.</div>'
+          }
+        </section>
+      </div>
+
+      <section class="digest-preview-section">
+        <div>
+          <p class="dashboard-label">Email body preview</p>
+          <p class="update-meta">The exact text that will go out if you send the digest now.</p>
+        </div>
+        <pre class="digest-preview-text">${escapeHtml(digest.text)}</pre>
+      </section>
+    </div>
   `;
 }
 
@@ -3513,6 +3732,16 @@ downloadReconciliationButton.addEventListener("click", () => {
   downloadTextFile("entity-reconciliation.csv", buildReconciliationCsv());
 });
 
+saveAllReconciliationButton.addEventListener("click", async () => {
+  try {
+    await saveReconciliationRows(Array.from(dirtyReconciliationRows));
+  } catch (error) {
+    if (reconciliationMessage) {
+      reconciliationMessage.textContent = error.message;
+    }
+  }
+});
+
 downloadBackupButton.addEventListener("click", () => {
   window.location.href = "/api/backup-export";
 });
@@ -3812,27 +4041,30 @@ reconciliationList.addEventListener("click", (event) => {
       return;
     }
 
-    const inputs = Array.from(
-      reconciliationList.querySelectorAll(`[data-edit-input="true"][data-id="${CSS.escape(investmentId)}"]`)
-    );
+    const inputs = getReconciliationInputs(investmentId);
     if (!inputs.length) {
       return;
     }
 
-    const values = inputs.reduce((result, input) => {
-      result[input.dataset.field] = input.value;
-      return result;
-    }, {});
+    const values = getReconciliationValues(investmentId);
 
     saveButton.disabled = true;
     saveButton.textContent = "Saving...";
     saveReconciliationRow(investmentId, values)
+      .then(() => {
+        setReconciliationRowDirty(investmentId, false);
+        if (reconciliationMessage) {
+          reconciliationMessage.textContent = "Reconciliation row saved.";
+        }
+      })
       .catch((error) => {
-        formMessage.textContent = error.message;
+        if (reconciliationMessage) {
+          reconciliationMessage.textContent = error.message;
+        }
       })
       .finally(() => {
         saveButton.disabled = false;
-        saveButton.textContent = "Save";
+        saveButton.textContent = "Save row";
       });
     return;
   }
@@ -3855,14 +4087,24 @@ reconciliationList.addEventListener("click", (event) => {
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
-reconciliationList.addEventListener("input", (event) => {
-  const target = event.target.closest("[data-money-input='true']");
-  if (!target) {
+function handleReconciliationFieldEdit(event) {
+  const editableTarget = event.target.closest("[data-edit-input='true']");
+  if (!editableTarget) {
     return;
   }
 
-  target.value = normalizeMoneyString(target.value);
-});
+  if (editableTarget.dataset.moneyInput === "true") {
+    editableTarget.value = normalizeMoneyString(editableTarget.value);
+  }
+
+  const investmentId = editableTarget.dataset.id || "";
+  if (investmentId) {
+    setReconciliationRowDirty(investmentId, true);
+  }
+}
+
+reconciliationList.addEventListener("input", handleReconciliationFieldEdit);
+reconciliationList.addEventListener("change", handleReconciliationFieldEdit);
 
 dataQualityList.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action='edit-quality-investment']");

@@ -857,9 +857,15 @@
               <h2>Entity reconciliation</h2>
               <p class="section-copy">Review every company, committed amount, and called capital amount contributing to each entity total.</p>
             </div>
-            <button id="downloadReconciliationButton" type="button" class="secondary-button">
-              Download reconciliation CSV
-            </button>
+            <div class="panel-actions">
+              <p id="reconciliationMessage" class="section-copy"></p>
+              <button id="saveAllReconciliationButton" type="button" class="secondary-button">
+                Save all changes
+              </button>
+              <button id="downloadReconciliationButton" type="button" class="secondary-button">
+                Download reconciliation CSV
+              </button>
+            </div>
           </div>
           <div id="reconciliationList" class="reconciliation-list"></div>
         </section>

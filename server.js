@@ -879,6 +879,30 @@ function buildBiweeklyDigest(investments, tasks, metadata, recipients = DEFAULT_
     const dueDate = parseDateValue(task.dueDate);
     return dueDate && dueDate.getTime() < now.getTime();
   });
+  const upcomingTasks = openNextStepTasks.filter((task) => {
+    const dueDate = parseDateValue(task.dueDate);
+    if (!dueDate) {
+      return false;
+    }
+
+    return dueDate.getTime() >= now.getTime() && dueDate.getTime() <= addDays(now, 14).getTime();
+  });
+  const changedByEntityMap = changedInvestments.reduce((map, investment) => {
+    const entity = normalizeEntityName(investment.entity) || "No entity";
+    if (!map.has(entity)) {
+      map.set(entity, []);
+    }
+
+    map.get(entity).push(investment);
+    return map;
+  }, new Map());
+  const changedByEntity = Array.from(changedByEntityMap.entries())
+    .map(([entity, items]) => ({
+      entity,
+      count: items.length,
+      companies: items.map((investment) => investment.company).filter(Boolean)
+    }))
+    .sort((left, right) => right.count - left.count || left.entity.localeCompare(right.entity));
 
   const subject = `BVB biweekly digest • ${formatDateOnly(safeWindowStart)} to ${formatDateOnly(now)}`;
   const changedLines = changedInvestments.length
@@ -910,6 +934,7 @@ function buildBiweeklyDigest(investments, tasks, metadata, recipients = DEFAULT_
     `Changed investments: ${changedInvestments.length}`,
     `Open next-step reminders: ${openNextStepTasks.length}`,
     `Overdue next-step reminders: ${overdueTasks.length}`,
+    `Upcoming next-step reminders: ${upcomingTasks.length}`,
     "",
     "New or updated investments",
     ...changedLines.flatMap((line) => [line, ""]),
@@ -930,7 +955,19 @@ function buildBiweeklyDigest(investments, tasks, metadata, recipients = DEFAULT_
           <li>Changed investments: ${changedInvestments.length}</li>
           <li>Open next-step reminders: ${openNextStepTasks.length}</li>
           <li>Overdue next-step reminders: ${overdueTasks.length}</li>
+          <li>Upcoming next-step reminders: ${upcomingTasks.length}</li>
         </ul>
+        <h3 style="margin-bottom: 8px;">Activity by entity</h3>
+        ${
+          changedByEntity.length
+            ? `<ul>${changedByEntity
+                .map(
+                  (group) =>
+                    `<li>${escapeHtml(group.entity)} • ${group.count} update${group.count === 1 ? "" : "s"}</li>`
+                )
+                .join("")}</ul>`
+            : '<p style="margin-top: 0;">No entity activity in this period.</p>'
+        }
         <h3 style="margin-bottom: 8px;">New or updated investments</h3>
         ${
           changedInvestments.length
@@ -983,10 +1020,13 @@ function buildBiweeklyDigest(investments, tasks, metadata, recipients = DEFAULT_
     changedInvestments,
     openNextStepTasks,
     overdueTasks,
+    upcomingTasks,
+    changedByEntity,
     counts: {
       changedInvestments: changedInvestments.length,
       openNextStepTasks: openNextStepTasks.length,
-      overdueTasks: overdueTasks.length
+      overdueTasks: overdueTasks.length,
+      upcomingTasks: upcomingTasks.length
     }
   };
 }
@@ -3304,7 +3344,12 @@ const server = http.createServer(async (request, response) => {
         text: digest.text,
         counts: digest.counts,
         generatedAt: digest.generatedAt,
-        windowStart: digest.windowStart
+        windowStart: digest.windowStart,
+        changedInvestments: digest.changedInvestments,
+        openNextStepTasks: digest.openNextStepTasks,
+        overdueTasks: digest.overdueTasks,
+        upcomingTasks: digest.upcomingTasks,
+        changedByEntity: digest.changedByEntity
       }
     });
     return;
