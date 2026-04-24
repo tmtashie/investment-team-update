@@ -323,6 +323,15 @@ h1 {
   margin-top: 16px;
 }
 
+.company-detail-grid-memo {
+  gap: 16px;
+}
+
+.company-detail-card-span-2,
+.company-detail-card-timeline {
+  grid-column: 1 / -1;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -694,10 +703,36 @@ button:disabled {
 .company-timeline {
   display: grid;
   gap: 12px;
-  margin-top: 16px;
 }
 
 .company-highlights {
+  display: grid;
+  gap: 12px;
+}
+
+.company-section-heading {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.company-section-heading h3,
+.company-mini-card h4 {
+  margin: 0;
+}
+
+.company-section-grid,
+.company-section-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.company-mini-card {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(23, 50, 77, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 251, 255, 0.92));
+  box-shadow: 0 10px 24px rgba(23, 50, 77, 0.05);
   display: grid;
   gap: 12px;
 }
@@ -1134,6 +1169,14 @@ a.secondary-button.inline-action-button {
 
   .company-detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .company-section-grid-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .company-section-grid-three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .workspace-menu {

@@ -2162,6 +2162,12 @@ function renderCompanyPanel() {
           investment.decisionType ||
           investment.decisionSummary
       );
+  const companyDocumentCount = companyRecord
+    ? (Array.isArray(companyRecord.documents) ? companyRecord.documents.length : 0)
+    : companyUpdates.reduce(
+        (count, investment) => count + (Array.isArray(investment.documents) ? investment.documents.length : 0),
+        0
+      );
   const relatedTasks = companyRecord
     ? companyRecord.tasks
     : allTasks
@@ -2207,14 +2213,17 @@ function renderCompanyPanel() {
     buildCompanyPerformance(companyUpdates);
   companyPanelTitle.textContent = latest.company || selectedCompany;
   companyPanelCopy.textContent = companyRecord
-    ? `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} organized into structured research, capital, valuation, decision, and document records.`
-    : `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company.`;
+    ? `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} organized into one operating file for research, capital history, decisions, reminders, and source material.`
+    : `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company in one operating record.`;
   companySummary.innerHTML = [
     { label: "Latest status", value: normalizeStatusName(latest.status) || "Not set" },
     { label: "Latest entity", value: normalizeEntityName(latest.entity) || "Not set" },
     { label: "Latest stage", value: latest.stage || "Not set" },
     { label: "Latest owner", value: latest.owner || "Not set" },
-    { label: "Reported amount", value: formatMoney(totalAmount) }
+    { label: "Reported amount", value: formatMoney(totalAmount) },
+    { label: "Open reminders", value: String(relatedTasks.filter((task) => task.status !== "Completed").length) },
+    { label: "Vault documents", value: String(companyDocumentCount) },
+    { label: "Research entries", value: String(deckSummaries.length) }
   ]
     .map(
       (item) => `

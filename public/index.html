@@ -689,63 +689,104 @@
             </button>
           </div>
           <div id="companySummary" class="company-summary-grid"></div>
-          <div class="company-detail-grid">
-            <section class="company-detail-card">
-              <h3>Snapshot</h3>
-              <div id="companyHighlights" class="company-highlights"></div>
-            </section>
-            <section class="company-detail-card">
-              <h3>Contact for updates</h3>
-              <div id="companyContactInfo" class="company-highlights"></div>
-            </section>
-            <section class="company-detail-card">
-              <h3>Performance</h3>
-              <div id="companyPerformanceSummary" class="company-highlights"></div>
-            </section>
-            <section class="company-detail-card">
-              <h3>Entity exposure</h3>
-              <div id="companyEntityPerformance" class="company-highlights"></div>
-            </section>
-            <section class="company-detail-card">
-              <h3>Ownership and allocation</h3>
-              <div id="companyOwnershipSummary" class="company-highlights"></div>
-            </section>
-            <section class="company-detail-card">
-              <h3>Deck summaries</h3>
-              <div id="companyDeckSummaries" class="company-rich-text"></div>
-            </section>
-            <section class="company-detail-card">
-              <h3>Investment vault and decisions</h3>
-              <div class="company-vault-tools">
-                <label id="companyDocumentDropZone" class="document-drop-zone" for="companyDocumentFile">
-                  <span class="deck-drop-title">Drop multiple files for this investment or tap to choose</span>
-                  <span class="deck-drop-subtitle">
-                    Keep decks, memos, legal docs, and reference files attached to the investment itself.
-                  </span>
-                  <input id="companyDocumentFile" name="companyDocumentFile" type="file" multiple />
-                </label>
-                <p id="companyDocumentMessage" class="form-message" aria-live="polite"></p>
+          <div class="company-detail-grid company-detail-grid-memo">
+            <section class="company-detail-card company-detail-card-span-2">
+              <div class="company-section-heading">
+                <p class="dashboard-label">Operating memo</p>
+                <h3>Overview and relationship</h3>
               </div>
-              <div id="companyDecisionLog" class="company-rich-text"></div>
+              <div class="company-section-grid company-section-grid-three">
+                <div class="company-mini-card">
+                  <h4>Snapshot</h4>
+                  <div id="companyHighlights" class="company-highlights"></div>
+                </div>
+                <div class="company-mini-card">
+                  <h4>Contact for updates</h4>
+                  <div id="companyContactInfo" class="company-highlights"></div>
+                </div>
+                <div class="company-mini-card">
+                  <h4>Ownership and allocation</h4>
+                  <div id="companyOwnershipSummary" class="company-highlights"></div>
+                </div>
+              </div>
             </section>
-            <section class="company-detail-card">
-              <h3>Open next steps</h3>
-              <div id="companyNextSteps" class="company-next-steps"></div>
+
+            <section class="company-detail-card company-detail-card-span-2">
+              <div class="company-section-heading">
+                <p class="dashboard-label">Investment vault</p>
+                <h3>Source material, AI research, and decisions</h3>
+              </div>
+              <div class="company-section-grid company-section-grid-two">
+                <div class="company-mini-card">
+                  <h4>AI deck summaries</h4>
+                  <div id="companyDeckSummaries" class="company-rich-text"></div>
+                </div>
+                <div class="company-mini-card">
+                  <h4>Files and decision log</h4>
+                  <div class="company-vault-tools">
+                    <label id="companyDocumentDropZone" class="document-drop-zone" for="companyDocumentFile">
+                      <span class="deck-drop-title">Drop multiple files for this investment or tap to choose</span>
+                      <span class="deck-drop-subtitle">
+                        Keep decks, memos, legal docs, and reference files attached to the investment itself.
+                      </span>
+                      <input id="companyDocumentFile" name="companyDocumentFile" type="file" multiple />
+                    </label>
+                    <p id="companyDocumentMessage" class="form-message" aria-live="polite"></p>
+                  </div>
+                  <div id="companyDecisionLog" class="company-rich-text"></div>
+                </div>
+              </div>
             </section>
+
             <section class="company-detail-card">
-              <h3>Tasks and reminders</h3>
-              <div id="companyTasks" class="company-rich-text"></div>
+              <div class="company-section-heading">
+                <p class="dashboard-label">Operating rhythm</p>
+                <h3>Next steps and reminders</h3>
+              </div>
+              <div class="company-section-stack">
+                <div class="company-mini-card">
+                  <h4>Open next steps</h4>
+                  <div id="companyNextSteps" class="company-next-steps"></div>
+                </div>
+                <div class="company-mini-card">
+                  <h4>Tasks and reminders</h4>
+                  <div id="companyTasks" class="company-rich-text"></div>
+                </div>
+              </div>
             </section>
+
             <section class="company-detail-card">
-              <h3>Follow-on capital</h3>
-              <div id="companyFollowOnCapital" class="company-highlights"></div>
-            </section>
-            <section class="company-detail-card">
-              <h3>Valuation history</h3>
-              <div id="companyValuationHistory" class="company-rich-text"></div>
+              <div class="company-section-heading">
+                <p class="dashboard-label">Capital and marks</p>
+                <h3>Performance and planning</h3>
+              </div>
+              <div class="company-section-stack">
+                <div class="company-mini-card">
+                  <h4>Performance</h4>
+                  <div id="companyPerformanceSummary" class="company-highlights"></div>
+                </div>
+                <div class="company-mini-card">
+                  <h4>Entity exposure</h4>
+                  <div id="companyEntityPerformance" class="company-highlights"></div>
+                </div>
+                <div class="company-mini-card">
+                  <h4>Follow-on capital</h4>
+                  <div id="companyFollowOnCapital" class="company-highlights"></div>
+                </div>
+                <div class="company-mini-card">
+                  <h4>Valuation history</h4>
+                  <div id="companyValuationHistory" class="company-rich-text"></div>
+                </div>
+              </div>
             </section>
           </div>
-          <div id="companyTimeline" class="company-timeline"></div>
+          <section class="company-detail-card company-detail-card-timeline">
+            <div class="company-section-heading">
+              <p class="dashboard-label">Operating history</p>
+              <h3>Update timeline</h3>
+            </div>
+            <div id="companyTimeline" class="company-timeline"></div>
+          </section>
         </section>
 
         <section id="researchLibrarySection" class="panel workspace-view hidden" data-view="research">
