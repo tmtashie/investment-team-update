@@ -309,13 +309,22 @@ function setSignedInState(user) {
     ? `Signed in as ${user.email}${user.role ? ` • ${user.role}` : ""}`
     : "Please sign in to view updates";
 
+  workspaceMenuLinks.forEach((link) => {
+    const viewName = link.dataset.view || "";
+    link.classList.toggle("hidden", isSignedIn && !canAccessWorkspaceView(viewName));
+  });
+
   if (isSignedIn) {
+    if (!canAccessWorkspaceView(activeWorkspaceView)) {
+      activeWorkspaceView = "home";
+    }
     showWorkspaceView(activeWorkspaceView);
   }
 }
 
 function showWorkspaceView(viewName) {
-  activeWorkspaceView = viewName || "home";
+  const requestedView = viewName || "home";
+  activeWorkspaceView = canAccessWorkspaceView(requestedView) ? requestedView : "home";
 
   workspaceViews.forEach((section) => {
     const matchesView = section.dataset.view === activeWorkspaceView;
@@ -340,7 +349,23 @@ function showWorkspaceView(viewName) {
 }
 
 function canEditWorkspace() {
-  return !currentUser || currentUser.role !== "viewer";
+  return !currentUser || !["viewer", "dashboard-viewer"].includes(currentUser.role);
+}
+
+function isDashboardViewer() {
+  return Boolean(currentUser && currentUser.role === "dashboard-viewer");
+}
+
+function canAccessWorkspaceView(viewName) {
+  if (!isDashboardViewer()) {
+    return true;
+  }
+
+  return ["home", "entity"].includes(viewName);
+}
+
+function canOpenCompanyDetails() {
+  return !isDashboardViewer();
 }
 
 function selectedDeckFile() {
@@ -546,7 +571,9 @@ function renderRoleState() {
   sendDigestButton.classList.toggle("hidden", !editable);
   roleNotice.textContent = editable
     ? "Editors can add investments, tasks, documents, and research."
-    : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
+    : isDashboardViewer()
+      ? "This account is limited to the dashboard and entity performance views."
+      : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
 }
 
 function currentFilters() {
@@ -1356,12 +1383,14 @@ function buildDashboardCards(investments) {
   const approvedCount = companySummaries.filter((summary) =>
     statusEquals(summary.latest && summary.latest.status, "Approved")
   ).length;
-  const openReminderCount = allTasks.filter(
-    (task) =>
-      task.autoManaged &&
-      task.sourceKind === "next-step" &&
-      String(task.status || "").trim() !== "Completed"
-  ).length;
+  const openReminderCount = isDashboardViewer()
+    ? Number(digestStatus.openReminderCount || 0)
+    : allTasks.filter(
+        (task) =>
+          task.autoManaged &&
+          task.sourceKind === "next-step" &&
+          String(task.status || "").trim() !== "Completed"
+      ).length;
   const totalCommittedCapital = sumEntityRows(
     allEntityRows,
     (row) => row.includedReportedAmount
@@ -1519,12 +1548,15 @@ function buildDataQualityAlerts() {
 
 function renderDashboard(investments) {
   const cards = buildDashboardCards(investments);
+  const restrictedDashboardActions = new Set(["portfolio", "tasks", "quality"]);
   dashboardCards.innerHTML = cards
     .map(
       (card) => `
         <article
           class="dashboard-card"
-          ${card.action ? `data-dashboard-action="${escapeHtml(card.action)}"` : ""}
+          ${card.action && !(isDashboardViewer() && restrictedDashboardActions.has(card.action))
+            ? `data-dashboard-action="${escapeHtml(card.action)}"`
+            : ""}
           ${card.entity ? `data-entity="${escapeHtml(card.entity)}"` : ""}
           ${card.status ? `data-status="${escapeHtml(card.status)}"` : ""}
         >
@@ -1688,18 +1720,34 @@ function renderEntityDetail() {
           return `
             <article class="update-card">
               <div class="update-head">
-                <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
-                  ${escapeHtml(investment.company)}
-                </button>
+                ${
+                  canOpenCompanyDetails()
+                    ? `<button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
+                        ${escapeHtml(investment.company)}
+                      </button>`
+                    : `<h3>${escapeHtml(investment.company)}</h3>`
+                }
                 <span class="status-chip">${escapeHtml(normalizeStatusName(investment.status) || "Update")}</span>
               </div>
               <p class="update-meta">${escapeHtml(investment.stage || "Stage not set")} • Owner: ${escapeHtml(investment.owner || "Not set")}</p>
               <p class="update-meta">Official NAV ${escapeHtml(formatMoney(companyPerformance.officialValue))} • XIRR ${escapeHtml(formatPercent(companyPerformance.official.xirr))}</p>
               <p class="update-notes">${escapeHtml(summarizeText(investment.notes, "No notes provided."))}</p>
-              <div class="card-actions">
-                <button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">View company</button>
-                <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>
-              </div>
+              ${
+                canOpenCompanyDetails() || canEditWorkspace()
+                  ? `<div class="card-actions">
+                      ${
+                        canOpenCompanyDetails()
+                          ? `<button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">View company</button>`
+                          : ""
+                      }
+                      ${
+                        canEditWorkspace()
+                          ? `<button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${investment.id}">Edit</button>`
+                          : ""
+                      }
+                    </div>`
+                  : ""
+              }
             </article>
           `;
         })
@@ -2996,7 +3044,7 @@ async function loadConfig() {
 
   loginCopy.textContent =
     config.authMode === "individual"
-      ? `Use your email and your personal workspace password to sign in. ${config.teamUserCount} team login${config.teamUserCount === 1 ? "" : "s"} configured. Add :viewer to a TEAM_USERS entry for view-only access.`
+      ? `Use your email and your personal workspace password to sign in. ${config.teamUserCount} team login${config.teamUserCount === 1 ? "" : "s"} configured. Add :viewer for full read-only access or :dashboard-viewer for dashboard-only access in TEAM_USERS.`
       : "Use your email and the shared workspace password to unlock updates.";
 
   if (!config.aiConfigured) {
@@ -3028,6 +3076,12 @@ async function loadTasks() {
     if (error.status === 401) {
       setSignedInState(null);
       tasksList.innerHTML = "";
+      return;
+    }
+
+    if (error.status === 403 && isDashboardViewer()) {
+      allTasks = [];
+      renderAll();
       return;
     }
 

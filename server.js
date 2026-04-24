@@ -112,7 +112,9 @@ function parseTeamUsers(value) {
     const [emailRaw, passwordRaw, roleRaw] = parts;
     const email = emailRaw.toLowerCase();
     const password = passwordRaw;
-    const role = roleRaw === "viewer" ? "viewer" : "editor";
+    const role = ["viewer", "dashboard-viewer"].includes(roleRaw)
+      ? roleRaw
+      : "editor";
 
     if (!email || !password) {
       return users;
@@ -1322,7 +1324,11 @@ function getSessionUser(request) {
 }
 
 function canEdit(user) {
-  return user && user.role !== "viewer";
+  return user && !["viewer", "dashboard-viewer"].includes(user.role);
+}
+
+function canAccessOperatingViews(user) {
+  return user && user.role !== "dashboard-viewer";
 }
 
 function sendJson(response, statusCode, payload, headers = {}) {
@@ -3139,6 +3145,22 @@ function requireEditor(request, response) {
   return user;
 }
 
+function requireOperatingViewer(request, response) {
+  const user = requireAuth(request, response);
+  if (!user) {
+    return null;
+  }
+
+  if (!canAccessOperatingViews(user)) {
+    sendJson(response, 403, {
+      error: "This account is limited to dashboard and entity performance views."
+    });
+    return null;
+  }
+
+  return user;
+}
+
 process.on("uncaughtException", (error) => {
   console.error("Uncaught exception:", error);
 });
@@ -3268,7 +3290,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/api/tasks") {
-    const user = requireAuth(request, response);
+    const user = requireOperatingViewer(request, response);
     if (!user) {
       return;
     }
@@ -3278,7 +3300,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/api/investments.csv") {
-    const user = requireAuth(request, response);
+    const user = requireOperatingViewer(request, response);
     if (!user) {
       return;
     }
@@ -3293,7 +3315,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/api/investments.xlsx") {
-    const user = requireAuth(request, response);
+    const user = requireOperatingViewer(request, response);
     if (!user) {
       return;
     }
@@ -3314,7 +3336,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/api/backup-export") {
-    const user = requireAuth(request, response);
+    const user = requireOperatingViewer(request, response);
     if (!user) {
       return;
     }
@@ -3329,7 +3351,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/api/biweekly-digest") {
-    const user = requireAuth(request, response);
+    const user = requireOperatingViewer(request, response);
     if (!user) {
       return;
     }
@@ -3403,7 +3425,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/api/family-office-workbook.xlsx") {
-    const user = requireAuth(request, response);
+    const user = requireOperatingViewer(request, response);
     if (!user) {
       return;
     }
@@ -3703,7 +3725,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/summarize-deck") {
-    const user = requireAuth(request, response);
+    const user = requireOperatingViewer(request, response);
     if (!user) {
       return;
     }
@@ -3735,7 +3757,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/summarize-email") {
-    const user = requireAuth(request, response);
+    const user = requireOperatingViewer(request, response);
     if (!user) {
       return;
     }
