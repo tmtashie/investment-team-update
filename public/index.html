@@ -34,6 +34,7 @@
           <button type="button" class="menu-link" data-view="portfolio">Current investments</button>
           <button type="button" class="menu-link" data-view="research">Decks and notes</button>
           <button type="button" class="menu-link" data-view="tasks">Tasks and reminders</button>
+          <button type="button" class="menu-link" data-view="quality">Data quality</button>
           <button type="button" class="menu-link" data-view="exports">Exports and backup</button>
           <button type="button" class="menu-link" data-view="reconciliation">Entity reconciliation</button>
         </nav>
@@ -119,6 +120,19 @@
             </div>
           </div>
           <div id="entityPerformanceCards" class="dashboard-grid"></div>
+        </section>
+
+        <section id="dataQualitySection" class="panel workspace-view hidden" data-view="quality">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>Data quality</h2>
+              <p class="section-copy">
+                Find items that may keep totals, pipeline amounts, valuations, or follow-ups from reconciling cleanly.
+              </p>
+            </div>
+          </div>
+          <div id="dataQualitySummary" class="dashboard-grid"></div>
+          <div id="dataQualityList" class="updates-list"></div>
         </section>
 
         <section id="entityDetailSection" class="panel workspace-view hidden" data-view="entity">

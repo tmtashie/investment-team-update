@@ -54,6 +54,8 @@ const summarizeEmailButton = document.getElementById("summarizeEmailButton");
 const emailMessage = document.getElementById("emailMessage");
 const dashboardCards = document.getElementById("dashboardCards");
 const entityPerformanceCards = document.getElementById("entityPerformanceCards");
+const dataQualitySummary = document.getElementById("dataQualitySummary");
+const dataQualityList = document.getElementById("dataQualityList");
 const entityDetailSection = document.getElementById("entityDetailSection");
 const entityDetailTitle = document.getElementById("entityDetailTitle");
 const entityDetailCopy = document.getElementById("entityDetailCopy");
@@ -1343,6 +1345,7 @@ function buildEntityPerformanceMap(investments) {
 function buildDashboardCards(investments) {
   const companySummaries = getCompanyCollections(investments);
   const allEntityRows = buildEntityRows(investments);
+  const qualityAlerts = buildDataQualityAlerts();
   const pipelineRows = allEntityRows.filter(isPipelineRow);
   const openCount = pipelineRows.length;
   const openPipelineAmount = sumEntityRows(pipelineRows, (row) => row.reportedAmount);
@@ -1382,6 +1385,7 @@ function buildDashboardCards(investments) {
       status: "Approved"
     },
     { label: "Open reminders", value: String(openReminderCount), action: "tasks" },
+    { label: "Data alerts", value: String(qualityAlerts.length), action: "quality" },
     { label: "Total committed capital", value: formatMoney(totalCommittedCapital), action: "portfolio" },
     { label: "Called capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
     { label: "Official NAV", value: formatMoney(officialNav), action: "portfolio" },
@@ -1401,6 +1405,112 @@ function buildDashboardCards(investments) {
     }));
 
   return cards.concat(entityTotals);
+}
+
+function daysSinceDate(value) {
+  const parsed = parseDateValue(value, null);
+  if (!parsed) {
+    return null;
+  }
+
+  return Math.floor((Date.now() - parsed.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function addQualityAlert(alerts, row, severity, title, detail) {
+  alerts.push({
+    id: row.latest.id,
+    company: row.latest.company || "Unnamed investment",
+    entity: normalizeEntityName(row.latest.entity) || "No entity",
+    severity,
+    title,
+    detail
+  });
+}
+
+function buildDataQualityAlerts() {
+  const alerts = [];
+  const rows = buildEntityRows(allInvestments);
+
+  rows.forEach((row) => {
+    const latest = row.latest || {};
+    const performance = row.performance || {};
+    const normalizedStatus = normalizeStatusName(latest.status);
+    const reportedAmount = row.reportedAmount;
+    const calledCapital = performance.investedCapital || 0;
+    const hasCommittedStatus = isCommittedStatus(normalizedStatus);
+    const isPipeline = isPipelineRow(row);
+    const staleValuationDays = daysSinceDate(latest.valuationDate);
+
+    if (!latest.company) {
+      addQualityAlert(alerts, row, "High", "Missing company name", "This row cannot be reconciled cleanly without a company name.");
+    }
+
+    if (!normalizeEntityName(latest.entity)) {
+      addQualityAlert(alerts, row, "High", "Missing entity", "Assign this investment to Beaman Ventures, Lee Beaman, Katherine Trust, or Natalie Trust.");
+    }
+
+    if (!normalizedStatus) {
+      addQualityAlert(alerts, row, "High", "Missing status", "Choose a status so the app knows whether this belongs in pipeline, committed capital, or archive views.");
+    }
+
+    if (latest.status && normalizedStatus !== String(latest.status || "").trim()) {
+      addQualityAlert(
+        alerts,
+        row,
+        "Medium",
+        "Legacy status wording",
+        `This record uses "${latest.status}". Save it once as "${normalizedStatus}" to clean up filters and exports.`
+      );
+    }
+
+    if (hasCommittedStatus && !reportedAmount) {
+      addQualityAlert(alerts, row, "High", "Committed deal missing reported amount", "Approved or closed deals should have a reported amount for committed capital totals.");
+    }
+
+    if (isPipeline && !reportedAmount) {
+      addQualityAlert(alerts, row, "Medium", "Pipeline deal missing amount", "Pipeline deals can stay open, but adding an expected amount makes the pipeline total useful.");
+    }
+
+    if (reportedAmount > 0 && calledCapital > reportedAmount) {
+      addQualityAlert(
+        alerts,
+        row,
+        "High",
+        "Called capital exceeds committed capital",
+        `${formatMoney(calledCapital)} called against ${formatMoney(reportedAmount)} committed.`
+      );
+    }
+
+    if ((performance.officialValue > 0 || performance.internalValue > 0) && !latest.valuationDate) {
+      addQualityAlert(alerts, row, "Medium", "Valuation date missing", "Add a valuation date so stale marks and XIRR timing are easier to audit.");
+    } else if (staleValuationDays !== null && staleValuationDays > 180) {
+      addQualityAlert(
+        alerts,
+        row,
+        "Medium",
+        "Valuation may be stale",
+        `Latest valuation date is ${formatDisplayDate(latest.valuationDate)}, about ${staleValuationDays} days ago.`
+      );
+    }
+
+    if ((hasCommittedStatus || statusEquals(normalizedStatus, "Funded") || statusEquals(normalizedStatus, "Active")) && !latest.nextStep) {
+      addQualityAlert(alerts, row, "Low", "No next step", "Add a next step if this investment needs an upcoming follow-up or valuation review.");
+    }
+
+    if ((hasCommittedStatus || statusEquals(normalizedStatus, "Funded") || statusEquals(normalizedStatus, "Active")) && !latest.contactName && !latest.contactEmail && !latest.contactPhone) {
+      addQualityAlert(alerts, row, "Low", "Contact info missing", "Add the best contact for future updates.");
+    }
+  });
+
+  const severityRank = { High: 0, Medium: 1, Low: 2 };
+  return alerts.sort((left, right) => {
+    const severityDelta = severityRank[left.severity] - severityRank[right.severity];
+    if (severityDelta) {
+      return severityDelta;
+    }
+
+    return left.company.localeCompare(right.company);
+  });
 }
 
 function renderDashboard(investments) {
@@ -1472,6 +1582,51 @@ function renderDashboard(investments) {
       }
     )
     .join("");
+}
+
+function renderDataQuality() {
+  const alerts = buildDataQualityAlerts();
+  const highCount = alerts.filter((alert) => alert.severity === "High").length;
+  const mediumCount = alerts.filter((alert) => alert.severity === "Medium").length;
+  const lowCount = alerts.filter((alert) => alert.severity === "Low").length;
+
+  dataQualitySummary.innerHTML = [
+    { label: "Total alerts", value: String(alerts.length) },
+    { label: "High priority", value: String(highCount) },
+    { label: "Medium priority", value: String(mediumCount) },
+    { label: "Low priority", value: String(lowCount) }
+  ]
+    .map(
+      (item) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="dashboard-value">${escapeHtml(item.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  dataQualityList.innerHTML = alerts.length
+    ? alerts
+        .map(
+          (alert) => `
+            <article class="quality-alert-card quality-alert-${escapeHtml(alert.severity.toLowerCase())}">
+              <div class="update-head">
+                <div>
+                  <p class="dashboard-label">${escapeHtml(alert.entity)} • ${escapeHtml(alert.company)}</p>
+                  <h3>${escapeHtml(alert.title)}</h3>
+                </div>
+                <span class="status-chip">${escapeHtml(alert.severity)}</span>
+              </div>
+              <p class="update-meta">${escapeHtml(alert.detail)}</p>
+              <div class="card-actions">
+                <button class="secondary-button card-action-button" type="button" data-action="edit-quality-investment" data-id="${escapeHtml(alert.id)}">Edit investment</button>
+              </div>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No data quality issues found. The reconciliation gremlins are quiet for now.</p>';
 }
 
 function renderEntityDetail() {
@@ -2706,6 +2861,7 @@ function renderAll() {
   renderFilterOptions();
   const filteredInvestments = filterInvestments(allInvestments);
   renderDashboard(allInvestments);
+  renderDataQuality();
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
   renderTasks();
@@ -3570,6 +3726,12 @@ dashboardCards.addEventListener("click", (event) => {
   if (action === "tasks") {
     showWorkspaceView("tasks");
     window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  if (action === "quality") {
+    showWorkspaceView("quality");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 });
 
@@ -3700,6 +3862,15 @@ reconciliationList.addEventListener("input", (event) => {
   }
 
   target.value = normalizeMoneyString(target.value);
+});
+
+dataQualityList.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-action='edit-quality-investment']");
+  if (!target) {
+    return;
+  }
+
+  beginEditInvestment(target.dataset.id || "");
 });
 
 tasksList.addEventListener("click", (event) => {
