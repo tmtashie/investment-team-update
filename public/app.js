@@ -361,7 +361,7 @@ function canAccessWorkspaceView(viewName) {
     return true;
   }
 
-  return ["home", "entity"].includes(viewName);
+  return viewName === "home";
 }
 
 function canOpenCompanyDetails() {
@@ -3974,6 +3974,10 @@ closeEntityDetailButton.addEventListener("click", () => {
 });
 
 entityPerformanceCards.addEventListener("click", (event) => {
+  if (isDashboardViewer()) {
+    return;
+  }
+
   const card = event.target.closest("[data-entity]");
   if (!card) {
     return;
@@ -3986,6 +3990,10 @@ entityPerformanceCards.addEventListener("click", (event) => {
 });
 
 dashboardCards.addEventListener("click", (event) => {
+  if (isDashboardViewer()) {
+    return;
+  }
+
   const card = event.target.closest("[data-dashboard-action], [data-entity]");
   if (!card) {
     return;
