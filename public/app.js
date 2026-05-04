@@ -7,6 +7,7 @@ const loginButton = document.getElementById("loginButton");
 const logoutButton = document.getElementById("logoutButton");
 const menuToggleButton = document.getElementById("menuToggleButton");
 const workspaceMenu = document.getElementById("workspaceMenu");
+const brandSubtitle = document.querySelector(".brand-subtitle");
 const form = document.getElementById("investmentForm");
 const loadCompanyDetailsButton = document.getElementById("loadCompanyDetailsButton");
 const formMessage = document.getElementById("formMessage");
@@ -14,6 +15,7 @@ const updatesList = document.getElementById("updatesList");
 const authStatus = document.getElementById("authStatus");
 const emailStatus = document.getElementById("emailStatus");
 const recipientStatus = document.getElementById("recipientStatus");
+const heroCopy = document.querySelector(".hero-copy");
 const roleNotice = document.getElementById("roleNotice");
 const refreshButton = document.getElementById("refreshButton");
 const submitButton = document.getElementById("submitButton");
@@ -120,6 +122,12 @@ let digestStatus = {
 };
 let dirtyReconciliationRows = new Set();
 let savingAllReconciliation = false;
+const DEFAULT_BRAND_SUBTITLE = "Family office investment workspace";
+const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Family office performance dashboard";
+const DEFAULT_HERO_COPY =
+  "A cleaner family office dashboard for tracking investments, entity exposure, research, documents, decisions, and follow-on capital from one disciplined source of truth.";
+const DASHBOARD_VIEWER_HERO_COPY =
+  "A private family office summary for reviewing entity exposure, committed capital, called capital, and portfolio marks from one disciplined source of truth.";
 
 const moneyFieldNames = [
   "amount",
@@ -301,13 +309,20 @@ async function fetchJson(url, options) {
 function setSignedInState(user) {
   currentUser = user;
   const isSignedIn = Boolean(user);
+  const dashboardViewer = Boolean(user && user.role === "dashboard-viewer");
 
   loginPanel.classList.toggle("hidden", isSignedIn);
   appPanel.classList.toggle("hidden", !isSignedIn);
   logoutButton.classList.toggle("hidden", !isSignedIn);
   authStatus.textContent = isSignedIn
-    ? `Signed in as ${user.email}${user.role ? ` • ${user.role}` : ""}`
+    ? dashboardViewer
+      ? `Family dashboard access • ${user.email}`
+      : `Signed in as ${user.email}${user.role ? ` • ${user.role}` : ""}`
     : "Please sign in to view updates";
+  brandSubtitle.textContent = dashboardViewer
+    ? DASHBOARD_VIEWER_BRAND_SUBTITLE
+    : DEFAULT_BRAND_SUBTITLE;
+  heroCopy.textContent = dashboardViewer ? DASHBOARD_VIEWER_HERO_COPY : DEFAULT_HERO_COPY;
 
   workspaceMenuLinks.forEach((link) => {
     const viewName = link.dataset.view || "";
@@ -578,7 +593,7 @@ function renderRoleState() {
   roleNotice.textContent = editable
     ? "Editors can add investments, tasks, documents, and research."
     : dashboardViewer
-      ? "This account is limited to the dashboard and entity performance views."
+      ? "This account is configured for a clean read-only family dashboard."
       : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
 }
 
