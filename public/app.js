@@ -566,12 +566,18 @@ function renderUploadedDocuments() {
 
 function renderRoleState() {
   const editable = canEditWorkspace();
+  const dashboardViewer = isDashboardViewer();
   form.classList.toggle("hidden", !editable);
   taskForm.classList.toggle("hidden", !editable);
   sendDigestButton.classList.toggle("hidden", !editable);
+  menuToggleButton.classList.toggle("hidden", dashboardViewer);
+  if (dashboardViewer) {
+    workspaceMenu.classList.add("hidden");
+  }
+  recipientStatus.classList.toggle("hidden", dashboardViewer);
   roleNotice.textContent = editable
     ? "Editors can add investments, tasks, documents, and research."
-    : isDashboardViewer()
+    : dashboardViewer
       ? "This account is limited to the dashboard and entity performance views."
       : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
 }
@@ -1599,7 +1605,7 @@ function renderDashboard(investments) {
               <p class="dashboard-label">Entity</p>
               <h3>${escapeHtml(entity)}</h3>
             </div>
-            <span class="entity-open-pill">Open entity</span>
+            ${isDashboardViewer() ? "" : '<span class="entity-open-pill">Open entity</span>'}
           </div>
           <div class="entity-metric-grid">
             ${metrics
