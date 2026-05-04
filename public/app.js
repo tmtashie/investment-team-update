@@ -75,6 +75,11 @@ const companySuggestions = document.getElementById("companySuggestions");
 const companyPanel = document.getElementById("companyPanel");
 const companyPanelTitle = document.getElementById("companyPanelTitle");
 const companyPanelCopy = document.getElementById("companyPanelCopy");
+const generateInvestmentSummaryButton = document.getElementById("generateInvestmentSummaryButton");
+const investmentSummaryPanel = document.getElementById("investmentSummaryPanel");
+const investmentSummaryDocument = document.getElementById("investmentSummaryDocument");
+const printInvestmentSummaryButton = document.getElementById("printInvestmentSummaryButton");
+const closeInvestmentSummaryButton = document.getElementById("closeInvestmentSummaryButton");
 const companySummary = document.getElementById("companySummary");
 const companyHighlights = document.getElementById("companyHighlights");
 const companyContactInfo = document.getElementById("companyContactInfo");
@@ -122,6 +127,7 @@ let digestStatus = {
 };
 let dirtyReconciliationRows = new Set();
 let savingAllReconciliation = false;
+let latestCompanySummaryContext = null;
 const DEFAULT_BRAND_SUBTITLE = "Family office investment workspace";
 const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Family office performance dashboard";
 const DEFAULT_HERO_COPY =
@@ -1831,6 +1837,303 @@ function summarizeText(value, fallback) {
   return text.length > 220 ? `${text.slice(0, 217)}...` : text;
 }
 
+function formatSummaryField(value, formatter = null) {
+  if (value === null || value === undefined || value === "") {
+    return "Not Available";
+  }
+
+  if (formatter) {
+    return formatter(value);
+  }
+
+  return String(value).trim() || "Not Available";
+}
+
+function joinSummarySentences(parts, fallback = "Not Available") {
+  const cleaned = parts
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+
+  return cleaned.length ? cleaned.join(" ") : fallback;
+}
+
+function buildInvestmentExecutiveSummary(latest, performance, latestUpdateText) {
+  const status = normalizeStatusName(latest.status) || "Not Available";
+  const investedCapital = formatSummaryField(performance.investedCapital, formatMoney);
+  const currentValue = formatSummaryField(
+    performance.internalValue || performance.officialValue,
+    formatMoney
+  );
+  const returnedCapital = formatSummaryField(performance.distributions, formatMoney);
+  const updateSentence =
+    latestUpdateText && latestUpdateText !== "Not Available"
+      ? `The latest operating note is: ${latestUpdateText}`
+      : "";
+
+  return joinSummarySentences([
+    `${latest.company || "This investment"} is currently marked as ${status}.`,
+    `Called capital stands at ${investedCapital}, with ${returnedCapital} returned to date and current value/NAV estimated at ${currentValue}.`,
+    updateSentence
+  ]);
+}
+
+function buildInvestmentChangeSummary(earliest, latest, performance) {
+  const changes = [];
+  const earliestStatus = normalizeStatusName(earliest.status);
+  const latestStatus = normalizeStatusName(latest.status);
+  if (earliestStatus || latestStatus) {
+    changes.push(
+      `Status moved from ${earliestStatus || "Not Available"} to ${latestStatus || "Not Available"}.`
+    );
+  }
+
+  const earliestAmount = toNumber(earliest.amount);
+  const latestAmount = toNumber(latest.amount);
+  if (earliestAmount || latestAmount) {
+    changes.push(
+      `Reported commitment shifted from ${formatMoney(earliestAmount)} to ${formatMoney(latestAmount || earliestAmount)}.`
+    );
+  }
+
+  if (performance.distributions > 0) {
+    changes.push(`Capital returned now totals ${formatMoney(performance.distributions)}.`);
+  }
+
+  if (performance.internalValue || performance.officialValue) {
+    changes.push(
+      `Current marks stand at official NAV ${formatMoney(performance.officialValue)} and internal NAV ${formatMoney(performance.internalValue)}.`
+    );
+  }
+
+  return joinSummarySentences(changes);
+}
+
+function buildInvestmentSummaryContext() {
+  if (!selectedCompany) {
+    return null;
+  }
+
+  const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+  const companyUpdates = companyRecord
+    ? [...companyRecord.updates]
+    : allInvestments
+        .filter(
+          (investment) =>
+            companyKey(investment.company) === companyKey(selectedCompany) &&
+            normalizeEntityName(investment.entity) === normalizeEntityName(selectedCompanyEntity)
+        )
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  if (!companyUpdates.length) {
+    return null;
+  }
+
+  const latest = companyUpdates[0];
+  const earliest = companyUpdates[companyUpdates.length - 1];
+  const performance =
+    companyPerformanceMap.get(companyEntityKey(selectedCompany, selectedCompanyEntity)) ||
+    buildCompanyPerformance(companyUpdates);
+  const latestUpdateText = summarizeText(
+    latest.notes || latest.deckSummary || latest.decisionSummary,
+    "Not Available"
+  );
+  const currentValue = performance.internalValue || performance.officialValue || null;
+  const totalValue = currentValue + performance.distributions;
+  const gainLoss = totalValue - performance.investedCapital;
+  const moic = performance.internal.moic ?? performance.official.moic;
+  const irr = performance.internal.xirr ?? performance.official.xirr;
+  const originalInvestmentAmount = performance.committedCapital || toNumber(latest.amount) || null;
+  const overview = joinSummarySentences([
+    latest.stage ? `${latest.stage} investment.` : "",
+    latest.entity ? `Tracked under ${normalizeEntityName(latest.entity)}.` : "",
+    latest.owner ? `Current owner: ${latest.owner}.` : "",
+    latest.contactName ? `Primary contact: ${latest.contactName}.` : "",
+    latest.notes ? `Latest context: ${summarizeText(latest.notes, "")}` : ""
+  ]);
+  const risks = joinSummarySentences(
+    [
+      latest.followOnCapitalNotes,
+      latest.ownershipNotes,
+      latest.decisionSummary && latest.decisionType ? `${latest.decisionType}: ${latest.decisionSummary}` : ""
+    ],
+    "Not Available"
+  );
+  const recommendation = joinSummarySentences(
+    [
+      latest.nextStep ? `Next step: ${latest.nextStep}.` : "",
+      latest.followOnCapitalStatus ? `Follow-on status: ${latest.followOnCapitalStatus}.` : "",
+      latest.nextStepDueDate ? `Reminder date: ${formatDisplayDate(latest.nextStepDueDate)}.` : ""
+    ],
+    "Not Available"
+  );
+
+  return {
+    latest,
+    earliest,
+    performance,
+    originalInvestmentAmount,
+    latestUpdateText,
+    currentValue,
+    totalValue,
+    gainLoss,
+    moic,
+    irr,
+    overview,
+    risks,
+    recommendation,
+    executiveSummary: buildInvestmentExecutiveSummary(latest, performance, latestUpdateText),
+    changeSummary: buildInvestmentChangeSummary(earliest, latest, performance)
+  };
+}
+
+function renderInvestmentSummary() {
+  const context = buildInvestmentSummaryContext();
+  latestCompanySummaryContext = context;
+  if (!context) {
+    investmentSummaryPanel.classList.add("hidden");
+    investmentSummaryDocument.innerHTML = "";
+    return;
+  }
+
+  const {
+    latest,
+    performance,
+    originalInvestmentAmount,
+    currentValue,
+    totalValue,
+    gainLoss,
+    moic,
+    irr
+  } = context;
+
+  const sections = [
+    {
+      title: "Executive Summary",
+      body: context.executiveSummary
+    },
+    {
+      title: "Company / Fund Overview",
+      body: context.overview
+    },
+    {
+      title: "Key Updates",
+      body: context.latestUpdateText
+    },
+    {
+      title: "What Has Changed Since Investment",
+      body: context.changeSummary
+    },
+    {
+      title: "Current Risks / Open Questions",
+      body: context.risks
+    },
+    {
+      title: "Next Steps / Recommendation",
+      body: context.recommendation
+    },
+    {
+      title: "Notes for Lee / Internal Discussion",
+      body: joinSummarySentences(
+        [latest.decisionSummary, latest.documentLinks, latest.notes],
+        "Not Available"
+      )
+    }
+  ];
+
+  investmentSummaryDocument.innerHTML = `
+    <header class="investment-summary-header">
+      <div>
+        <p class="investment-summary-eyebrow">Investment Summary</p>
+        <h2>${escapeHtml(latest.company || selectedCompany)}</h2>
+        <p class="investment-summary-meta">${escapeHtml(
+          normalizeEntityName(latest.entity) || "Not Available"
+        )} • ${escapeHtml(normalizeStatusName(latest.status) || "Not Available")} • Prepared ${escapeHtml(
+          formatDisplayDate(new Date().toISOString())
+        )}</p>
+      </div>
+    </header>
+    <section class="investment-summary-grid">
+      <article class="investment-summary-kpi">
+        <p class="dashboard-label">Original investment amount</p>
+        <p class="dashboard-value">${escapeHtml(formatSummaryField(originalInvestmentAmount, formatMoney))}</p>
+      </article>
+      <article class="investment-summary-kpi">
+        <p class="dashboard-label">Current value / NAV</p>
+        <p class="dashboard-value">${escapeHtml(formatSummaryField(currentValue, formatMoney))}</p>
+      </article>
+      <article class="investment-summary-kpi">
+        <p class="dashboard-label">Capital returned</p>
+        <p class="dashboard-value">${escapeHtml(
+          formatSummaryField(performance.distributions, formatMoney)
+        )}</p>
+      </article>
+      <article class="investment-summary-kpi">
+        <p class="dashboard-label">Total value realized + unrealized</p>
+        <p class="dashboard-value">${escapeHtml(formatSummaryField(totalValue, formatMoney))}</p>
+      </article>
+      <article class="investment-summary-kpi">
+        <p class="dashboard-label">Gain / Loss</p>
+        <p class="dashboard-value">${escapeHtml(formatSummaryField(gainLoss, formatMoney))}</p>
+      </article>
+      <article class="investment-summary-kpi">
+        <p class="dashboard-label">MOIC</p>
+        <p class="dashboard-value">${escapeHtml(formatSummaryField(moic, formatTurns))}</p>
+      </article>
+      <article class="investment-summary-kpi">
+        <p class="dashboard-label">IRR</p>
+        <p class="dashboard-value">${escapeHtml(formatSummaryField(irr, formatPercent))}</p>
+      </article>
+      <article class="investment-summary-kpi">
+        <p class="dashboard-label">Investment status</p>
+        <p class="dashboard-value">${escapeHtml(
+          formatSummaryField(normalizeStatusName(latest.status))
+        )}</p>
+      </article>
+    </section>
+    <section class="investment-summary-sections">
+      ${sections
+        .map(
+          (section) => `
+            <article class="investment-summary-section">
+              <h3>${escapeHtml(section.title)}</h3>
+              <p>${escapeHtml(section.body)}</p>
+            </article>
+          `
+        )
+        .join("")}
+    </section>
+    <footer class="investment-summary-footer">
+      Prepared for internal discussion purposes only. Figures should be verified against source documents before making investment decisions.
+    </footer>
+  `;
+}
+
+function openInvestmentSummary() {
+  renderInvestmentSummary();
+  if (!latestCompanySummaryContext) {
+    return;
+  }
+
+  investmentSummaryPanel.classList.remove("hidden");
+  investmentSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeInvestmentSummary() {
+  latestCompanySummaryContext = null;
+  investmentSummaryPanel.classList.add("hidden");
+  investmentSummaryDocument.innerHTML = "";
+  document.body.classList.remove("print-investment-summary");
+}
+
+function printInvestmentSummary() {
+  if (investmentSummaryPanel.classList.contains("hidden")) {
+    openInvestmentSummary();
+  }
+
+  document.body.classList.add("print-investment-summary");
+  window.print();
+}
+
 function sortInvestmentsAlphabetically(investments) {
   return [...investments].sort((left, right) =>
     String(left.company || "").localeCompare(String(right.company || ""), undefined, {
@@ -2164,6 +2467,7 @@ async function saveReconciliationRow(investmentId, values, options = {}) {
 function renderCompanyPanel() {
   if (!selectedCompany) {
     companyPanel.classList.add("hidden");
+    closeInvestmentSummary();
     companySummary.innerHTML = "";
     companyHighlights.innerHTML = "";
     companyContactInfo.innerHTML = "";
@@ -2194,6 +2498,7 @@ function renderCompanyPanel() {
 
   if (!companyUpdates.length) {
     companyPanel.classList.add("hidden");
+    closeInvestmentSummary();
     return;
   }
 
@@ -2607,6 +2912,10 @@ function renderCompanyPanel() {
       `
     )
     .join("");
+
+  if (!investmentSummaryPanel.classList.contains("hidden")) {
+    renderInvestmentSummary();
+  }
 }
 
 function renderUpdates(investments) {
@@ -3986,6 +4295,22 @@ closeCompanyPanelButton.addEventListener("click", () => {
   selectedCompanyEntity = "";
   renderCompanyPanel();
   showWorkspaceView("portfolio");
+});
+
+generateInvestmentSummaryButton.addEventListener("click", () => {
+  openInvestmentSummary();
+});
+
+closeInvestmentSummaryButton.addEventListener("click", () => {
+  closeInvestmentSummary();
+});
+
+printInvestmentSummaryButton.addEventListener("click", () => {
+  printInvestmentSummary();
+});
+
+window.addEventListener("afterprint", () => {
+  document.body.classList.remove("print-investment-summary");
 });
 
 closeEntityDetailButton.addEventListener("click", () => {

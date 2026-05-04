@@ -684,10 +684,32 @@
               <h2 id="companyPanelTitle">Company detail</h2>
               <p id="companyPanelCopy" class="section-copy"></p>
             </div>
-            <button id="closeCompanyPanelButton" type="button" class="secondary-button">
-              Close
-            </button>
+            <div class="panel-header-actions">
+              <button id="generateInvestmentSummaryButton" type="button" class="secondary-button">
+                Generate Investment Summary
+              </button>
+              <button id="closeCompanyPanelButton" type="button" class="secondary-button">
+                Close
+              </button>
+            </div>
           </div>
+          <section id="investmentSummaryPanel" class="investment-summary-panel hidden">
+            <div class="investment-summary-toolbar print-hidden">
+              <div>
+                <p class="feature-kicker">PDF-style investment summary</p>
+                <h3>Internal investment memo</h3>
+              </div>
+              <div class="card-actions">
+                <button id="printInvestmentSummaryButton" type="button" class="secondary-button">
+                  Print / Save as PDF
+                </button>
+                <button id="closeInvestmentSummaryButton" type="button" class="secondary-button">
+                  Close summary
+                </button>
+              </div>
+            </div>
+            <article id="investmentSummaryDocument" class="investment-summary-document"></article>
+          </section>
           <div id="companySummary" class="company-summary-grid"></div>
           <div class="company-detail-grid company-detail-grid-memo">
             <section class="company-detail-card company-detail-card-span-2">
