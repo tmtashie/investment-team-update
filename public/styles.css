@@ -860,6 +860,34 @@ button:disabled {
   line-height: 1.5;
 }
 
+.ai-analyst-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ai-analyst-chip {
+  white-space: nowrap;
+}
+
+.ai-analyst-response-shell {
+  padding: 20px;
+  border-radius: 18px;
+  border: 1px solid rgba(23, 50, 77, 0.1);
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.ai-analyst-response-body {
+  color: #22324a;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.ai-analyst-response-body strong {
+  color: #132235;
+}
+
 .link-button {
   padding: 0;
   border: 0;
@@ -1292,6 +1320,14 @@ a.secondary-button.inline-action-button {
   .workspace-header-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .ai-analyst-chip-row {
+    flex-direction: column;
+  }
+
+  .ai-analyst-chip {
+    width: 100%;
   }
 
   .uploaded-document-card {

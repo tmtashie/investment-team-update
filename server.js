@@ -52,6 +52,8 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-before-productio
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_BODY_SIZE_BYTES = 20 * 1024 * 1024;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const AI_ANALYST_SYSTEM_PROMPT =
+  "You are an internal investment analyst for Beaman Ventures. Your job is to produce concise, Lee-ready investment analysis. Be clear, practical, and decision-oriented. Do not make up facts. If data is missing, say what is missing and suggest what to ask for.";
 const DATA_SCHEMA_VERSION = 2;
 const NEXT_STEP_REMINDER_DAYS = Number(process.env.NEXT_STEP_REMINDER_DAYS || 14);
 const DIGEST_WINDOW_DAYS = 14;
@@ -1803,6 +1805,306 @@ function calculateCompanyPerformanceSnapshot(company) {
     official: buildScenarioMetrics(latestOfficialValue),
     internal: buildScenarioMetrics(latestInternalValue),
     exit: buildScenarioMetrics(latestExitValue)
+  };
+}
+
+function textOrNull(value) {
+  const text = String(value || "").trim();
+  return text || null;
+}
+
+function limitRows(rows, size = 5) {
+  return Array.isArray(rows) ? rows.slice(0, size) : [];
+}
+
+function getLatestTextFromUpdates(updates) {
+  const latest = Array.isArray(updates) && updates.length ? updates[0] : null;
+  if (!latest) {
+    return null;
+  }
+
+  return (
+    textOrNull(latest.notes) ||
+    textOrNull(latest.deckSummary) ||
+    textOrNull(latest.decisionSummary) ||
+    null
+  );
+}
+
+function buildCompanyAnalystContext(company) {
+  const performance = calculateCompanyPerformanceSnapshot(company);
+  const latest = Array.isArray(company.updates) && company.updates.length ? company.updates[0] : null;
+  const openTasks = (company.tasks || []).filter(
+    (task) => String(task.status || "").trim() !== "Completed"
+  );
+
+  return {
+    company: company.company,
+    entity: normalizeEntityName(company.profile && company.profile.entity),
+    profile: {
+      stage: textOrNull(company.profile && company.profile.stage),
+      status: textOrNull(company.profile && company.profile.status),
+      owner: textOrNull(company.profile && company.profile.owner),
+      nextStep: textOrNull(company.profile && company.profile.nextStep),
+      currency: textOrNull(company.profile && company.profile.currency)
+    },
+    contact: latest
+      ? {
+          name: textOrNull(latest.contactName),
+          position: textOrNull(latest.contactPosition),
+          email: textOrNull(latest.contactEmail),
+          phone: textOrNull(latest.contactPhone)
+        }
+      : null,
+    performance: {
+      committedCapital: performance.committedCapital,
+      investedCapital: performance.totalInvestedCapital,
+      distributions: performance.totalDistributions,
+      officialValue: performance.officialValue,
+      internalValue: performance.internalValue,
+      exitValue: performance.exitValue,
+      officialXirr: performance.official.xirr,
+      internalXirr: performance.internal.xirr,
+      exitXirr: performance.exit.xirr,
+      officialMoic: performance.official.moic,
+      internalMoic: performance.internal.moic,
+      exitMoic: performance.exit.moic
+    },
+    latestUpdate: getLatestTextFromUpdates(company.updates),
+    capitalActivity: limitRows(company.capitalActivities, 6).map((row) => ({
+      date: textOrNull(row.date),
+      type: textOrNull(row.type),
+      amount: toPositiveNumber(row.amount),
+      notes: textOrNull(row.notes)
+    })),
+    valuationHistory: limitRows(company.valuationHistory, 4).map((row) => ({
+      date: textOrNull(row.date),
+      officialValue: toPositiveNumber(row.officialValue),
+      internalValue: toPositiveNumber(row.internalValue),
+      exitValue: toPositiveNumber(row.exitValue)
+    })),
+    decisions: limitRows(company.decisionLog, 4).map((row) => ({
+      date: textOrNull(row.date),
+      type: textOrNull(row.type),
+      summary: textOrNull(row.summary)
+    })),
+    research: limitRows(company.researchEntries, 4).map((row) => ({
+      date: textOrNull(row.date),
+      type: textOrNull(row.type),
+      summary: textOrNull(row.summary)
+    })),
+    documents: limitRows(company.documents, 5).map((row) => row.name).filter(Boolean),
+    openTasks: limitRows(openTasks, 5).map((task) => ({
+      title: textOrNull(task.title),
+      dueDate: textOrNull(task.dueDate),
+      priority: textOrNull(task.priority),
+      description: textOrNull(task.description)
+    }))
+  };
+}
+
+function buildPortfolioAnalystContext(investments, tasks, companyDocuments) {
+  const companies = buildCompanyRecords(investments, tasks, companyDocuments);
+  const now = Date.now();
+  const needsAttention = companies
+    .map((company) => {
+      const performance = calculateCompanyPerformanceSnapshot(company);
+      const latest = Array.isArray(company.updates) && company.updates.length ? company.updates[0] : null;
+      const latestValuationDate = textOrNull(
+        (company.valuationHistory && company.valuationHistory[0] && company.valuationHistory[0].date) ||
+          (latest && latest.valuationDate)
+      );
+      const staleValuation =
+        latestValuationDate && now - new Date(latestValuationDate).getTime() > 180 * 24 * 60 * 60 * 1000;
+      const missingContact =
+        latest &&
+        ![
+          textOrNull(latest.contactName),
+          textOrNull(latest.contactEmail),
+          textOrNull(latest.contactPhone)
+        ].some(Boolean);
+      const openTaskCount = (company.tasks || []).filter(
+        (task) => String(task.status || "").trim() !== "Completed"
+      ).length;
+      const latestStatus = textOrNull(company.profile && company.profile.status);
+
+      return {
+        company: company.company,
+        entity: normalizeEntityName(company.profile && company.profile.entity),
+        status: latestStatus,
+        committedCapital: performance.committedCapital,
+        investedCapital: performance.totalInvestedCapital,
+        internalValue: performance.internalValue,
+        openTaskCount,
+        missingNextStep: !(company.profile && textOrNull(company.profile.nextStep)),
+        missingContact,
+        staleValuation: Boolean(staleValuation)
+      };
+    })
+    .filter(
+      (item) =>
+        item.openTaskCount > 0 ||
+        item.missingNextStep ||
+        item.missingContact ||
+        item.staleValuation
+    )
+    .slice(0, 10);
+
+  return {
+    companyCount: companies.length,
+    entitySummary: INVESTMENT_ENTITIES.map((entity) => {
+      const entityCompanies = companies.filter(
+        (company) => normalizeEntityName(company.profile && company.profile.entity) === entity
+      );
+      const totals = entityCompanies.reduce(
+        (sum, company) => {
+          const performance = calculateCompanyPerformanceSnapshot(company);
+          return {
+            committedCapital: sum.committedCapital + performance.committedCapital,
+            investedCapital: sum.investedCapital + performance.totalInvestedCapital,
+            internalValue: sum.internalValue + performance.internalValue
+          };
+        },
+        { committedCapital: 0, investedCapital: 0, internalValue: 0 }
+      );
+
+      return {
+        entity,
+        companyCount: entityCompanies.length,
+        committedCapital: totals.committedCapital,
+        investedCapital: totals.investedCapital,
+        internalValue: totals.internalValue
+      };
+    }),
+    needsAttention
+  };
+}
+
+function findRelevantCompanyRecord({ companies, company, entity, question }) {
+  const explicitCompany = textOrNull(company);
+  const explicitEntity = normalizeEntityName(entity);
+
+  if (explicitCompany) {
+    return (
+      companies.find(
+        (item) =>
+          normalizeCompanyKey(item.company) === normalizeCompanyKey(explicitCompany) &&
+          normalizeEntityName(item.profile && item.profile.entity) === explicitEntity
+      ) ||
+      companies.find((item) => normalizeCompanyKey(item.company) === normalizeCompanyKey(explicitCompany)) ||
+      null
+    );
+  }
+
+  const normalizedQuestion = String(question || "").toLowerCase();
+  const matched = companies.find((item) =>
+    normalizedQuestion.includes(String(item.company || "").trim().toLowerCase())
+  );
+  return matched || null;
+}
+
+async function askInvestmentAnalyst({ question, company, entity }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI is not configured yet. Add OPENAI_API_KEY in Render first.");
+  }
+
+  const investments = readInvestments();
+  const tasks = syncNextStepReminderTasks(investments, readTasks());
+  const companyDocuments = readCompanyDocuments();
+  const companies = buildCompanyRecords(investments, tasks, companyDocuments);
+  const matchedCompany = findRelevantCompanyRecord({ companies, company, entity, question });
+
+  const context = matchedCompany
+    ? {
+        scope: "investment",
+        investment: buildCompanyAnalystContext(matchedCompany)
+      }
+    : {
+        scope: "portfolio",
+        portfolio: buildPortfolioAnalystContext(investments, tasks, companyDocuments)
+      };
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                AI_ANALYST_SYSTEM_PROMPT,
+                "",
+                "Guardrails:",
+                "- Never fabricate numbers or facts.",
+                "- Clearly label missing information.",
+                "- Include risks and next steps when relevant.",
+                "- Do not provide legal, tax, or investment advice as final authority.",
+                "- State that figures should be verified against source documents.",
+                "- Keep the tone concise, professional, and suitable for internal family office review.",
+                "- If a question asks for an email, draft the email only from the facts provided."
+              ].join("\n")
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                "User question:",
+                question,
+                "",
+                "Relevant portfolio context:",
+                JSON.stringify(context, null, 2),
+                "",
+                "Format your response with short internal-ready sections where helpful:",
+                "Direct answer",
+                "Missing information",
+                "Risks",
+                "Next steps",
+                "Verification note"
+              ].join("\n")
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    if (errorText.includes("insufficient_quota")) {
+      throw new Error(
+        "AI Analyst failed: your OpenAI API account needs billing or more quota before this can run."
+      );
+    }
+    throw new Error(`AI Analyst failed: ${errorText}`);
+  }
+
+  const payload = await response.json();
+  const answer = extractResponseText(payload);
+
+  if (!answer) {
+    throw new Error("AI Analyst did not return an answer.");
+  }
+
+  return {
+    answer,
+    contextLabel: matchedCompany
+      ? `${matchedCompany.company} • ${normalizeEntityName(matchedCompany.profile && matchedCompany.profile.entity) || "All entities"}`
+      : "Portfolio-wide analysis",
+    company: matchedCompany ? matchedCompany.company : textOrNull(company) || "",
+    entity: matchedCompany ? normalizeEntityName(matchedCompany.profile && matchedCompany.profile.entity) : normalizeEntityName(entity)
   };
 }
 
@@ -3778,6 +4080,32 @@ const server = http.createServer(async (request, response) => {
       return;
     } catch (error) {
       sendJson(response, 500, { error: error.message || "Email summarization failed." });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-agent") {
+    const user = requireOperatingViewer(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const question = String(payload.question || "").trim();
+      const company = String(payload.company || "").trim();
+      const entity = String(payload.entity || "").trim();
+
+      if (!question) {
+        sendJson(response, 400, { error: "Ask the AI Analyst a question first." });
+        return;
+      }
+
+      const result = await askInvestmentAnalyst({ question, company, entity });
+      sendJson(response, 200, result);
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "AI Analyst request failed." });
       return;
     }
   }

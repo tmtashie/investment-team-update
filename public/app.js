@@ -77,10 +77,22 @@ const searchFilter = document.getElementById("searchFilter");
 const statusFilter = document.getElementById("statusFilter");
 const stageFilter = document.getElementById("stageFilter");
 const ownerFilter = document.getElementById("ownerFilter");
+const aiAnalystSection = document.getElementById("aiAnalystSection");
+const aiAnalystCompanyField = document.getElementById("aiAnalystCompanyField");
+const aiAnalystEntityField = document.getElementById("aiAnalystEntityField");
+const aiAnalystPromptField = document.getElementById("aiAnalystPromptField");
+const askAiAnalystButton = document.getElementById("askAiAnalystButton");
+const clearAiAnalystButton = document.getElementById("clearAiAnalystButton");
+const useAiAnalystInSummaryButton = document.getElementById("useAiAnalystInSummaryButton");
+const aiAnalystMessage = document.getElementById("aiAnalystMessage");
+const aiAnalystResponseCard = document.getElementById("aiAnalystResponseCard");
+const aiAnalystContextLabel = document.getElementById("aiAnalystContextLabel");
+const aiAnalystResponseBody = document.getElementById("aiAnalystResponseBody");
 const companySuggestions = document.getElementById("companySuggestions");
 const companyPanel = document.getElementById("companyPanel");
 const companyPanelTitle = document.getElementById("companyPanelTitle");
 const companyPanelCopy = document.getElementById("companyPanelCopy");
+const openAiAnalystButton = document.getElementById("openAiAnalystButton");
 const generateInvestmentSummaryButton = document.getElementById("generateInvestmentSummaryButton");
 const investmentSummaryPanel = document.getElementById("investmentSummaryPanel");
 const investmentSummaryDocument = document.getElementById("investmentSummaryDocument");
@@ -134,6 +146,8 @@ let digestStatus = {
 let dirtyReconciliationRows = new Set();
 let savingAllReconciliation = false;
 let latestCompanySummaryContext = null;
+let latestAiAnalystResult = null;
+let investmentSummaryAiNotes = null;
 let activePortfolioPreset = "";
 const DEFAULT_BRAND_SUBTITLE = "Family office investment workspace";
 const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Private family office reporting dashboard";
@@ -441,6 +455,91 @@ function canAccessWorkspaceView(viewName) {
 
 function canOpenCompanyDetails() {
   return !isDashboardViewer();
+}
+
+function clearAiAnalystState(resetFields = false) {
+  latestAiAnalystResult = null;
+  if (aiAnalystResponseCard) {
+    aiAnalystResponseCard.classList.add("hidden");
+  }
+  if (aiAnalystContextLabel) {
+    aiAnalystContextLabel.textContent = "Portfolio-wide analysis";
+  }
+  if (aiAnalystResponseBody) {
+    aiAnalystResponseBody.textContent = "";
+  }
+  if (aiAnalystMessage) {
+    aiAnalystMessage.textContent = "";
+  }
+  if (useAiAnalystInSummaryButton) {
+    useAiAnalystInSummaryButton.classList.add("hidden");
+  }
+  if (resetFields) {
+    if (aiAnalystCompanyField) {
+      aiAnalystCompanyField.value = "";
+    }
+    if (aiAnalystEntityField) {
+      aiAnalystEntityField.value = "";
+    }
+    if (aiAnalystPromptField) {
+      aiAnalystPromptField.value = "";
+    }
+  }
+}
+
+function renderAiAnalystResponse(result) {
+  latestAiAnalystResult = result || null;
+  if (!result) {
+    clearAiAnalystState();
+    return;
+  }
+
+  if (aiAnalystContextLabel) {
+    aiAnalystContextLabel.textContent = result.contextLabel || "Portfolio-wide analysis";
+  }
+  if (aiAnalystResponseBody) {
+    aiAnalystResponseBody.textContent = result.answer || "";
+  }
+  if (aiAnalystResponseCard) {
+    aiAnalystResponseCard.classList.remove("hidden");
+  }
+  if (useAiAnalystInSummaryButton) {
+    useAiAnalystInSummaryButton.classList.toggle("hidden", !(result.company || selectedCompany));
+  }
+}
+
+function applyAiAnalystTemplate(template) {
+  if (!aiAnalystPromptField) {
+    return;
+  }
+
+  const company = String(
+    (aiAnalystCompanyField && aiAnalystCompanyField.value) || selectedCompany || "this investment"
+  ).trim();
+  const prompt = String(template || "")
+    .replace(/\{\{company\}\}/g, company || "this investment")
+    .trim();
+  aiAnalystPromptField.value = prompt;
+  aiAnalystPromptField.focus();
+}
+
+function openAiAnalystForSelectedCompany() {
+  if (!aiAnalystSection || !canAccessWorkspaceView("analyst")) {
+    return;
+  }
+
+  if (selectedCompany && aiAnalystCompanyField) {
+    aiAnalystCompanyField.value = selectedCompany;
+  }
+  if (selectedCompanyEntity && aiAnalystEntityField) {
+    aiAnalystEntityField.value = normalizeEntityName(selectedCompanyEntity);
+  }
+  if (selectedCompany && aiAnalystPromptField && !aiAnalystPromptField.value.trim()) {
+    aiAnalystPromptField.value = `Summarize ${selectedCompany} for Lee. Include the main risks, what is missing, and recommended next steps.`;
+  }
+
+  showWorkspaceView("analyst");
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function selectedDeckFile() {
@@ -2123,6 +2222,17 @@ function renderInvestmentSummary() {
       )
     }
   ];
+
+  if (
+    investmentSummaryAiNotes &&
+    companyKey(investmentSummaryAiNotes.company) === companyKey(selectedCompany) &&
+    normalizeEntityName(investmentSummaryAiNotes.entity) === normalizeEntityName(selectedCompanyEntity)
+  ) {
+    sections.push({
+      title: "AI Analyst Notes",
+      body: investmentSummaryAiNotes.answer || "Not Available"
+    });
+  }
 
   investmentSummaryDocument.innerHTML = `
     <header class="investment-summary-header">
@@ -4053,6 +4163,114 @@ summarizeEmailButton.addEventListener("click", async () => {
     summarizeEmailButton.disabled = false;
   }
 });
+
+if (openAiAnalystButton) {
+  openAiAnalystButton.addEventListener("click", () => {
+    openAiAnalystForSelectedCompany();
+  });
+}
+
+if (aiAnalystSection) {
+  aiAnalystSection.addEventListener("click", (event) => {
+    const templateButton = event.target.closest("[data-analyst-template]");
+    if (!templateButton) {
+      return;
+    }
+
+    applyAiAnalystTemplate(templateButton.dataset.analystTemplate || "");
+  });
+}
+
+if (askAiAnalystButton) {
+  askAiAnalystButton.addEventListener("click", async () => {
+    const question = String((aiAnalystPromptField && aiAnalystPromptField.value) || "").trim();
+    const company = String((aiAnalystCompanyField && aiAnalystCompanyField.value) || "").trim();
+    const entity = normalizeEntityName(
+      String((aiAnalystEntityField && aiAnalystEntityField.value) || "").trim()
+    );
+
+    if (!question) {
+      if (aiAnalystMessage) {
+        aiAnalystMessage.textContent = "Ask the AI Analyst a question first.";
+      }
+      if (aiAnalystPromptField) {
+        aiAnalystPromptField.focus();
+      }
+      return;
+    }
+
+    askAiAnalystButton.disabled = true;
+    clearAiAnalystState(false);
+    if (aiAnalystMessage) {
+      aiAnalystMessage.textContent = "Analyzing portfolio context...";
+    }
+
+    try {
+      const result = await fetchJson("/api/ai-agent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          question,
+          company,
+          entity
+        })
+      });
+
+      renderAiAnalystResponse(result);
+      if (aiAnalystMessage) {
+        aiAnalystMessage.textContent = "AI Analyst response ready.";
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        setSignedInState(null);
+        if (aiAnalystMessage) {
+          aiAnalystMessage.textContent = "Your session expired. Please sign in again.";
+        }
+        return;
+      }
+
+      if (aiAnalystMessage) {
+        aiAnalystMessage.textContent = error.message;
+      }
+    } finally {
+      askAiAnalystButton.disabled = false;
+    }
+  });
+}
+
+if (clearAiAnalystButton) {
+  clearAiAnalystButton.addEventListener("click", () => {
+    clearAiAnalystState(true);
+  });
+}
+
+if (useAiAnalystInSummaryButton) {
+  useAiAnalystInSummaryButton.addEventListener("click", () => {
+    if (!latestAiAnalystResult) {
+      return;
+    }
+
+    investmentSummaryAiNotes = {
+      company: latestAiAnalystResult.company || selectedCompany,
+      entity: normalizeEntityName(latestAiAnalystResult.entity || selectedCompanyEntity),
+      answer: latestAiAnalystResult.answer || ""
+    };
+
+    if (investmentSummaryAiNotes.company) {
+      selectedCompany = investmentSummaryAiNotes.company;
+    }
+    selectedCompanyEntity = investmentSummaryAiNotes.entity || "";
+    renderCompanyPanel();
+    showWorkspaceView("portfolio");
+    openInvestmentSummary();
+
+    if (aiAnalystMessage) {
+      aiAnalystMessage.textContent = "AI Analyst notes added to the investment summary.";
+    }
+  });
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
