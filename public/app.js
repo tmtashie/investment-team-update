@@ -8,6 +8,8 @@ const logoutButton = document.getElementById("logoutButton");
 const menuToggleButton = document.getElementById("menuToggleButton");
 const workspaceMenu = document.getElementById("workspaceMenu");
 const brandSubtitle = document.querySelector(".brand-subtitle");
+const dashboardSection = document.getElementById("dashboardSection");
+const entityPerformanceSection = document.getElementById("entityPerformanceSection");
 const form = document.getElementById("investmentForm");
 const loadCompanyDetailsButton = document.getElementById("loadCompanyDetailsButton");
 const formMessage = document.getElementById("formMessage");
@@ -130,11 +132,19 @@ let savingAllReconciliation = false;
 let latestCompanySummaryContext = null;
 let activePortfolioPreset = "";
 const DEFAULT_BRAND_SUBTITLE = "Family office investment workspace";
-const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Family office performance dashboard";
+const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Private family office reporting dashboard";
 const DEFAULT_HERO_COPY =
   "A cleaner family office dashboard for tracking investments, entity exposure, research, documents, decisions, and follow-on capital from one disciplined source of truth.";
 const DASHBOARD_VIEWER_HERO_COPY =
-  "A private family office summary for reviewing entity exposure, committed capital, called capital, and portfolio marks from one disciplined source of truth.";
+  "A private reporting view for reviewing entity exposure, committed capital, called capital, and current portfolio marks across the family office.";
+const DEFAULT_DASHBOARD_COPY =
+  "Track pipeline size, marks, and company activity from the BVB home dashboard.";
+const DASHBOARD_VIEWER_DASHBOARD_COPY =
+  "Review top-line portfolio activity, capital exposure, and current marks across the family office.";
+const DEFAULT_ENTITY_PERFORMANCE_COPY =
+  "See committed capital, called capital, marks, and performance by family office entity.";
+const DASHBOARD_VIEWER_ENTITY_PERFORMANCE_COPY =
+  "Review committed capital, called capital, current marks, and performance by family office entity.";
 
 const moneyFieldNames = [
   "amount",
@@ -589,6 +599,8 @@ function renderUploadedDocuments() {
 function renderRoleState() {
   const editable = canEditWorkspace();
   const dashboardViewer = isDashboardViewer();
+  const dashboardCopy = dashboardSection.querySelector(".section-copy");
+  const entityPerformanceCopy = entityPerformanceSection.querySelector(".section-copy");
   form.classList.toggle("hidden", !editable);
   taskForm.classList.toggle("hidden", !editable);
   sendDigestButton.classList.toggle("hidden", !editable);
@@ -596,7 +608,15 @@ function renderRoleState() {
   if (dashboardViewer) {
     workspaceMenu.classList.add("hidden");
   }
+  emailStatus.classList.toggle("hidden", dashboardViewer);
   recipientStatus.classList.toggle("hidden", dashboardViewer);
+  roleNotice.classList.toggle("hidden", dashboardViewer);
+  dashboardCopy.textContent = dashboardViewer
+    ? DASHBOARD_VIEWER_DASHBOARD_COPY
+    : DEFAULT_DASHBOARD_COPY;
+  entityPerformanceCopy.textContent = dashboardViewer
+    ? DASHBOARD_VIEWER_ENTITY_PERFORMANCE_COPY
+    : DEFAULT_ENTITY_PERFORMANCE_COPY;
   roleNotice.textContent = editable
     ? "Editors can add investments, tasks, documents, and research."
     : dashboardViewer
