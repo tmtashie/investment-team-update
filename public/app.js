@@ -165,6 +165,14 @@ function getDashboardViewerGreeting(user) {
   return `Welcome: ${titleCaseName}`;
 }
 
+function getDashboardViewerBrandSubtitle(user) {
+  const email = String((user && user.email) || "").trim().toLowerCase();
+  if (email === "lee@leebeaman.com") {
+    return "Beaman Family Office";
+  }
+  return DASHBOARD_VIEWER_BRAND_SUBTITLE;
+}
+
 const moneyFieldNames = [
   "amount",
   "officialValue",
@@ -356,7 +364,7 @@ function setSignedInState(user) {
       : `Signed in as ${user.email}${user.role ? ` • ${user.role}` : ""}`
     : "Please sign in to view updates";
   brandSubtitle.textContent = dashboardViewer
-    ? DASHBOARD_VIEWER_BRAND_SUBTITLE
+    ? getDashboardViewerBrandSubtitle(user)
     : DEFAULT_BRAND_SUBTITLE;
   heroCopy.textContent = dashboardViewer ? DASHBOARD_VIEWER_HERO_COPY : DEFAULT_HERO_COPY;
 
