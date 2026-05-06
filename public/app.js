@@ -10,6 +10,7 @@ const workspaceMenu = document.getElementById("workspaceMenu");
 const brandSubtitle = document.querySelector(".brand-subtitle");
 const heroTopline = document.querySelector(".hero-topline");
 const heroTitle = document.querySelector(".brand-title");
+const heroThesis = document.querySelector(".hero-thesis");
 const brandLockupEyebrow = document.querySelector(".brand-lockup .eyebrow");
 const dashboardSection = document.getElementById("dashboardSection");
 const entityPerformanceSection = document.getElementById("entityPerformanceSection");
@@ -139,7 +140,8 @@ const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Private family office reporting dashboa
 const DEFAULT_HERO_COPY =
   "A cleaner family office dashboard for tracking investments, entity exposure, research, documents, decisions, and follow-on capital from one disciplined source of truth.";
 const DASHBOARD_VIEWER_HERO_COPY =
-  "A private dashboard for reviewing committed capital, called capital, and current portfolio marks across the family office.";
+  "Portfolio dashboard for internal family office review.";
+const DEFAULT_HERO_THESIS = "Stewarding assets, growing wealth, and pursuing bold ideas.";
 const DEFAULT_DASHBOARD_COPY =
   "Track pipeline size, marks, and company activity from the BVB home dashboard.";
 const DASHBOARD_VIEWER_DASHBOARD_COPY =
@@ -174,6 +176,14 @@ function getDashboardViewerBrandSubtitle(user) {
     return "Beaman Family Office";
   }
   return DASHBOARD_VIEWER_BRAND_SUBTITLE;
+}
+
+function getDashboardViewerHeroThesis(user) {
+  const email = String((user && user.email) || "").trim().toLowerCase();
+  if (email === "lee@leebeaman.com") {
+    return "Welcome: Lee Beaman";
+  }
+  return getDashboardViewerGreeting(user);
 }
 
 const moneyFieldNames = [
@@ -369,6 +379,9 @@ function setSignedInState(user) {
   brandSubtitle.textContent = dashboardViewer
     ? getDashboardViewerBrandSubtitle(user)
     : DEFAULT_BRAND_SUBTITLE;
+  heroThesis.textContent = dashboardViewer
+    ? getDashboardViewerHeroThesis(user)
+    : DEFAULT_HERO_THESIS;
   heroCopy.textContent = dashboardViewer ? DASHBOARD_VIEWER_HERO_COPY : DEFAULT_HERO_COPY;
 
   workspaceMenuLinks.forEach((link) => {
@@ -641,6 +654,7 @@ function renderRoleState() {
   heroTopline.classList.toggle("hidden", dashboardViewer);
   heroTitle.classList.toggle("hidden", dashboardViewer);
   brandLockupEyebrow.classList.toggle("hidden", dashboardViewer);
+  authStatus.classList.toggle("hidden", dashboardViewer);
   emailStatus.classList.toggle("hidden", dashboardViewer);
   recipientStatus.classList.toggle("hidden", dashboardViewer);
   roleNotice.classList.toggle("hidden", dashboardViewer);
