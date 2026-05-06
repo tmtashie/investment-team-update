@@ -128,6 +128,7 @@ let digestStatus = {
 let dirtyReconciliationRows = new Set();
 let savingAllReconciliation = false;
 let latestCompanySummaryContext = null;
+let activePortfolioPreset = "";
 const DEFAULT_BRAND_SUBTITLE = "Family office investment workspace";
 const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Family office performance dashboard";
 const DEFAULT_HERO_COPY =
@@ -609,7 +610,8 @@ function currentFilters() {
     search: searchFilter.value.trim().toLowerCase(),
     status: statusFilter.value,
     stage: stageFilter.value,
-    owner: ownerFilter.value
+    owner: ownerFilter.value,
+    portfolioPreset: activePortfolioPreset
   };
 }
 
@@ -719,8 +721,19 @@ function filterInvestments(investments) {
     const matchesStatus = !filters.status || statusEquals(investment.status, filters.status);
     const matchesStage = !filters.stage || investment.stage === filters.stage;
     const matchesOwner = !filters.owner || investment.owner === filters.owner;
+    const matchesPipelinePreset =
+      filters.portfolioPreset !== "pipeline" ||
+      isPipelineStatus(investment.status) ||
+      isPipelineStatus(investment.stage);
 
-    return matchesEntity && matchesSearch && matchesStatus && matchesStage && matchesOwner;
+    return (
+      matchesEntity &&
+      matchesSearch &&
+      matchesStatus &&
+      matchesStage &&
+      matchesOwner &&
+      matchesPipelinePreset
+    );
   });
 }
 
@@ -1432,11 +1445,11 @@ function buildDashboardCards(investments) {
   const cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
     { label: "Companies", value: String(companySummaries.length), action: "portfolio" },
-    { label: "Pipeline deals", value: String(openCount), action: "portfolio" },
+    { label: "Pipeline deals", value: String(openCount), action: "pipeline" },
     {
       label: "Pipeline amount",
       value: formatMoney(openPipelineAmount),
-      action: "portfolio"
+      action: "pipeline"
     },
     {
       label: "Approved",
@@ -4275,8 +4288,12 @@ cancelTaskEditButton.addEventListener("click", () => {
 });
 
 [entityFilter, searchFilter, statusFilter, stageFilter, ownerFilter].forEach((element) => {
-  element.addEventListener("input", renderAll);
-  element.addEventListener("change", renderAll);
+  const clearPresetAndRender = () => {
+    activePortfolioPreset = "";
+    renderAll();
+  };
+  element.addEventListener("input", clearPresetAndRender);
+  element.addEventListener("change", clearPresetAndRender);
 });
 
 uploadedDocumentsList.addEventListener("click", (event) => {
@@ -4358,8 +4375,22 @@ dashboardCards.addEventListener("click", (event) => {
   }
 
   if (action === "portfolio") {
+    activePortfolioPreset = "";
     if (statusFilter) {
       statusFilter.value = status || "";
+    }
+    renderDashboard(allInvestments);
+    renderEntityDetail();
+    renderCompanyPanel();
+    showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  if (action === "pipeline") {
+    activePortfolioPreset = "pipeline";
+    if (statusFilter) {
+      statusFilter.value = "";
     }
     renderDashboard(allInvestments);
     renderEntityDetail();
