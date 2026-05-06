@@ -136,7 +136,7 @@ const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Private family office reporting dashboa
 const DEFAULT_HERO_COPY =
   "A cleaner family office dashboard for tracking investments, entity exposure, research, documents, decisions, and follow-on capital from one disciplined source of truth.";
 const DASHBOARD_VIEWER_HERO_COPY =
-  "A private reporting view for reviewing entity exposure, committed capital, called capital, and current portfolio marks across the family office.";
+  "A private dashboard for reviewing committed capital, called capital, and current portfolio marks across the family office.";
 const DEFAULT_DASHBOARD_COPY =
   "Track pipeline size, marks, and company activity from the BVB home dashboard.";
 const DASHBOARD_VIEWER_DASHBOARD_COPY =
@@ -145,6 +145,25 @@ const DEFAULT_ENTITY_PERFORMANCE_COPY =
   "See committed capital, called capital, marks, and performance by family office entity.";
 const DASHBOARD_VIEWER_ENTITY_PERFORMANCE_COPY =
   "Review committed capital, called capital, current marks, and performance by family office entity.";
+
+function getDashboardViewerGreeting(user) {
+  const email = String((user && user.email) || "").trim().toLowerCase();
+  if (!email) {
+    return "Welcome";
+  }
+  if (email === "lee@leebeaman.com") {
+    return "Welcome: Lee Beaman";
+  }
+  const namePart = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  if (!namePart) {
+    return "Welcome";
+  }
+  const titleCaseName = namePart
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+  return `Welcome: ${titleCaseName}`;
+}
 
 const moneyFieldNames = [
   "amount",
@@ -333,7 +352,7 @@ function setSignedInState(user) {
   logoutButton.classList.toggle("hidden", !isSignedIn);
   authStatus.textContent = isSignedIn
     ? dashboardViewer
-      ? `Family dashboard access • ${user.email}`
+      ? getDashboardViewerGreeting(user)
       : `Signed in as ${user.email}${user.role ? ` • ${user.role}` : ""}`
     : "Please sign in to view updates";
   brandSubtitle.textContent = dashboardViewer
@@ -1462,7 +1481,7 @@ function buildDashboardCards(investments) {
   const officialNav = sumEntityRows(allEntityRows, (row) => row.performance.officialValue);
   const internalNav = sumEntityRows(allEntityRows, (row) => row.performance.internalValue);
 
-  const cards = [
+  let cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
     { label: "Companies", value: String(companySummaries.length), action: "portfolio" },
     { label: "Pipeline deals", value: String(openCount), action: "pipeline" },
@@ -1484,6 +1503,10 @@ function buildDashboardCards(investments) {
     { label: "Official NAV", value: formatMoney(officialNav), action: "portfolio" },
     { label: "Internal NAV", value: formatMoney(internalNav), action: "portfolio" }
   ];
+
+  if (isDashboardViewer()) {
+    cards = cards.filter((card) => !["Open reminders", "Data alerts"].includes(card.label));
+  }
 
   const entityTotals = (configuredEntities.length ? configuredEntities.map(normalizeEntityName) : [])
     .map((entity) => ({
