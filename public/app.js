@@ -8,6 +8,9 @@ const logoutButton = document.getElementById("logoutButton");
 const menuToggleButton = document.getElementById("menuToggleButton");
 const workspaceMenu = document.getElementById("workspaceMenu");
 const brandSubtitle = document.querySelector(".brand-subtitle");
+const heroTopline = document.querySelector(".hero-topline");
+const heroTitle = document.querySelector(".brand-title");
+const brandLockupEyebrow = document.querySelector(".brand-lockup .eyebrow");
 const dashboardSection = document.getElementById("dashboardSection");
 const entityPerformanceSection = document.getElementById("entityPerformanceSection");
 const form = document.getElementById("investmentForm");
@@ -635,6 +638,9 @@ function renderRoleState() {
   if (dashboardViewer) {
     workspaceMenu.classList.add("hidden");
   }
+  heroTopline.classList.toggle("hidden", dashboardViewer);
+  heroTitle.classList.toggle("hidden", dashboardViewer);
+  brandLockupEyebrow.classList.toggle("hidden", dashboardViewer);
   emailStatus.classList.toggle("hidden", dashboardViewer);
   recipientStatus.classList.toggle("hidden", dashboardViewer);
   roleNotice.classList.toggle("hidden", dashboardViewer);
