@@ -78,6 +78,9 @@ const statusFilter = document.getElementById("statusFilter");
 const stageFilter = document.getElementById("stageFilter");
 const ownerFilter = document.getElementById("ownerFilter");
 const aiAnalystSection = document.getElementById("aiAnalystSection");
+const aiAnalystWidgetToggleButton = document.getElementById("aiAnalystWidgetToggleButton");
+const aiAnalystWidgetMinimizeButton = document.getElementById("aiAnalystWidgetMinimizeButton");
+const aiAnalystWidgetCloseButton = document.getElementById("aiAnalystWidgetCloseButton");
 const aiAnalystCompanyField = document.getElementById("aiAnalystCompanyField");
 const aiAnalystEntityField = document.getElementById("aiAnalystEntityField");
 const aiAnalystPromptField = document.getElementById("aiAnalystPromptField");
@@ -148,8 +151,11 @@ let savingAllReconciliation = false;
 let latestCompanySummaryContext = null;
 let latestAiAnalystResult = null;
 let investmentSummaryAiNotes = null;
+let aiAnalystWidgetMinimized = false;
 let activePortfolioPreset = "";
 const DEFAULT_BRAND_SUBTITLE = "Family office investment workspace";
+const DEFAULT_BRAND_EYEBROW = "BVB";
+const DEFAULT_HERO_TITLE = "BVB";
 const DASHBOARD_VIEWER_BRAND_SUBTITLE = "Private family office reporting dashboard";
 const DEFAULT_HERO_COPY =
   "A cleaner family office dashboard for tracking investments, entity exposure, research, documents, decisions, and follow-on capital from one disciplined source of truth.";
@@ -393,6 +399,16 @@ function setSignedInState(user) {
   brandSubtitle.textContent = dashboardViewer
     ? getDashboardViewerBrandSubtitle(user)
     : DEFAULT_BRAND_SUBTITLE;
+  if (brandLockupEyebrow) {
+    brandLockupEyebrow.textContent = dashboardViewer ? "" : DEFAULT_BRAND_EYEBROW;
+  }
+  const heroToplineEyebrow = heroTopline ? heroTopline.querySelector(".eyebrow") : null;
+  if (heroToplineEyebrow) {
+    heroToplineEyebrow.textContent = dashboardViewer ? "" : DEFAULT_BRAND_EYEBROW;
+  }
+  if (heroTitle) {
+    heroTitle.textContent = dashboardViewer ? "" : DEFAULT_HERO_TITLE;
+  }
   heroThesis.textContent = dashboardViewer
     ? getDashboardViewerHeroThesis(user)
     : DEFAULT_HERO_THESIS;
@@ -408,6 +424,9 @@ function setSignedInState(user) {
       activeWorkspaceView = "home";
     }
     showWorkspaceView(activeWorkspaceView);
+    syncAiAnalystWidgetAvailability();
+  } else {
+    setAiAnalystWidgetOpen(false);
   }
 }
 
@@ -455,6 +474,61 @@ function canAccessWorkspaceView(viewName) {
 
 function canOpenCompanyDetails() {
   return !isDashboardViewer();
+}
+
+function canUseAiAnalyst() {
+  return Boolean(currentUser) && !isDashboardViewer();
+}
+
+function setAiAnalystWidgetMinimized(minimized) {
+  aiAnalystWidgetMinimized = Boolean(minimized);
+  if (!aiAnalystSection) {
+    return;
+  }
+
+  aiAnalystSection.classList.toggle("ai-analyst-widget-panel-minimized", aiAnalystWidgetMinimized);
+  if (aiAnalystWidgetMinimizeButton) {
+    aiAnalystWidgetMinimizeButton.textContent = aiAnalystWidgetMinimized ? "Expand" : "Minimize";
+    aiAnalystWidgetMinimizeButton.setAttribute(
+      "aria-label",
+      aiAnalystWidgetMinimized ? "Expand AI Analyst" : "Minimize AI Analyst"
+    );
+  }
+}
+
+function setAiAnalystWidgetOpen(isOpen, options = {}) {
+  const shouldOpen = Boolean(isOpen) && canUseAiAnalyst();
+
+  if (aiAnalystWidgetToggleButton) {
+    aiAnalystWidgetToggleButton.classList.toggle("hidden", !canUseAiAnalyst());
+    aiAnalystWidgetToggleButton.classList.toggle("is-open", shouldOpen);
+    aiAnalystWidgetToggleButton.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+  }
+
+  if (!aiAnalystSection) {
+    return;
+  }
+
+  aiAnalystSection.classList.toggle("hidden", !shouldOpen);
+  aiAnalystSection.setAttribute("aria-hidden", shouldOpen ? "false" : "true");
+
+  if (shouldOpen) {
+    setAiAnalystWidgetMinimized(false);
+    if (options.focusInput && aiAnalystPromptField) {
+      aiAnalystPromptField.focus();
+    }
+  }
+}
+
+function syncAiAnalystWidgetAvailability() {
+  if (!canUseAiAnalyst()) {
+    setAiAnalystWidgetOpen(false);
+    return;
+  }
+
+  if (aiAnalystWidgetToggleButton) {
+    aiAnalystWidgetToggleButton.classList.remove("hidden");
+  }
 }
 
 function clearAiAnalystState(resetFields = false) {
@@ -524,7 +598,7 @@ function applyAiAnalystTemplate(template) {
 }
 
 function openAiAnalystForSelectedCompany() {
-  if (!aiAnalystSection || !canAccessWorkspaceView("analyst")) {
+  if (!aiAnalystSection || !canUseAiAnalyst()) {
     return;
   }
 
@@ -538,8 +612,7 @@ function openAiAnalystForSelectedCompany() {
     aiAnalystPromptField.value = `Summarize ${selectedCompany} for Lee. Include the main risks, what is missing, and recommended next steps.`;
   }
 
-  showWorkspaceView("analyst");
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  setAiAnalystWidgetOpen(true, { focusInput: !selectedCompany });
 }
 
 function selectedDeckFile() {
@@ -763,6 +836,7 @@ function renderRoleState() {
   entityPerformanceCopy.textContent = dashboardViewer
     ? DASHBOARD_VIEWER_ENTITY_PERFORMANCE_COPY
     : DEFAULT_ENTITY_PERFORMANCE_COPY;
+  syncAiAnalystWidgetAvailability();
   roleNotice.textContent = editable
     ? "Editors can add investments, tasks, documents, and research."
     : dashboardViewer
@@ -4170,6 +4244,25 @@ if (openAiAnalystButton) {
   });
 }
 
+if (aiAnalystWidgetToggleButton) {
+  aiAnalystWidgetToggleButton.addEventListener("click", () => {
+    const shouldOpen = aiAnalystSection ? aiAnalystSection.classList.contains("hidden") : true;
+    setAiAnalystWidgetOpen(shouldOpen, { focusInput: shouldOpen });
+  });
+}
+
+if (aiAnalystWidgetMinimizeButton) {
+  aiAnalystWidgetMinimizeButton.addEventListener("click", () => {
+    setAiAnalystWidgetMinimized(!aiAnalystWidgetMinimized);
+  });
+}
+
+if (aiAnalystWidgetCloseButton) {
+  aiAnalystWidgetCloseButton.addEventListener("click", () => {
+    setAiAnalystWidgetOpen(false);
+  });
+}
+
 if (aiAnalystSection) {
   aiAnalystSection.addEventListener("click", (event) => {
     const templateButton = event.target.closest("[data-analyst-template]");
@@ -4668,9 +4761,7 @@ dashboardCards.addEventListener("click", (event) => {
     if (statusFilter) {
       statusFilter.value = status || "";
     }
-    renderDashboard(allInvestments);
-    renderEntityDetail();
-    renderCompanyPanel();
+    renderAll();
     showWorkspaceView("portfolio");
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
@@ -4681,9 +4772,7 @@ dashboardCards.addEventListener("click", (event) => {
     if (statusFilter) {
       statusFilter.value = "";
     }
-    renderDashboard(allInvestments);
-    renderEntityDetail();
-    renderCompanyPanel();
+    renderAll();
     showWorkspaceView("portfolio");
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;

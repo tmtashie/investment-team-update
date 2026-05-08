@@ -31,7 +31,6 @@
         <nav id="workspaceMenu" class="workspace-menu hidden" aria-label="Workspace navigation">
           <button type="button" class="menu-link is-active" data-view="home">Home</button>
           <button type="button" class="menu-link" data-view="capture">Add investment / AI research</button>
-          <button type="button" class="menu-link" data-view="analyst">AI Analyst</button>
           <button type="button" class="menu-link" data-view="portfolio">Current investments</button>
           <button type="button" class="menu-link" data-view="research">Decks and notes</button>
           <button type="button" class="menu-link" data-view="tasks">Tasks and reminders</button>
@@ -844,95 +843,6 @@
           </div>
         </section>
 
-        <section id="aiAnalystSection" class="panel workspace-view hidden" data-view="analyst">
-          <div class="panel-header panel-header-stack">
-            <div>
-              <h2>AI Analyst</h2>
-              <p class="section-copy">
-                Ask for Lee-ready summaries, portfolio attention lists, diligence questions, risk reviews, and draft update emails using the investment data already in the workspace.
-              </p>
-            </div>
-          </div>
-          <div class="company-detail-grid">
-            <section class="company-detail-card company-detail-card-span-2">
-              <div class="company-section-heading">
-                <p class="dashboard-label">Context</p>
-                <h3>Focus the analyst on the right investment</h3>
-              </div>
-              <div class="two-up">
-                <label>
-                  Company
-                  <input
-                    id="aiAnalystCompanyField"
-                    type="text"
-                    placeholder="Optional: HavenLock"
-                    list="companySuggestions"
-                  />
-                </label>
-                <label>
-                  Entity
-                  <select id="aiAnalystEntityField">
-                    <option value="">Any entity</option>
-                    <option value="Beaman Ventures">Beaman Ventures</option>
-                    <option value="Lee Beaman">Lee Beaman</option>
-                    <option value="Katherine Trust">Katherine Trust</option>
-                    <option value="Natalie Trust">Natalie Trust</option>
-                  </select>
-                </label>
-              </div>
-              <div class="ai-analyst-chip-row">
-                <button type="button" class="secondary-button ai-analyst-chip" data-analyst-template="Summarize {{company}} for Lee.">
-                  Summarize for Lee
-                </button>
-                <button type="button" class="secondary-button ai-analyst-chip" data-analyst-template="What investments need attention?">
-                  Need attention
-                </button>
-                <button type="button" class="secondary-button ai-analyst-chip" data-analyst-template="What are the main risks in {{company}}?">
-                  Main risks
-                </button>
-                <button type="button" class="secondary-button ai-analyst-chip" data-analyst-template="Draft an email asking for an update on {{company}}.">
-                  Draft update email
-                </button>
-                <button type="button" class="secondary-button ai-analyst-chip" data-analyst-template="Create an IC-style summary for {{company}}.">
-                  IC-style summary
-                </button>
-              </div>
-              <label>
-                Ask the AI Analyst
-                <textarea
-                  id="aiAnalystPromptField"
-                  rows="6"
-                  placeholder="Ask about one investment or the portfolio overall. Example: Summarize HavenLock for Lee and call out the biggest risks, missing information, and recommended next steps."
-                ></textarea>
-              </label>
-              <div class="form-actions">
-                <button id="askAiAnalystButton" type="button">Ask AI Analyst</button>
-                <button id="clearAiAnalystButton" type="button" class="secondary-button">
-                  Clear
-                </button>
-                <button
-                  id="useAiAnalystInSummaryButton"
-                  type="button"
-                  class="secondary-button hidden"
-                >
-                  Use this in Investment Summary
-                </button>
-              </div>
-              <p id="aiAnalystMessage" class="form-message" aria-live="polite"></p>
-            </section>
-
-            <section id="aiAnalystResponseCard" class="company-detail-card company-detail-card-span-2 hidden">
-              <div class="company-section-heading">
-                <p class="dashboard-label">Response</p>
-                <h3 id="aiAnalystContextLabel">Portfolio-wide analysis</h3>
-              </div>
-              <div class="ai-analyst-response-shell">
-                <div id="aiAnalystResponseBody" class="ai-analyst-response-body"></div>
-              </div>
-            </section>
-          </div>
-        </section>
-
         <section id="currentInvestmentsSection" class="panel workspace-view hidden" data-view="portfolio">
           <div class="panel-header">
             <div>
@@ -1024,6 +934,134 @@
             </div>
           </div>
           <div id="reconciliationList" class="reconciliation-list"></div>
+        </section>
+
+        <button
+          id="aiAnalystWidgetToggleButton"
+          type="button"
+          class="ai-analyst-widget-toggle hidden"
+          aria-controls="aiAnalystSection"
+          aria-expanded="false"
+        >
+          AI Analyst
+        </button>
+
+        <section id="aiAnalystSection" class="ai-analyst-widget-panel hidden" aria-label="AI Analyst">
+          <div class="ai-analyst-widget-header">
+            <div>
+              <p class="dashboard-label">AI Analyst</p>
+              <h3>Portfolio and investment chat</h3>
+            </div>
+            <div class="ai-analyst-widget-controls">
+              <button
+                id="aiAnalystWidgetMinimizeButton"
+                type="button"
+                class="secondary-button inline-action-button"
+                aria-label="Minimize AI Analyst"
+              >
+                Minimize
+              </button>
+              <button
+                id="aiAnalystWidgetCloseButton"
+                type="button"
+                class="secondary-button inline-action-button"
+                aria-label="Close AI Analyst"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          <div class="ai-analyst-widget-content">
+            <div class="ai-analyst-widget-context two-up">
+              <label>
+                Company
+                <input
+                  id="aiAnalystCompanyField"
+                  type="text"
+                  placeholder="Optional: HavenLock"
+                  list="companySuggestions"
+                />
+              </label>
+              <label>
+                Entity
+                <select id="aiAnalystEntityField">
+                  <option value="">Any entity</option>
+                  <option value="Beaman Ventures">Beaman Ventures</option>
+                  <option value="Lee Beaman">Lee Beaman</option>
+                  <option value="Katherine Trust">Katherine Trust</option>
+                  <option value="Natalie Trust">Natalie Trust</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="ai-analyst-chip-row ai-analyst-widget-chips">
+              <button
+                type="button"
+                class="secondary-button ai-analyst-chip"
+                data-analyst-template="What investments need attention?"
+              >
+                What needs attention?
+              </button>
+              <button
+                type="button"
+                class="secondary-button ai-analyst-chip"
+                data-analyst-template="Summarize this portfolio for Lee. Highlight what changed, the main risks, and the next steps."
+              >
+                Summarize this portfolio
+              </button>
+              <button
+                type="button"
+                class="secondary-button ai-analyst-chip"
+                data-analyst-template="Draft an internal-ready portfolio update for Lee covering the most important changes and follow-ups."
+              >
+                Draft internal-ready update
+              </button>
+              <button
+                type="button"
+                class="secondary-button ai-analyst-chip"
+                data-analyst-template="What are the top risks this week across the portfolio?"
+              >
+                Top risks this week
+              </button>
+            </div>
+
+            <section id="aiAnalystResponseCard" class="ai-analyst-widget-response-card hidden">
+              <div class="company-section-heading">
+                <p class="dashboard-label">Response</p>
+                <h3 id="aiAnalystContextLabel">Portfolio-wide analysis</h3>
+              </div>
+              <div class="ai-analyst-response-shell ai-analyst-widget-response-shell">
+                <div id="aiAnalystResponseBody" class="ai-analyst-response-body"></div>
+              </div>
+            </section>
+
+            <p id="aiAnalystMessage" class="form-message ai-analyst-widget-message" aria-live="polite"></p>
+
+            <div class="ai-analyst-widget-input-shell">
+              <label>
+                Ask the AI Analyst
+                <textarea
+                  id="aiAnalystPromptField"
+                  rows="5"
+                  placeholder="Ask about one investment or the portfolio overall. Example: Summarize HavenLock for Lee and call out the biggest risks, missing information, and recommended next steps."
+                ></textarea>
+              </label>
+              <div class="form-actions ai-analyst-widget-actions">
+                <button id="askAiAnalystButton" type="button">Ask AI Analyst</button>
+                <button id="clearAiAnalystButton" type="button" class="secondary-button">
+                  Clear
+                </button>
+                <button
+                  id="useAiAnalystInSummaryButton"
+                  type="button"
+                  class="secondary-button hidden"
+                >
+                  Use this in Investment Summary
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
       </section>
     </main>
