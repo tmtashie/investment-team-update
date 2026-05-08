@@ -366,6 +366,8 @@ function normalizeStructuredRow(row, fallback = {}) {
     date: String(row.date || fallback.date || "").trim(),
     type: String(row.type || fallback.type || "").trim(),
     title: String(row.title || fallback.title || "").trim(),
+    reportPeriod: String(row.reportPeriod || fallback.reportPeriod || "").trim(),
+    sourceType: String(row.sourceType || fallback.sourceType || "").trim(),
     amount: String(row.amount || fallback.amount || "").trim(),
     officialValue: String(row.officialValue || fallback.officialValue || "").trim(),
     internalValue: String(row.internalValue || fallback.internalValue || "").trim(),
@@ -374,6 +376,13 @@ function normalizeStructuredRow(row, fallback = {}) {
     entityPercent: String(row.entityPercent || fallback.entityPercent || "").trim(),
     notes: String(row.notes || fallback.notes || "").trim(),
     summary: String(row.summary || fallback.summary || "").trim(),
+    originalNotes: String(row.originalNotes || fallback.originalNotes || "").trim(),
+    aiSummary: String(row.aiSummary || fallback.aiSummary || "").trim(),
+    keyWins: String(row.keyWins || fallback.keyWins || "").trim(),
+    keyRisks: String(row.keyRisks || fallback.keyRisks || "").trim(),
+    keyMetrics: String(row.keyMetrics || fallback.keyMetrics || "").trim(),
+    actionItems: String(row.actionItems || fallback.actionItems || "").trim(),
+    attachmentLink: String(row.attachmentLink || fallback.attachmentLink || "").trim(),
     sourceUpdateId: String(row.sourceUpdateId || fallback.sourceUpdateId || "").trim()
   };
 }
@@ -556,6 +565,7 @@ function normalizeInvestment(entry) {
     decisionType,
     decisionSummary,
     researchEntries: normalizeStructuredRows(entry.researchEntries, fallbackResearchEntries),
+    reportUpdates: normalizeStructuredRows(entry.reportUpdates),
     capitalActivity: normalizedCapitalActivity,
     valuationHistory: normalizeStructuredRows(entry.valuationHistory, fallbackValuationHistory),
     ownershipHistory: normalizeStructuredRows(entry.ownershipHistory, fallbackOwnershipHistory),
@@ -1177,6 +1187,16 @@ function buildCompanyRecords(investments, tasks = [], companyDocuments = []) {
         },
         updates,
         researchEntries: sortStructuredRows(updates.flatMap((investment) => investment.researchEntries || [])),
+        reportUpdates: sortStructuredRows(
+          updates.flatMap((investment) =>
+            (investment.reportUpdates || []).map((report) => ({
+              ...report,
+              entity: investment.entity,
+              currency: investment.currency,
+              sourceUpdateId: report.sourceUpdateId || investment.id
+            }))
+          )
+        ),
         capitalActivities: sortStructuredRows(
           updates.flatMap((investment) =>
             (investment.capitalActivity || []).map((activity) => ({
@@ -1892,6 +1912,20 @@ function buildCompanyAnalystContext(company) {
       date: textOrNull(row.date),
       type: textOrNull(row.type),
       summary: textOrNull(row.summary)
+    })),
+    reportUpdates: limitRows(company.reportUpdates, 6).map((row) => ({
+      date: textOrNull(row.date),
+      reportPeriod: textOrNull(row.reportPeriod),
+      type: textOrNull(row.type),
+      sourceType: textOrNull(row.sourceType),
+      title: textOrNull(row.title),
+      originalNotes: textOrNull(row.originalNotes),
+      aiSummary: textOrNull(row.aiSummary),
+      keyWins: textOrNull(row.keyWins),
+      keyRisks: textOrNull(row.keyRisks),
+      keyMetrics: textOrNull(row.keyMetrics),
+      actionItems: textOrNull(row.actionItems),
+      attachmentLink: textOrNull(row.attachmentLink)
     })),
     documents: limitRows(company.documents, 5).map((row) => row.name).filter(Boolean),
     openTasks: limitRows(openTasks, 5).map((task) => ({
@@ -3346,6 +3380,7 @@ function validateSubmission(payload, sessionUser) {
     decisionDate: payload.decisionDate,
     decisionType: payload.decisionType,
     decisionSummary: payload.decisionSummary,
+    reportUpdates: payload.reportUpdates,
     recipients: payload.recipients,
     submittedBy: sessionUser.email,
     createdAt: new Date().toISOString()
@@ -3403,6 +3438,9 @@ function validateInvestmentPatch(payload) {
     decisionDate: String(payload.decisionDate || "").trim(),
     decisionType: String(payload.decisionType || "").trim(),
     decisionSummary: String(payload.decisionSummary || "").trim(),
+    ...(payload.reportUpdates !== undefined
+      ? { reportUpdates: normalizeStructuredRows(payload.reportUpdates) }
+      : {}),
     recipients: Array.isArray(payload.recipients)
       ? payload.recipients.map((value) => String(value).trim()).filter(Boolean)
       : []

@@ -113,6 +113,40 @@ const companyNextSteps = document.getElementById("companyNextSteps");
 const companyFollowOnCapital = document.getElementById("companyFollowOnCapital");
 const companyValuationHistory = document.getElementById("companyValuationHistory");
 const companyTimeline = document.getElementById("companyTimeline");
+const reportUpdateTypeFilter = document.getElementById("reportUpdateTypeFilter");
+const reportUpdatePeriodFilter = document.getElementById("reportUpdatePeriodFilter");
+const addReportUpdateButton = document.getElementById("addReportUpdateButton");
+const compareLatestReportUpdatesButton = document.getElementById(
+  "compareLatestReportUpdatesButton"
+);
+const generateAllReportSummaryButton = document.getElementById(
+  "generateAllReportSummaryButton"
+);
+const reportUpdateComposer = document.getElementById("reportUpdateComposer");
+const reportUpdateDateField = document.getElementById("reportUpdateDateField");
+const reportUpdatePeriodField = document.getElementById("reportUpdatePeriodField");
+const reportUpdateTypeField = document.getElementById("reportUpdateTypeField");
+const reportUpdateSourceTypeField = document.getElementById("reportUpdateSourceTypeField");
+const reportUpdateTitleField = document.getElementById("reportUpdateTitleField");
+const reportUpdateOriginalNotesField = document.getElementById("reportUpdateOriginalNotesField");
+const reportUpdateAiSummaryField = document.getElementById("reportUpdateAiSummaryField");
+const reportUpdateKeyMetricsField = document.getElementById("reportUpdateKeyMetricsField");
+const reportUpdateKeyWinsField = document.getElementById("reportUpdateKeyWinsField");
+const reportUpdateKeyRisksField = document.getElementById("reportUpdateKeyRisksField");
+const reportUpdateActionItemsField = document.getElementById("reportUpdateActionItemsField");
+const reportUpdateAttachmentField = document.getElementById("reportUpdateAttachmentField");
+const summarizeReportUpdateDraftButton = document.getElementById(
+  "summarizeReportUpdateDraftButton"
+);
+const saveReportUpdateButton = document.getElementById("saveReportUpdateButton");
+const cancelReportUpdateButton = document.getElementById("cancelReportUpdateButton");
+const reportUpdateMessage = document.getElementById("reportUpdateMessage");
+const reportUpdateInsightPanel = document.getElementById("reportUpdateInsightPanel");
+const reportUpdateInsightTitle = document.getElementById("reportUpdateInsightTitle");
+const reportUpdateInsightBody = document.getElementById("reportUpdateInsightBody");
+const useReportInsightInSummaryButton = document.getElementById("useReportInsightInSummaryButton");
+const closeReportUpdateInsightButton = document.getElementById("closeReportUpdateInsightButton");
+const reportUpdatesList = document.getElementById("reportUpdatesList");
 const closeCompanyPanelButton = document.getElementById("closeCompanyPanelButton");
 const taskForm = document.getElementById("taskForm");
 const taskMessage = document.getElementById("taskMessage");
@@ -151,8 +185,25 @@ let savingAllReconciliation = false;
 let latestCompanySummaryContext = null;
 let latestAiAnalystResult = null;
 let investmentSummaryAiNotes = null;
+let latestReportInsight = null;
 let aiAnalystWidgetMinimized = false;
 let activePortfolioPreset = "";
+let reportUpdateFilters = {
+  type: "",
+  period: ""
+};
+
+const REPORT_UPDATE_TYPES = [
+  "Monthly",
+  "Quarterly",
+  "Annual",
+  "Capital Call",
+  "Legal",
+  "Call Notes",
+  "Other"
+];
+
+const REPORT_SOURCE_TYPES = ["PDF", "Email", "Call", "Manual Note", "Other"];
 const DEFAULT_BRAND_SUBTITLE = "Family office investment workspace";
 const DEFAULT_BRAND_EYEBROW = "BVB";
 const DEFAULT_HERO_TITLE = "BVB";
@@ -615,6 +666,181 @@ function openAiAnalystForSelectedCompany() {
   setAiAnalystWidgetOpen(true, { focusInput: !selectedCompany });
 }
 
+function closeReportInsightPanel() {
+  latestReportInsight = null;
+  if (reportUpdateInsightPanel) {
+    reportUpdateInsightPanel.classList.add("hidden");
+  }
+  if (reportUpdateInsightBody) {
+    reportUpdateInsightBody.innerHTML = "";
+  }
+}
+
+function renderReportInsight(title, body, company = selectedCompany, entity = selectedCompanyEntity) {
+  latestReportInsight = {
+    title: String(title || "").trim(),
+    body: String(body || "").trim(),
+    company: String(company || "").trim(),
+    entity: String(entity || "").trim()
+  };
+
+  if (reportUpdateInsightTitle) {
+    reportUpdateInsightTitle.textContent = latestReportInsight.title || "Lee-ready output";
+  }
+  if (reportUpdateInsightBody) {
+    reportUpdateInsightBody.innerHTML = `
+      <article class="timeline-card timeline-card-compact">
+        <pre class="report-insight-text">${escapeHtml(latestReportInsight.body || "Not Available")}</pre>
+      </article>
+    `;
+  }
+  if (reportUpdateInsightPanel) {
+    reportUpdateInsightPanel.classList.remove("hidden");
+    reportUpdateInsightPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function buildInvestmentPatchPayload(investment, overrides = {}) {
+  if (!investment) {
+    return null;
+  }
+
+  return {
+    company: investment.company,
+    entity: investment.entity,
+    amount: investment.amount,
+    currency: investment.currency,
+    stage: investment.stage,
+    status: normalizeStatusName(investment.status) || investment.status,
+    owner: investment.owner,
+    nextStep: investment.nextStep,
+    nextStepDueDate: investment.nextStepDueDate,
+    notes: investment.notes,
+    deckSummary: investment.deckSummary,
+    capitalActivity: normalizeCapitalActivityRows(investment.capitalActivity),
+    valuationDate: investment.valuationDate,
+    officialValue: investment.officialValue,
+    internalValue: investment.internalValue,
+    exitValue: investment.exitValue,
+    ownershipPercent: investment.ownershipPercent,
+    entityOwnershipPercent: investment.entityOwnershipPercent,
+    ownershipNotes: investment.ownershipNotes,
+    followOnCapitalAmount: investment.followOnCapitalAmount,
+    followOnCapitalStatus: investment.followOnCapitalStatus,
+    followOnCapitalNotes: investment.followOnCapitalNotes,
+    contactName: investment.contactName,
+    contactPosition: investment.contactPosition,
+    contactEmail: investment.contactEmail,
+    contactPhone: investment.contactPhone,
+    documentLinks: investment.documentLinks,
+    documents: Array.isArray(investment.documents) ? investment.documents : [],
+    decisionDate: investment.decisionDate,
+    decisionType: investment.decisionType,
+    decisionSummary: investment.decisionSummary,
+    recipients: Array.isArray(investment.recipients) ? investment.recipients : [],
+    reportUpdates: normalizeReportUpdateRows(investment.reportUpdates),
+    ...overrides
+  };
+}
+
+async function saveCompanyReportUpdates(reportUpdates, successMessage = "Report update saved.") {
+  const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+  const latest = companyRecord && companyRecord.latest ? companyRecord.latest : null;
+  if (!latest) {
+    throw new Error("Open an investment record first.");
+  }
+
+  const payload = buildInvestmentPatchPayload(latest, {
+    reportUpdates: normalizeReportUpdateRows(reportUpdates)
+  });
+
+  await fetchJson(`/api/investments/${latest.id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (reportUpdateMessage) {
+    reportUpdateMessage.textContent = successMessage;
+  }
+  await loadUpdates();
+}
+
+function buildReportAnalystPrompt(mode, rows, companyRecord) {
+  const companyName = (companyRecord && companyRecord.latest && companyRecord.latest.company) || selectedCompany || "this investment";
+  const baseInstruction =
+    mode === "compare"
+      ? `Compare the two most recent updates for ${companyName}.`
+      : mode === "lee-single"
+        ? `Create a Lee-ready internal summary for one update on ${companyName}.`
+        : mode === "lee-all"
+          ? `Create a Lee-ready internal summary using all provided updates for ${companyName}.`
+          : `Summarize the provided update for ${companyName}.`;
+
+  const rowsText = normalizeReportUpdateRows(rows)
+    .map(
+      (row, index) => [
+        `Update ${index + 1}:`,
+        `Date received: ${row.date || "Not Available"}`,
+        `Report period: ${row.reportPeriod || "Not Available"}`,
+        `Update type: ${row.type || "Not Available"}`,
+        `Source type: ${row.sourceType || "Not Available"}`,
+        `Title: ${row.title || "Not Available"}`,
+        `Original notes: ${row.originalNotes || "Not Available"}`,
+        `AI summary: ${row.aiSummary || "Not Available"}`,
+        `Key wins: ${row.keyWins || "Not Available"}`,
+        `Key risks: ${row.keyRisks || "Not Available"}`,
+        `Key metrics: ${row.keyMetrics || "Not Available"}`,
+        `Action items: ${row.actionItems || "Not Available"}`,
+        `Attachment: ${row.attachmentLink || "Not Available"}`
+      ].join("\n")
+    )
+    .join("\n\n");
+
+  const endingInstruction =
+    mode === "compare"
+      ? "Focus on what changed, new risks, what improved, what worsened, and what needs follow-up."
+      : mode.startsWith("lee")
+        ? "Use short internal-ready sections: Executive Summary, What Changed, Risks, Key Metrics, Next Steps, Verification Note."
+        : "Summarize the key wins, risks, metrics, and follow-ups.";
+
+  return [baseInstruction, "", rowsText, "", endingInstruction].join("\n");
+}
+
+async function runReportAnalystPrompt(mode, rows, companyRecord, options = {}) {
+  const prompt = buildReportAnalystPrompt(mode, rows, companyRecord);
+  const company =
+    (companyRecord && companyRecord.latest && companyRecord.latest.company) || selectedCompany || "";
+  const entity =
+    normalizeEntityName(
+      (companyRecord && companyRecord.latest && companyRecord.latest.entity) || selectedCompanyEntity || ""
+    ) || "";
+
+  if (reportUpdateMessage) {
+    reportUpdateMessage.textContent = options.loadingMessage || "AI Analyst is reviewing the update...";
+  }
+
+  const result = await fetchJson("/api/ai-agent", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      question: prompt,
+      company,
+      entity
+    })
+  });
+
+  return {
+    answer: String((result && result.answer) || "").trim(),
+    company: company || String((result && result.company) || "").trim(),
+    entity: entity || normalizeEntityName(String((result && result.entity) || "").trim())
+  };
+}
+
 function selectedDeckFile() {
   return deckFile.files && deckFile.files[0] ? deckFile.files[0] : null;
 }
@@ -634,6 +860,209 @@ function normalizeCapitalActivityRows(rows) {
       notes: String((row && row.notes) || "").trim()
     }))
     .filter((row) => row.date || row.type || row.amount || row.notes);
+}
+
+function normalizeReportUpdateRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      date: String((row && row.date) || "").trim(),
+      reportPeriod: String((row && row.reportPeriod) || "").trim(),
+      type: String((row && row.type) || "").trim(),
+      sourceType: String((row && row.sourceType) || "").trim(),
+      title: String((row && row.title) || "").trim(),
+      originalNotes: String((row && row.originalNotes) || "").trim(),
+      aiSummary: String((row && row.aiSummary) || "").trim(),
+      keyWins: String((row && row.keyWins) || "").trim(),
+      keyRisks: String((row && row.keyRisks) || "").trim(),
+      keyMetrics: String((row && row.keyMetrics) || "").trim(),
+      actionItems: String((row && row.actionItems) || "").trim(),
+      attachmentLink: String((row && row.attachmentLink) || "").trim(),
+      sourceUpdateId: String((row && row.sourceUpdateId) || "").trim()
+    }))
+    .filter((row) => Object.values(row).some(Boolean));
+}
+
+function formatDisplayDateOrText(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "Not Available";
+  }
+
+  return formatDisplayDate(text);
+}
+
+function getReportUpdateFilters() {
+  return {
+    type: String((reportUpdateTypeFilter && reportUpdateTypeFilter.value) || "").trim(),
+    period: String((reportUpdatePeriodFilter && reportUpdatePeriodFilter.value) || "").trim()
+  };
+}
+
+function resetReportUpdateComposer() {
+  if (!reportUpdateComposer) {
+    return;
+  }
+
+  reportUpdateDateField.value = "";
+  reportUpdatePeriodField.value = "";
+  reportUpdateTypeField.value = "Monthly";
+  reportUpdateSourceTypeField.value = "PDF";
+  reportUpdateTitleField.value = "";
+  reportUpdateOriginalNotesField.value = "";
+  reportUpdateAiSummaryField.value = "";
+  reportUpdateKeyMetricsField.value = "";
+  reportUpdateKeyWinsField.value = "";
+  reportUpdateKeyRisksField.value = "";
+  reportUpdateActionItemsField.value = "";
+  reportUpdateAttachmentField.value = "";
+  reportUpdateMessage.textContent = "";
+  reportUpdateComposer.classList.add("hidden");
+}
+
+function openReportUpdateComposer() {
+  if (!reportUpdateComposer) {
+    return;
+  }
+
+  reportUpdateComposer.classList.remove("hidden");
+  reportUpdateDateField.value = new Date().toISOString().slice(0, 10);
+  reportUpdateTitleField.focus();
+}
+
+function collectReportUpdateFormData() {
+  return {
+    date: String(reportUpdateDateField.value || "").trim(),
+    reportPeriod: String(reportUpdatePeriodField.value || "").trim(),
+    type: String(reportUpdateTypeField.value || "").trim(),
+    sourceType: String(reportUpdateSourceTypeField.value || "").trim(),
+    title: String(reportUpdateTitleField.value || "").trim(),
+    originalNotes: String(reportUpdateOriginalNotesField.value || "").trim(),
+    aiSummary: String(reportUpdateAiSummaryField.value || "").trim(),
+    keyMetrics: String(reportUpdateKeyMetricsField.value || "").trim(),
+    keyWins: String(reportUpdateKeyWinsField.value || "").trim(),
+    keyRisks: String(reportUpdateKeyRisksField.value || "").trim(),
+    actionItems: String(reportUpdateActionItemsField.value || "").trim(),
+    attachmentLink: String(reportUpdateAttachmentField.value || "").trim()
+  };
+}
+
+function buildReportUpdateField(label, value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  return `
+    <div class="report-update-detail">
+      <p class="dashboard-label">${escapeHtml(label)}</p>
+      <p class="highlight-value">${escapeHtml(text)}</p>
+    </div>
+  `;
+}
+
+function renderReportUpdateFilters(rows) {
+  const normalizedRows = normalizeReportUpdateRows(rows);
+  const periods = Array.from(
+    new Set(normalizedRows.map((row) => row.reportPeriod).filter(Boolean))
+  ).sort((left, right) => right.localeCompare(left));
+  const types = Array.from(new Set(normalizedRows.map((row) => row.type).filter(Boolean)));
+
+  if (reportUpdateTypeFilter) {
+    reportUpdateTypeFilter.innerHTML = [
+      '<option value="">All update types</option>',
+      ...REPORT_UPDATE_TYPES.filter((type) => types.includes(type)).map(
+        (type) =>
+          `<option value="${escapeHtml(type)}"${reportUpdateFilters.type === type ? " selected" : ""}>${escapeHtml(type)}</option>`
+      ),
+      ...types
+        .filter((type) => !REPORT_UPDATE_TYPES.includes(type))
+        .map(
+          (type) =>
+            `<option value="${escapeHtml(type)}"${reportUpdateFilters.type === type ? " selected" : ""}>${escapeHtml(type)}</option>`
+        )
+    ].join("");
+  }
+
+  if (reportUpdatePeriodFilter) {
+    reportUpdatePeriodFilter.innerHTML = [
+      '<option value="">All periods</option>',
+      ...periods.map(
+        (period) =>
+          `<option value="${escapeHtml(period)}"${reportUpdateFilters.period === period ? " selected" : ""}>${escapeHtml(period)}</option>`
+      )
+    ].join("");
+  }
+}
+
+function renderReportUpdatesSection(companyRecord) {
+  const reportRows = companyRecord
+    ? normalizeReportUpdateRows(companyRecord.reportUpdates).sort(
+        (left, right) => new Date(right.date || 0).getTime() - new Date(left.date || 0).getTime()
+      )
+    : [];
+  renderReportUpdateFilters(reportRows);
+
+  const filteredRows = reportRows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => {
+    if (reportUpdateFilters.type && row.type !== reportUpdateFilters.type) {
+      return false;
+    }
+    if (reportUpdateFilters.period && row.reportPeriod !== reportUpdateFilters.period) {
+      return false;
+    }
+    return true;
+  });
+
+  if (reportUpdatesList) {
+    reportUpdatesList.innerHTML = filteredRows.length
+      ? filteredRows
+          .map(
+            ({ row, index }) => `
+              <article class="timeline-card report-update-card">
+                <div class="update-head">
+                  <div>
+                    <h3>${escapeHtml(row.title || row.type || "Update")}</h3>
+                    <p class="update-meta">
+                      ${escapeHtml(formatDisplayDate(row.date || "") || row.date || "Not Available")} • ${escapeHtml(row.reportPeriod || "Period not set")} • ${escapeHtml(row.type || "Type not set")} • ${escapeHtml(row.sourceType || "Source not set")}
+                    </p>
+                  </div>
+                  <span class="status-chip">${escapeHtml(row.type || "Update")}</span>
+                </div>
+                <div class="report-update-grid">
+                  ${buildReportUpdateField("AI summary", row.aiSummary || "Not Available")}
+                  ${buildReportUpdateField("Key wins", row.keyWins || "Not Available")}
+                  ${buildReportUpdateField("Key risks", row.keyRisks || "Not Available")}
+                  ${buildReportUpdateField("Key metrics", row.keyMetrics || "Not Available")}
+                  ${buildReportUpdateField("Action items / follow-ups", row.actionItems || "Not Available")}
+                  ${buildReportUpdateField("Attachment link or file reference", row.attachmentLink || "Not Available")}
+                </div>
+                ${
+                  row.originalNotes
+                    ? `<div class="update-subsection"><p class="dashboard-label">Original notes or pasted text</p><p class="update-notes">${escapeHtml(row.originalNotes)}</p></div>`
+                    : ""
+                }
+                <div class="card-actions">
+                  <button type="button" class="secondary-button card-action-button" data-action="summarize-report-update" data-index="${index}">
+                    Summarize with AI
+                  </button>
+                  <button type="button" class="secondary-button card-action-button" data-action="generate-report-update-summary" data-index="${index}">
+                    Generate Lee-ready summary
+                  </button>
+                </div>
+              </article>
+            `
+          )
+          .join("")
+      : '<p class="update-meta">No saved updates or reports yet. Add your first monthly report, quarterly letter, capital call, or call note above.</p>';
+  }
+
+  if (compareLatestReportUpdatesButton) {
+    compareLatestReportUpdatesButton.disabled = reportRows.length < 2;
+  }
+  if (generateAllReportSummaryButton) {
+    generateAllReportSummaryButton.disabled = reportRows.length === 0;
+  }
 }
 
 function buildLegacyCapitalActivityRows(investment) {
@@ -1331,6 +1760,9 @@ function getCompanyCollections(investments) {
               (entry) => !entry.entity || sameEntity(entry)
             ),
             decisionLog: (company.decisionLog || []).filter(
+              (entry) => !entry.entity || sameEntity(entry)
+            ),
+            reportUpdates: (company.reportUpdates || []).filter(
               (entry) => !entry.entity || sameEntity(entry)
             ),
             valuationHistory: (company.valuationHistory || []).filter(
@@ -2736,6 +3168,8 @@ function renderCompanyPanel() {
   if (!selectedCompany) {
     companyPanel.classList.add("hidden");
     closeInvestmentSummary();
+    resetReportUpdateComposer();
+    closeReportInsightPanel();
     companySummary.innerHTML = "";
     companyHighlights.innerHTML = "";
     companyContactInfo.innerHTML = "";
@@ -2749,6 +3183,7 @@ function renderCompanyPanel() {
     companyFollowOnCapital.innerHTML = "";
     companyValuationHistory.innerHTML = "";
     companyTimeline.innerHTML = "";
+    reportUpdatesList.innerHTML = "";
     companyDocumentMessage.textContent = "";
     return;
   }
@@ -2767,6 +3202,9 @@ function renderCompanyPanel() {
   if (!companyUpdates.length) {
     companyPanel.classList.add("hidden");
     closeInvestmentSummary();
+    resetReportUpdateComposer();
+    closeReportInsightPanel();
+    reportUpdatesList.innerHTML = "";
     return;
   }
 
@@ -3086,6 +3524,8 @@ function renderCompanyPanel() {
         )
         .join("")
     : '<p class="update-meta">No valuation history yet.</p>';
+
+  renderReportUpdatesSection(companyRecord);
 
   companyTimeline.innerHTML = companyUpdates
     .map(
@@ -4449,6 +4889,242 @@ refreshButton.addEventListener("click", () => {
   });
 });
 
+if (addReportUpdateButton) {
+  addReportUpdateButton.addEventListener("click", () => {
+    if (!selectedCompany) {
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Open an investment detail page first.";
+      }
+      return;
+    }
+
+    reportUpdateMessage.textContent = "";
+    openReportUpdateComposer();
+  });
+}
+
+if (cancelReportUpdateButton) {
+  cancelReportUpdateButton.addEventListener("click", () => {
+    resetReportUpdateComposer();
+  });
+}
+
+if (closeReportUpdateInsightButton) {
+  closeReportUpdateInsightButton.addEventListener("click", () => {
+    closeReportInsightPanel();
+  });
+}
+
+if (useReportInsightInSummaryButton) {
+  useReportInsightInSummaryButton.addEventListener("click", () => {
+    if (!latestReportInsight || !latestReportInsight.body) {
+      return;
+    }
+
+    investmentSummaryAiNotes = {
+      company: latestReportInsight.company || selectedCompany,
+      entity: normalizeEntityName(latestReportInsight.entity || selectedCompanyEntity),
+      answer: latestReportInsight.body
+    };
+
+    if (investmentSummaryAiNotes.company) {
+      selectedCompany = investmentSummaryAiNotes.company;
+    }
+    selectedCompanyEntity = investmentSummaryAiNotes.entity || "";
+    renderCompanyPanel();
+    openInvestmentSummary();
+
+    if (reportUpdateMessage) {
+      reportUpdateMessage.textContent = "Lee-ready notes added to the investment summary.";
+    }
+  });
+}
+
+[reportUpdateTypeFilter, reportUpdatePeriodFilter].forEach((element) => {
+  if (!element) {
+    return;
+  }
+
+  element.addEventListener("change", () => {
+    reportUpdateFilters = getReportUpdateFilters();
+    renderReportUpdatesSection(findCompanyRecord(selectedCompany, selectedCompanyEntity));
+  });
+});
+
+if (summarizeReportUpdateDraftButton) {
+  summarizeReportUpdateDraftButton.addEventListener("click", async () => {
+    const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+    const draft = collectReportUpdateFormData();
+    if (!draft.title && !draft.originalNotes && !draft.keyWins && !draft.keyRisks && !draft.keyMetrics) {
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Add a title, pasted text, or key update details first.";
+      }
+      return;
+    }
+
+    summarizeReportUpdateDraftButton.disabled = true;
+
+    try {
+      const result = await runReportAnalystPrompt("single", [draft], companyRecord, {
+        loadingMessage: "Summarizing draft update..."
+      });
+      if (reportUpdateAiSummaryField) {
+        reportUpdateAiSummaryField.value = result.answer || "";
+      }
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "AI summary added to the draft update.";
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        setSignedInState(null);
+        if (reportUpdateMessage) {
+          reportUpdateMessage.textContent = "Your session expired. Please sign in again.";
+        }
+        return;
+      }
+
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = error.message;
+      }
+    } finally {
+      summarizeReportUpdateDraftButton.disabled = false;
+    }
+  });
+}
+
+if (saveReportUpdateButton) {
+  saveReportUpdateButton.addEventListener("click", async () => {
+    const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+    const currentRows = companyRecord ? normalizeReportUpdateRows(companyRecord.reportUpdates) : [];
+    const draft = collectReportUpdateFormData();
+    if (!draft.date) {
+      draft.date = new Date().toISOString().slice(0, 10);
+    }
+
+    if (!draft.title && !draft.originalNotes && !draft.aiSummary) {
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Add a title, notes, or AI summary before saving.";
+      }
+      return;
+    }
+
+    saveReportUpdateButton.disabled = true;
+
+    try {
+      await saveCompanyReportUpdates(
+        [
+          {
+            ...draft,
+            sourceUpdateId:
+              (companyRecord && companyRecord.latest && companyRecord.latest.id) || ""
+          },
+          ...currentRows
+        ],
+        "Report update saved."
+      );
+      resetReportUpdateComposer();
+      closeReportInsightPanel();
+    } catch (error) {
+      if (error.status === 401) {
+        setSignedInState(null);
+        if (reportUpdateMessage) {
+          reportUpdateMessage.textContent = "Your session expired. Please sign in again.";
+        }
+        return;
+      }
+
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = error.message;
+      }
+    } finally {
+      saveReportUpdateButton.disabled = false;
+    }
+  });
+}
+
+if (compareLatestReportUpdatesButton) {
+  compareLatestReportUpdatesButton.addEventListener("click", async () => {
+    const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+    const rows = companyRecord ? normalizeReportUpdateRows(companyRecord.reportUpdates) : [];
+    if (rows.length < 2) {
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Add at least two updates before comparing changes.";
+      }
+      return;
+    }
+
+    compareLatestReportUpdatesButton.disabled = true;
+
+    try {
+      const result = await runReportAnalystPrompt("compare", rows.slice(0, 2), companyRecord, {
+        loadingMessage: "Comparing the latest two updates..."
+      });
+      renderReportInsight("What changed since last update?", result.answer, result.company, result.entity);
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Comparison ready.";
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        setSignedInState(null);
+        if (reportUpdateMessage) {
+          reportUpdateMessage.textContent = "Your session expired. Please sign in again.";
+        }
+        return;
+      }
+
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = error.message;
+      }
+    } finally {
+      compareLatestReportUpdatesButton.disabled = false;
+    }
+  });
+}
+
+if (generateAllReportSummaryButton) {
+  generateAllReportSummaryButton.addEventListener("click", async () => {
+    const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+    const rows = companyRecord ? normalizeReportUpdateRows(companyRecord.reportUpdates) : [];
+    if (!rows.length) {
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Add at least one update before generating a summary.";
+      }
+      return;
+    }
+
+    generateAllReportSummaryButton.disabled = true;
+
+    try {
+      const result = await runReportAnalystPrompt("lee-all", rows, companyRecord, {
+        loadingMessage: "Generating Lee-ready summary across all updates..."
+      });
+      renderReportInsight(
+        "Lee-ready summary across all updates",
+        result.answer,
+        result.company,
+        result.entity
+      );
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Lee-ready summary is ready.";
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        setSignedInState(null);
+        if (reportUpdateMessage) {
+          reportUpdateMessage.textContent = "Your session expired. Please sign in again.";
+        }
+        return;
+      }
+
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = error.message;
+      }
+    } finally {
+      generateAllReportSummaryButton.disabled = false;
+    }
+  });
+}
+
 addCapitalActivityButton.addEventListener("click", () => {
   const rows = collectCapitalActivityRows();
   rows.push({ date: "", type: "Investment Amount", amount: "", notes: "" });
@@ -4798,6 +5474,72 @@ companyDecisionLog.addEventListener("click", (event) => {
 
   deleteCompanyDocumentById(target.dataset.documentId);
 });
+
+if (reportUpdatesList) {
+  reportUpdatesList.addEventListener("click", async (event) => {
+    const target = event.target.closest("[data-action]");
+    if (!target) {
+      return;
+    }
+
+    const action = target.dataset.action || "";
+    const index = Number(target.dataset.index);
+    const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+    const rows = companyRecord
+      ? normalizeReportUpdateRows(companyRecord.reportUpdates).sort(
+          (left, right) => new Date(right.date || 0).getTime() - new Date(left.date || 0).getTime()
+        )
+      : [];
+    const row = Number.isFinite(index) ? rows[index] : null;
+
+    if (!row) {
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Could not find that report update.";
+      }
+      return;
+    }
+
+    target.disabled = true;
+
+    try {
+      if (action === "summarize-report-update") {
+        const result = await runReportAnalystPrompt("single", [row], companyRecord, {
+          loadingMessage: "Summarizing selected update..."
+        });
+        const updatedRows = rows.map((entry, rowIndex) =>
+          rowIndex === index ? { ...entry, aiSummary: result.answer || entry.aiSummary || "" } : entry
+        );
+        await saveCompanyReportUpdates(updatedRows, "AI summary saved to the update.");
+        renderReportInsight("Update summary", result.answer, result.company, result.entity);
+        return;
+      }
+
+      if (action === "generate-report-update-summary") {
+        const result = await runReportAnalystPrompt("lee-single", [row], companyRecord, {
+          loadingMessage: "Generating Lee-ready update summary..."
+        });
+        renderReportInsight("Lee-ready update summary", result.answer, result.company, result.entity);
+        if (reportUpdateMessage) {
+          reportUpdateMessage.textContent = "Lee-ready summary is ready.";
+        }
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        setSignedInState(null);
+        if (reportUpdateMessage) {
+          reportUpdateMessage.textContent = "Your session expired. Please sign in again.";
+        }
+        return;
+      }
+
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = error.message;
+      }
+    } finally {
+      target.disabled = false;
+    }
+  });
+}
 
 updatesList.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action], [data-company]");

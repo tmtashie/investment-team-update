@@ -807,10 +807,154 @@
           </div>
           <section class="company-detail-card company-detail-card-timeline">
             <div class="company-section-heading">
-              <p class="dashboard-label">Operating history</p>
-              <h3>Update timeline</h3>
+              <p class="dashboard-label">Updates &amp; reports</p>
+              <h3>Updates &amp; Reports</h3>
             </div>
-            <div id="companyTimeline" class="company-timeline"></div>
+            <div class="report-updates-toolbar">
+              <div class="report-updates-filters">
+                <label>
+                  Update type
+                  <select id="reportUpdateTypeFilter">
+                    <option value="">All update types</option>
+                  </select>
+                </label>
+                <label>
+                  Report period
+                  <select id="reportUpdatePeriodFilter">
+                    <option value="">All periods</option>
+                  </select>
+                </label>
+              </div>
+              <div class="panel-header-actions">
+                <button id="compareLatestReportUpdatesButton" type="button" class="secondary-button">
+                  What changed since last update?
+                </button>
+                <button id="generateAllReportSummaryButton" type="button" class="secondary-button">
+                  Generate Lee-ready summary
+                </button>
+                <button id="addReportUpdateButton" type="button" class="secondary-button">
+                  Create new update
+                </button>
+              </div>
+            </div>
+            <section id="reportUpdateComposer" class="subsection-card hidden">
+              <div class="subsection-copy">
+                <p class="feature-kicker">New report entry</p>
+                <h4>Add an update or report to this investment</h4>
+                <p class="section-copy">
+                  Capture monthly reports, capital calls, legal notes, call notes, and other materials in one timeline.
+                </p>
+              </div>
+              <div class="three-up">
+                <label>
+                  Date received
+                  <input id="reportUpdateDateField" type="date" />
+                </label>
+                <label>
+                  Report period
+                  <input id="reportUpdatePeriodField" type="text" placeholder="Q1 2026" />
+                </label>
+                <label>
+                  Update type
+                  <select id="reportUpdateTypeField">
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                    <option value="Annual">Annual</option>
+                    <option value="Capital Call">Capital Call</option>
+                    <option value="Legal">Legal</option>
+                    <option value="Call Notes">Call Notes</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+              </div>
+              <div class="three-up">
+                <label>
+                  Source type
+                  <select id="reportUpdateSourceTypeField">
+                    <option value="PDF">PDF</option>
+                    <option value="Email">Email</option>
+                    <option value="Call">Call</option>
+                    <option value="Manual Note">Manual Note</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+                <label class="company-detail-card-span-2">
+                  Title
+                  <input id="reportUpdateTitleField" type="text" placeholder="March 2026 investor update" />
+                </label>
+              </div>
+              <label>
+                Original notes or pasted text
+                <textarea id="reportUpdateOriginalNotesField" rows="5" placeholder="Paste the report text, call notes, email copy, or any original source details here."></textarea>
+              </label>
+              <div class="two-up">
+                <label>
+                  AI summary
+                  <textarea id="reportUpdateAiSummaryField" rows="4" placeholder="AI-generated or manually written summary."></textarea>
+                </label>
+                <label>
+                  Key metrics
+                  <textarea id="reportUpdateKeyMetricsField" rows="4" placeholder="Revenue, burn, ARR, occupancy, distribution rate, or other metrics."></textarea>
+                </label>
+              </div>
+              <div class="two-up">
+                <label>
+                  Key wins
+                  <textarea id="reportUpdateKeyWinsField" rows="4" placeholder="Top wins, momentum, or positive changes."></textarea>
+                </label>
+                <label>
+                  Key risks
+                  <textarea id="reportUpdateKeyRisksField" rows="4" placeholder="Risks, misses, unresolved issues, or watch items."></textarea>
+                </label>
+              </div>
+              <div class="two-up">
+                <label>
+                  Action items / follow-ups
+                  <textarea id="reportUpdateActionItemsField" rows="4" placeholder="Questions to ask, follow-ups, or next meeting prep."></textarea>
+                </label>
+                <label>
+                  Attachment link or file reference
+                  <input id="reportUpdateAttachmentField" type="text" placeholder="Paste a document link, filename, or vault reference." />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button id="summarizeReportUpdateDraftButton" type="button" class="secondary-button">
+                  Summarize with AI
+                </button>
+                <button id="saveReportUpdateButton" type="button">
+                  Save update
+                </button>
+                <button id="cancelReportUpdateButton" type="button" class="secondary-button">
+                  Cancel
+                </button>
+              </div>
+              <p id="reportUpdateMessage" class="form-message" aria-live="polite"></p>
+            </section>
+            <section id="reportUpdateInsightPanel" class="company-mini-card hidden">
+              <div class="report-insight-header">
+                <div>
+                  <p class="feature-kicker">Lee-ready output</p>
+                  <h4 id="reportUpdateInsightTitle">Report insight</h4>
+                </div>
+                <div class="card-actions">
+                  <button id="useReportInsightInSummaryButton" type="button" class="secondary-button">
+                    Use this in Investment Summary
+                  </button>
+                  <button id="closeReportUpdateInsightButton" type="button" class="secondary-button">
+                    Close
+                  </button>
+                </div>
+              </div>
+              <div id="reportUpdateInsightBody" class="company-rich-text"></div>
+            </section>
+            <div id="reportUpdatesList" class="company-timeline"></div>
+            <div class="report-updates-history">
+              <div class="company-section-heading">
+                <p class="dashboard-label">Operating history</p>
+                <h4>Saved investment update history</h4>
+              </div>
+              <div id="companyTimeline" class="company-timeline"></div>
+            </div>
           </section>
         </section>
 
