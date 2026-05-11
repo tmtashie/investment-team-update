@@ -11,6 +11,7 @@ const brandSubtitle = document.querySelector(".brand-subtitle");
 const heroTopline = document.querySelector(".hero-topline");
 const heroTitle = document.querySelector(".brand-title");
 const heroThesis = document.querySelector(".hero-thesis");
+const statusRow = document.querySelector(".status-row");
 const brandLockupEyebrow = document.querySelector(".brand-lockup .eyebrow");
 const dashboardSection = document.getElementById("dashboardSection");
 const entityPerformanceSection = document.getElementById("entityPerformanceSection");
@@ -257,6 +258,14 @@ function getDashboardViewerHeroThesis(user) {
   return getDashboardViewerGreeting(user);
 }
 
+function getDashboardViewerHeroCopy(user) {
+  const email = String((user && user.email) || "").trim().toLowerCase();
+  if (email === "lee@leebeaman.com") {
+    return "Private portfolio summary for internal review.";
+  }
+  return "Private portfolio summary for internal review.";
+}
+
 const moneyFieldNames = [
   "amount",
   "officialValue",
@@ -463,7 +472,7 @@ function setSignedInState(user) {
   heroThesis.textContent = dashboardViewer
     ? getDashboardViewerHeroThesis(user)
     : DEFAULT_HERO_THESIS;
-  heroCopy.textContent = dashboardViewer ? DASHBOARD_VIEWER_HERO_COPY : DEFAULT_HERO_COPY;
+  heroCopy.textContent = dashboardViewer ? getDashboardViewerHeroCopy(user) : DEFAULT_HERO_COPY;
 
   workspaceMenuLinks.forEach((link) => {
     const viewName = link.dataset.view || "";
@@ -1258,6 +1267,9 @@ function renderRoleState() {
   authStatus.classList.toggle("hidden", dashboardViewer);
   emailStatus.classList.toggle("hidden", dashboardViewer);
   recipientStatus.classList.toggle("hidden", dashboardViewer);
+  if (statusRow) {
+    statusRow.classList.toggle("hidden", dashboardViewer);
+  }
   roleNotice.classList.toggle("hidden", dashboardViewer);
   dashboardCopy.textContent = dashboardViewer
     ? DASHBOARD_VIEWER_DASHBOARD_COPY
