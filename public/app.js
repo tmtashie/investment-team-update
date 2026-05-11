@@ -3124,6 +3124,8 @@ async function saveReconciliationRow(investmentId, values, options = {}) {
   const investedCapital = normalizeMoneyString(values.investedCapital);
   const officialValue = normalizeMoneyString(values.officialValue);
   const internalValue = normalizeMoneyString(values.internalValue);
+  const valuationDate = String(values.valuationDate || "").trim();
+  const nextStepDueDate = String(values.nextStepDueDate || "").trim();
 
   const payload = {
     company: String(values.company || investment.company || "").trim(),
@@ -3141,7 +3143,7 @@ async function saveReconciliationRow(investmentId, values, options = {}) {
     capitalCallAmount: investment.capitalCallAmount || "",
     distributionDate: investment.distributionDate || "",
     distributionAmount: investment.distributionAmount || "",
-    valuationDate: investment.valuationDate || "",
+    valuationDate,
     officialValue,
     internalValue,
     exitValue: investment.exitValue || "",
@@ -3155,6 +3157,7 @@ async function saveReconciliationRow(investmentId, values, options = {}) {
     contactPosition: investment.contactPosition || "",
     contactEmail: investment.contactEmail || "",
     contactPhone: investment.contactPhone || "",
+    nextStepDueDate,
     documentLinks: investment.documentLinks || "",
     documents: Array.isArray(investment.documents) ? investment.documents : [],
     decisionDate: investment.decisionDate || "",
@@ -3906,6 +3909,8 @@ function renderReconciliation() {
                 <th>Called capital</th>
                 <th>Official NAV</th>
                 <th>Internal NAV</th>
+                <th>Valuation date</th>
+                <th>Next step reminder</th>
                 ${canEditWorkspace() ? "<th>Edit</th>" : ""}
               </tr>
             </thead>
@@ -4023,6 +4028,24 @@ function renderReconciliation() {
                                 : escapeHtml(formatMoney(performance.internalValue))
                             }
                           </td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="date" value="${escapeHtml(
+                                    latest.valuationDate || ""
+                                  )}" data-edit-input="true" data-field="valuationDate" data-id="${escapeHtml(latest.id)}" aria-label="Valuation date for ${escapeHtml(latest.company)}" />`
+                                : escapeHtml(formatDisplayDateOrText(latest.valuationDate || ""))
+                            }
+                          </td>
+                          <td>
+                            ${
+                              canEditWorkspace()
+                                ? `<input class="reconciliation-amount-input" type="date" value="${escapeHtml(
+                                    latest.nextStepDueDate || ""
+                                  )}" data-edit-input="true" data-field="nextStepDueDate" data-id="${escapeHtml(latest.id)}" aria-label="Next step reminder date for ${escapeHtml(latest.company)}" />`
+                                : escapeHtml(formatDisplayDateOrText(latest.nextStepDueDate || ""))
+                            }
+                          </td>
                           ${
                             canEditWorkspace()
                               ? `<td><button class="secondary-button card-action-button" type="button" data-action="save-reconciliation-amount" data-id="${escapeHtml(
@@ -4034,7 +4057,7 @@ function renderReconciliation() {
                       `
                     )
                     .join("")
-                : `<tr><td colspan="${canEditWorkspace() ? "11" : "10"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
+                : `<tr><td colspan="${canEditWorkspace() ? "13" : "12"}" class="update-meta">No investments are assigned to this entity.</td></tr>`}
             </tbody>
             <tfoot>
               <tr>
@@ -4044,6 +4067,8 @@ function renderReconciliation() {
                 <td>${escapeHtml(formatMoney(entityPerformance.investedCapital))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.officialValue))}</td>
                 <td>${escapeHtml(formatMoney(entityPerformance.internalValue))}</td>
+                <td></td>
+                <td></td>
                 ${canEditWorkspace() ? "<td></td>" : ""}
               </tr>
             </tfoot>
