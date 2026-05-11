@@ -181,6 +181,7 @@ let digestStatus = {
   nextDigestDueAt: "",
   openReminderCount: 0
 };
+let dismissedDataAlerts = {};
 let dirtyReconciliationRows = new Set();
 let savingAllReconciliation = false;
 let latestCompanySummaryContext = null;
@@ -222,6 +223,44 @@ const DEFAULT_ENTITY_PERFORMANCE_COPY =
   "See committed capital, called capital, marks, and performance by family office entity.";
 const DASHBOARD_VIEWER_ENTITY_PERFORMANCE_COPY =
   "Review committed capital, called capital, current marks, and performance by family office entity.";
+
+function normalizeDismissedAlertMap(value) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.entries(value).reduce((entries, [alertKey, dismissedUntil]) => {
+    const key = String(alertKey || "").trim();
+    const parsed = parseDateValue(dismissedUntil, null);
+    if (!key || !parsed) {
+      return entries;
+    }
+
+    entries[key] = parsed.toISOString();
+    return entries;
+  }, {});
+}
+
+function isAlertDismissed(alertKey) {
+  const key = String(alertKey || "").trim();
+  if (!key) {
+    return false;
+  }
+
+  const dismissedUntil = dismissedDataAlerts[key];
+  const parsed = parseDateValue(dismissedUntil, null);
+  if (!parsed) {
+    delete dismissedDataAlerts[key];
+    return false;
+  }
+
+  if (parsed.getTime() <= Date.now()) {
+    delete dismissedDataAlerts[key];
+    return false;
+  }
+
+  return true;
+}
 
 function getDashboardViewerGreeting(user) {
   const email = String((user && user.email) || "").trim().toLowerCase();
@@ -2178,8 +2217,14 @@ function daysSinceDate(value) {
 }
 
 function addQualityAlert(alerts, row, severity, title, detail) {
+  const alertId =
+    row.latest.id ||
+    companyEntityKey(row.latest.company, row.latest.entity) ||
+    `${normalizeCompanyKey(row.latest.company)}::${Date.now()}`;
+  const alertKey = `${alertId}::${normalizeCompanyKey(title)}`;
   alerts.push({
-    id: row.latest.id,
+    id: alertId,
+    alertKey,
     company: row.latest.company || "Unnamed investment",
     entity: normalizeEntityName(row.latest.entity) || "No entity",
     severity,
@@ -2264,14 +2309,16 @@ function buildDataQualityAlerts() {
   });
 
   const severityRank = { High: 0, Medium: 1, Low: 2 };
-  return alerts.sort((left, right) => {
-    const severityDelta = severityRank[left.severity] - severityRank[right.severity];
-    if (severityDelta) {
-      return severityDelta;
-    }
+  return alerts
+    .filter((alert) => !isAlertDismissed(alert.alertKey))
+    .sort((left, right) => {
+      const severityDelta = severityRank[left.severity] - severityRank[right.severity];
+      if (severityDelta) {
+        return severityDelta;
+      }
 
-    return left.company.localeCompare(right.company);
-  });
+      return left.company.localeCompare(right.company);
+    });
 }
 
 function renderDashboard(investments) {
@@ -2385,6 +2432,13 @@ function renderDataQuality() {
               <p class="update-meta">${escapeHtml(alert.detail)}</p>
               <div class="card-actions">
                 <button class="secondary-button card-action-button" type="button" data-action="edit-quality-investment" data-id="${escapeHtml(alert.id)}">Edit investment</button>
+                ${
+                  canEditWorkspace()
+                    ? `<button class="secondary-button card-action-button" type="button" data-action="dismiss-quality-alert" data-alert-key="${escapeHtml(
+                        alert.alertKey
+                      )}">Dismiss for 30 days</button>`
+                    : ""
+                }
               </div>
             </article>
           `
@@ -4099,6 +4153,7 @@ function renderAll() {
 async function loadConfig() {
   const config = await fetchJson("/api/config");
   setSignedInState(config.user || null);
+  dismissedDataAlerts = normalizeDismissedAlertMap(config.dismissedDataAlerts);
 
   emailStatus.textContent = config.emailConfigured
     ? "Email sending is configured"
@@ -4140,6 +4195,34 @@ async function loadConfig() {
   roleNotice.textContent = config.canEdit
     ? "Editors can add investments, tasks, documents, and research."
     : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
+
+  renderAll();
+}
+
+async function dismissDataQualityAlert(alertKey) {
+  const normalizedKey = String(alertKey || "").trim();
+  if (!normalizedKey) {
+    return;
+  }
+
+  try {
+    const result = await fetchJson("/api/data-alerts/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alertKey: normalizedKey })
+    });
+    dismissedDataAlerts = normalizeDismissedAlertMap(
+      (result && result.dismissedDataAlerts) || {
+        ...dismissedDataAlerts,
+        [normalizedKey]: result.dismissedUntil
+      }
+    );
+    renderDataQuality();
+    renderDashboard(allInvestments);
+  } catch (error) {
+    reconciliationMessage.textContent =
+      error.message || "Could not dismiss the data alert right now.";
+  }
 }
 
 async function loadTasks() {
@@ -5712,6 +5795,12 @@ reconciliationList.addEventListener("input", handleReconciliationFieldEdit);
 reconciliationList.addEventListener("change", handleReconciliationFieldEdit);
 
 dataQualityList.addEventListener("click", (event) => {
+  const dismissTarget = event.target.closest("[data-action='dismiss-quality-alert']");
+  if (dismissTarget) {
+    dismissDataQualityAlert(dismissTarget.dataset.alertKey || "");
+    return;
+  }
+
   const target = event.target.closest("[data-action='edit-quality-investment']");
   if (!target) {
     return;

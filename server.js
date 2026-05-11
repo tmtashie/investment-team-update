@@ -203,6 +203,19 @@ function writeJsonFile(filePath, value) {
 
 function readMetadata() {
   const metadata = readJsonFile(METADATA_FILE, {});
+  const dismissedDataAlerts = Object.entries(metadata.dismissedDataAlerts || {}).reduce(
+    (entries, [alertKey, dismissedUntil]) => {
+      const key = String(alertKey || "").trim();
+      const parsedDismissedUntil = parseDateValue(dismissedUntil);
+      if (!key || !parsedDismissedUntil) {
+        return entries;
+      }
+
+      entries[key] = parsedDismissedUntil.toISOString();
+      return entries;
+    },
+    {}
+  );
   return {
     schemaVersion:
       Number.isFinite(Number(metadata.schemaVersion)) && Number(metadata.schemaVersion) > 0
@@ -218,7 +231,8 @@ function readMetadata() {
     lastDigestChangeCount:
       Number.isFinite(Number(metadata.lastDigestChangeCount)) && Number(metadata.lastDigestChangeCount) >= 0
         ? Number(metadata.lastDigestChangeCount)
-        : 0
+        : 0,
+    dismissedDataAlerts
   };
 }
 
@@ -3550,6 +3564,7 @@ const server = http.createServer(async (request, response) => {
       schemaVersion: metadata.schemaVersion,
       lastBackupAt: metadata.lastBackupAt,
       lastDigestSentAt: metadata.lastDigestSentAt,
+      dismissedDataAlerts: metadata.dismissedDataAlerts,
       nextDigestDueAt: metadata.lastDigestSentAt
         ? addDays(metadata.lastDigestSentAt, DIGEST_WINDOW_DAYS).toISOString()
         : addDays(new Date(), DIGEST_WINDOW_DAYS).toISOString(),
@@ -3558,6 +3573,43 @@ const server = http.createServer(async (request, response) => {
       user
     });
     return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/data-alerts/dismiss") {
+    const user = getSessionUser(request);
+    if (!canEdit(user)) {
+      sendJson(response, 403, { error: "Only editors can dismiss data alerts." });
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const alertKey = String((payload && payload.alertKey) || "").trim();
+      if (!alertKey) {
+        sendJson(response, 400, { error: "Alert key is required." });
+        return;
+      }
+
+      const metadata = readMetadata();
+      const dismissedDataAlerts = { ...(metadata.dismissedDataAlerts || {}) };
+      const now = new Date();
+
+      Object.entries(dismissedDataAlerts).forEach(([key, dismissedUntil]) => {
+        const parsed = parseDateValue(dismissedUntil, null);
+        if (!parsed || parsed.getTime() <= now.getTime()) {
+          delete dismissedDataAlerts[key];
+        }
+      });
+
+      const dismissedUntil = addDays(now, 30).toISOString();
+      dismissedDataAlerts[alertKey] = dismissedUntil;
+      writeMetadata({ dismissedDataAlerts });
+      sendJson(response, 200, { ok: true, alertKey, dismissedUntil, dismissedDataAlerts });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Unexpected server error." });
+      return;
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/session") {
