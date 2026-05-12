@@ -1935,6 +1935,18 @@ function isCommittedStatus(status) {
   return ["Approved", "Closed / Archived"].includes(normalizeStatusName(status));
 }
 
+function isEntityPerformanceStatus(status) {
+  return [
+    "Approved",
+    "Funded",
+    "Active",
+    "Partially Realized",
+    "Realized",
+    "Written Off",
+    "Closed / Archived"
+  ].includes(normalizeStatusName(status));
+}
+
 function isPipelineStatus(status) {
   return ["New Lead", "Under Review"].includes(normalizeStatusName(status));
 }
@@ -1961,6 +1973,7 @@ function buildEntityRows(investments, entity) {
       const status = normalizeStatusName(company.latest && company.latest.status);
       const reportedAmount = toNumber(company.latest && company.latest.amount);
       const includeReportedAmount = isCommittedStatus(status);
+      const includeInEntityPerformance = isEntityPerformanceStatus(status);
 
       return {
         company,
@@ -1968,7 +1981,8 @@ function buildEntityRows(investments, entity) {
         performance,
         reportedAmount,
         includedReportedAmount: includeReportedAmount ? reportedAmount : 0,
-        includeReportedAmount
+        includeReportedAmount,
+        includeInEntityPerformance
       };
     });
 }
@@ -1978,16 +1992,17 @@ function sumEntityRows(rows, selector) {
 }
 
 function buildEntityRowTotals(rows) {
-  const entityCompanies = rows.map((row) => row.company);
+  const includedRows = rows.filter((row) => row.includeInEntityPerformance);
+  const entityCompanies = includedRows.map((row) => row.company);
   const aggregatePerformance = buildAggregatePerformance(entityCompanies);
 
   return {
-    reportedAmount: sumEntityRows(rows, (row) => row.includedReportedAmount),
-    investedCapital: sumEntityRows(rows, (row) => row.performance.investedCapital),
-    distributions: sumEntityRows(rows, (row) => row.performance.distributions),
-    officialValue: sumEntityRows(rows, (row) => row.performance.officialValue),
-    internalValue: sumEntityRows(rows, (row) => row.performance.internalValue),
-    exitValue: sumEntityRows(rows, (row) => row.performance.exitValue),
+    reportedAmount: sumEntityRows(includedRows, (row) => row.includedReportedAmount),
+    investedCapital: sumEntityRows(includedRows, (row) => row.performance.investedCapital),
+    distributions: sumEntityRows(includedRows, (row) => row.performance.distributions),
+    officialValue: sumEntityRows(includedRows, (row) => row.performance.officialValue),
+    internalValue: sumEntityRows(includedRows, (row) => row.performance.internalValue),
+    exitValue: sumEntityRows(includedRows, (row) => row.performance.exitValue),
     official: aggregatePerformance.official,
     internal: aggregatePerformance.internal,
     exit: aggregatePerformance.exit
@@ -2128,7 +2143,9 @@ function buildEntityPerformanceMap(investments) {
 
   entityList.forEach((entity) => {
     const entityCompanies = companyCollections.filter(
-      (company) => normalizeEntityName(company.latest.entity) === normalizeEntityName(entity)
+      (company) =>
+        normalizeEntityName(company.latest.entity) === normalizeEntityName(entity) &&
+        isEntityPerformanceStatus(company.latest.status)
     );
     performanceMap.set(entity, buildAggregatePerformance(entityCompanies));
   });
