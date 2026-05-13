@@ -482,6 +482,14 @@ async function fetchJson(url, options) {
   return data;
 }
 
+function addListener(element, eventName, handler, options) {
+  if (!element) {
+    return;
+  }
+
+  element.addEventListener(eventName, handler, options);
+}
+
 function setSignedInState(user) {
   currentUser = user;
   const isSignedIn = Boolean(user);
@@ -4491,25 +4499,25 @@ async function deleteCompanyDocumentById(documentId) {
   }
 }
 
-deckFile.addEventListener("change", () => {
+addListener(deckFile, "change", () => {
   updateDeckFileLabel(selectedDeckFile());
 });
 
 ["dragenter", "dragover"].forEach((eventName) => {
-  deckDropZone.addEventListener(eventName, (event) => {
+  addListener(deckDropZone, eventName, (event) => {
     event.preventDefault();
     deckDropZone.classList.add("deck-drop-zone-active");
   });
 });
 
 ["dragleave", "drop"].forEach((eventName) => {
-  deckDropZone.addEventListener(eventName, (event) => {
+  addListener(deckDropZone, eventName, (event) => {
     event.preventDefault();
     deckDropZone.classList.remove("deck-drop-zone-active");
   });
 });
 
-deckDropZone.addEventListener("drop", (event) => {
+addListener(deckDropZone, "drop", (event) => {
   const files = event.dataTransfer && event.dataTransfer.files;
   if (!files || !files.length) {
     return;
@@ -4523,20 +4531,20 @@ deckDropZone.addEventListener("drop", (event) => {
 });
 
 ["dragenter", "dragover"].forEach((eventName) => {
-  documentDropZone.addEventListener(eventName, (event) => {
+  addListener(documentDropZone, eventName, (event) => {
     event.preventDefault();
     documentDropZone.classList.add("deck-drop-zone-active");
   });
 });
 
 ["dragleave", "drop"].forEach((eventName) => {
-  documentDropZone.addEventListener(eventName, (event) => {
+  addListener(documentDropZone, eventName, (event) => {
     event.preventDefault();
     documentDropZone.classList.remove("deck-drop-zone-active");
   });
 });
 
-documentDropZone.addEventListener("drop", async (event) => {
+addListener(documentDropZone, "drop", async (event) => {
   const files = event.dataTransfer && event.dataTransfer.files;
   if (!files || !files.length) {
     return;
@@ -4549,7 +4557,7 @@ documentDropZone.addEventListener("drop", async (event) => {
   }
 });
 
-documentFile.addEventListener("change", async () => {
+addListener(documentFile, "change", async () => {
   const files = documentFile.files;
   if (!files || !files.length) {
     return;
@@ -4564,20 +4572,20 @@ documentFile.addEventListener("change", async () => {
 });
 
 ["dragenter", "dragover"].forEach((eventName) => {
-  companyDocumentDropZone.addEventListener(eventName, (event) => {
+  addListener(companyDocumentDropZone, eventName, (event) => {
     event.preventDefault();
     companyDocumentDropZone.classList.add("deck-drop-zone-active");
   });
 });
 
 ["dragleave", "drop"].forEach((eventName) => {
-  companyDocumentDropZone.addEventListener(eventName, (event) => {
+  addListener(companyDocumentDropZone, eventName, (event) => {
     event.preventDefault();
     companyDocumentDropZone.classList.remove("deck-drop-zone-active");
   });
 });
 
-companyDocumentDropZone.addEventListener("drop", async (event) => {
+addListener(companyDocumentDropZone, "drop", async (event) => {
   const files = event.dataTransfer && event.dataTransfer.files;
   if (!files || !files.length) {
     return;
@@ -4590,7 +4598,7 @@ companyDocumentDropZone.addEventListener("drop", async (event) => {
   }
 });
 
-companyDocumentFile.addEventListener("change", async () => {
+addListener(companyDocumentFile, "change", async () => {
   const files = companyDocumentFile.files;
   if (!files || !files.length) {
     return;
@@ -4604,11 +4612,15 @@ companyDocumentFile.addEventListener("change", async () => {
   }
 });
 
-menuToggleButton.addEventListener("click", () => {
+addListener(menuToggleButton, "click", () => {
+  if (!workspaceMenu) {
+    return;
+  }
+
   workspaceMenu.classList.toggle("hidden");
 });
 
-workspaceMenu.addEventListener("click", (event) => {
+addListener(workspaceMenu, "click", (event) => {
   const target = event.target.closest("[data-view]");
   if (!target) {
     return;
@@ -4637,7 +4649,48 @@ async function loadUpdates() {
   }
 }
 
-taskForm.addEventListener("submit", async (event) => {
+addListener(loginForm, "submit", async (event) => {
+  event.preventDefault();
+  if (loginMessage) {
+    loginMessage.textContent = "Signing in...";
+  }
+  if (loginButton) {
+    loginButton.disabled = true;
+  }
+
+  const formData = new FormData(loginForm);
+  const payload = {
+    email: formData.get("email"),
+    password: formData.get("password")
+  };
+
+  try {
+    const result = await fetchJson("/api/session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    setSignedInState(result.user);
+    loginForm.reset();
+    if (loginMessage) {
+      loginMessage.textContent = "Signed in. Your workspace is ready.";
+    }
+    await Promise.all([loadConfig(), loadUpdates()]);
+  } catch (error) {
+    if (loginMessage) {
+      loginMessage.textContent = error.message;
+    }
+  } finally {
+    if (loginButton) {
+      loginButton.disabled = false;
+    }
+  }
+});
+
+addListener(taskForm, "submit", async (event) => {
   event.preventDefault();
   taskMessage.textContent = "Saving task...";
   saveTaskButton.disabled = true;
@@ -4681,38 +4734,7 @@ taskForm.addEventListener("submit", async (event) => {
   }
 });
 
-loginForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  loginMessage.textContent = "Signing in...";
-  loginButton.disabled = true;
-
-  const formData = new FormData(loginForm);
-  const payload = {
-    email: formData.get("email"),
-    password: formData.get("password")
-  };
-
-  try {
-    const result = await fetchJson("/api/session", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    setSignedInState(result.user);
-    loginForm.reset();
-    loginMessage.textContent = "Signed in. Your workspace is ready.";
-    await Promise.all([loadConfig(), loadUpdates()]);
-  } catch (error) {
-    loginMessage.textContent = error.message;
-  } finally {
-    loginButton.disabled = false;
-  }
-});
-
-logoutButton.addEventListener("click", async () => {
+addListener(logoutButton, "click", async () => {
   logoutButton.disabled = true;
 
   try {
@@ -4728,7 +4750,7 @@ logoutButton.addEventListener("click", async () => {
   }
 });
 
-summarizeDeckButton.addEventListener("click", async () => {
+addListener(summarizeDeckButton, "click", async () => {
   const selectedFile = selectedDeckFile();
   if (!selectedFile) {
     deckMessage.textContent = "Choose a PDF deck first.";
@@ -4775,7 +4797,7 @@ summarizeDeckButton.addEventListener("click", async () => {
   }
 });
 
-summarizeEmailButton.addEventListener("click", async () => {
+addListener(summarizeEmailButton, "click", async () => {
   const emailText = emailSummaryInput.value.trim();
   if (!emailText) {
     emailMessage.textContent = "Paste an email or thread first.";
@@ -4942,7 +4964,7 @@ if (useAiAnalystInSummaryButton) {
   });
 }
 
-form.addEventListener("submit", async (event) => {
+addListener(form, "submit", async (event) => {
   event.preventDefault();
   formMessage.textContent = "Saving your update...";
   submitButton.disabled = true;
@@ -5020,7 +5042,7 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-refreshButton.addEventListener("click", () => {
+addListener(refreshButton, "click", () => {
   Promise.all([loadUpdates(), loadTasks()]).catch((error) => {
     formMessage.textContent = error.message;
   });
@@ -5262,13 +5284,13 @@ if (generateAllReportSummaryButton) {
   });
 }
 
-addCapitalActivityButton.addEventListener("click", () => {
+addListener(addCapitalActivityButton, "click", () => {
   const rows = collectCapitalActivityRows();
   rows.push({ date: "", type: "Investment Amount", amount: "", notes: "" });
   renderCapitalActivityRows(rows);
 });
 
-capitalActivityList.addEventListener("click", (event) => {
+addListener(capitalActivityList, "click", (event) => {
   const target = event.target.closest("[data-action='remove-capital-activity']");
   if (!target) {
     return;
@@ -5279,7 +5301,7 @@ capitalActivityList.addEventListener("click", (event) => {
   renderCapitalActivityRows(rows);
 });
 
-capitalActivityList.addEventListener("input", (event) => {
+addListener(capitalActivityList, "input", (event) => {
   const amountField = event.target.closest('[data-capital-field="amount"]');
   if (!amountField) {
     return;
@@ -5291,7 +5313,7 @@ capitalActivityList.addEventListener("input", (event) => {
 attachFormattedInputHandlers();
 applyFormInputFormatting();
 
-loadCompanyDetailsButton.addEventListener("click", () => {
+addListener(loadCompanyDetailsButton, "click", () => {
   const company = String(form.elements.company.value || "").trim();
   if (!company) {
     formMessage.textContent = "Enter a company name first, then load the latest saved details.";
@@ -5304,36 +5326,38 @@ loadCompanyDetailsButton.addEventListener("click", () => {
     : "No saved company record was found to load.";
 });
 
-form.elements.company.addEventListener("change", () => {
-  if (editingInvestmentId.value) {
-    return;
-  }
+if (form && form.elements && form.elements.company) {
+  form.elements.company.addEventListener("change", () => {
+    if (editingInvestmentId.value) {
+      return;
+    }
 
-  const company = String(form.elements.company.value || "").trim();
-  if (!company) {
-    return;
-  }
+    const company = String(form.elements.company.value || "").trim();
+    if (!company) {
+      return;
+    }
 
-  hydrateFormFromCompanyRecord(company);
-});
+    hydrateFormFromCompanyRecord(company);
+  });
+}
 
-downloadCsvButton.addEventListener("click", () => {
+addListener(downloadCsvButton, "click", () => {
   window.location.href = "/api/investments.csv";
 });
 
-downloadExcelButton.addEventListener("click", () => {
+addListener(downloadExcelButton, "click", () => {
   window.location.href = "/api/investments.xlsx";
 });
 
-downloadFamilyOfficeWorkbookButton.addEventListener("click", () => {
+addListener(downloadFamilyOfficeWorkbookButton, "click", () => {
   window.location.href = "/api/family-office-workbook.xlsx";
 });
 
-downloadReconciliationButton.addEventListener("click", () => {
+addListener(downloadReconciliationButton, "click", () => {
   downloadTextFile("entity-reconciliation.csv", buildReconciliationCsv());
 });
 
-saveAllReconciliationButton.addEventListener("click", async () => {
+addListener(saveAllReconciliationButton, "click", async () => {
   try {
     await saveReconciliationRows(Array.from(dirtyReconciliationRows));
   } catch (error) {
@@ -5343,11 +5367,11 @@ saveAllReconciliationButton.addEventListener("click", async () => {
   }
 });
 
-downloadBackupButton.addEventListener("click", () => {
+addListener(downloadBackupButton, "click", () => {
   window.location.href = "/api/backup-export";
 });
 
-previewDigestButton.addEventListener("click", async () => {
+addListener(previewDigestButton, "click", async () => {
   digestMessage.textContent = "Building biweekly digest preview...";
   previewDigestButton.disabled = true;
 
@@ -5370,7 +5394,7 @@ previewDigestButton.addEventListener("click", async () => {
   }
 });
 
-sendDigestButton.addEventListener("click", async () => {
+addListener(sendDigestButton, "click", async () => {
   digestMessage.textContent = "Sending biweekly digest...";
   sendDigestButton.disabled = true;
 
@@ -5399,7 +5423,7 @@ sendDigestButton.addEventListener("click", async () => {
   }
 });
 
-importWorkbookFile.addEventListener("change", async () => {
+addListener(importWorkbookFile, "change", async () => {
   const selectedFile = importWorkbookFile.files && importWorkbookFile.files[0];
   if (!selectedFile) {
     return;
@@ -5434,7 +5458,7 @@ importWorkbookFile.addEventListener("change", async () => {
   }
 });
 
-restoreBackupFile.addEventListener("change", async () => {
+addListener(restoreBackupFile, "change", async () => {
   const selectedFile = restoreBackupFile.files && restoreBackupFile.files[0];
   if (!selectedFile) {
     return;
@@ -5472,12 +5496,12 @@ restoreBackupFile.addEventListener("change", async () => {
   }
 });
 
-cancelEditButton.addEventListener("click", () => {
+addListener(cancelEditButton, "click", () => {
   resetFormToCreateMode();
   formMessage.textContent = "Edit canceled.";
 });
 
-cancelTaskEditButton.addEventListener("click", () => {
+addListener(cancelTaskEditButton, "click", () => {
   resetTaskForm();
   taskMessage.textContent = "Task edit canceled.";
 });
@@ -5487,11 +5511,11 @@ cancelTaskEditButton.addEventListener("click", () => {
     activePortfolioPreset = "";
     renderAll();
   };
-  element.addEventListener("input", clearPresetAndRender);
-  element.addEventListener("change", clearPresetAndRender);
+  addListener(element, "input", clearPresetAndRender);
+  addListener(element, "change", clearPresetAndRender);
 });
 
-uploadedDocumentsList.addEventListener("click", (event) => {
+addListener(uploadedDocumentsList, "click", (event) => {
   const action = event.target.closest("[data-action='remove-document']");
   if (!action) {
     return;
@@ -5502,36 +5526,36 @@ uploadedDocumentsList.addEventListener("click", (event) => {
   renderUploadedDocuments();
 });
 
-closeCompanyPanelButton.addEventListener("click", () => {
+addListener(closeCompanyPanelButton, "click", () => {
   selectedCompany = "";
   selectedCompanyEntity = "";
   renderCompanyPanel();
   showWorkspaceView("portfolio");
 });
 
-generateInvestmentSummaryButton.addEventListener("click", () => {
+addListener(generateInvestmentSummaryButton, "click", () => {
   openInvestmentSummary();
 });
 
-closeInvestmentSummaryButton.addEventListener("click", () => {
+addListener(closeInvestmentSummaryButton, "click", () => {
   closeInvestmentSummary();
 });
 
-printInvestmentSummaryButton.addEventListener("click", () => {
+addListener(printInvestmentSummaryButton, "click", () => {
   printInvestmentSummary();
 });
 
-window.addEventListener("afterprint", () => {
+addListener(window, "afterprint", () => {
   document.body.classList.remove("print-investment-summary");
 });
 
-closeEntityDetailButton.addEventListener("click", () => {
+addListener(closeEntityDetailButton, "click", () => {
   selectedEntity = "";
   renderEntityDetail();
   showWorkspaceView("home");
 });
 
-entityPerformanceCards.addEventListener("click", (event) => {
+addListener(entityPerformanceCards, "click", (event) => {
   if (isDashboardViewer()) {
     return;
   }
@@ -5547,7 +5571,7 @@ entityPerformanceCards.addEventListener("click", (event) => {
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
-dashboardCards.addEventListener("click", (event) => {
+addListener(dashboardCards, "click", (event) => {
   if (isDashboardViewer()) {
     return;
   }
@@ -5603,7 +5627,7 @@ dashboardCards.addEventListener("click", (event) => {
   }
 });
 
-companyDecisionLog.addEventListener("click", (event) => {
+addListener(companyDecisionLog, "click", (event) => {
   const target = event.target.closest("[data-action='delete-company-document']");
   if (!target) {
     return;
@@ -5678,7 +5702,7 @@ if (reportUpdatesList) {
   });
 }
 
-updatesList.addEventListener("click", (event) => {
+addListener(updatesList, "click", (event) => {
   const target = event.target.closest("[data-action], [data-company]");
   if (!target) {
     return;
@@ -5708,7 +5732,7 @@ updatesList.addEventListener("click", (event) => {
   }
 });
 
-entityDetailInvestments.addEventListener("click", (event) => {
+addListener(entityDetailInvestments, "click", (event) => {
   const target = event.target.closest("[data-action], [data-company]");
   if (!target) {
     return;
@@ -5738,7 +5762,7 @@ entityDetailInvestments.addEventListener("click", (event) => {
   }
 });
 
-reconciliationList.addEventListener("click", (event) => {
+addListener(reconciliationList, "click", (event) => {
   const saveButton = event.target.closest("[data-action='save-reconciliation-amount']");
   if (saveButton) {
     const investmentId = saveButton.dataset.id || "";
@@ -5808,10 +5832,10 @@ function handleReconciliationFieldEdit(event) {
   }
 }
 
-reconciliationList.addEventListener("input", handleReconciliationFieldEdit);
-reconciliationList.addEventListener("change", handleReconciliationFieldEdit);
+addListener(reconciliationList, "input", handleReconciliationFieldEdit);
+addListener(reconciliationList, "change", handleReconciliationFieldEdit);
 
-dataQualityList.addEventListener("click", (event) => {
+addListener(dataQualityList, "click", (event) => {
   const dismissTarget = event.target.closest("[data-action='dismiss-quality-alert']");
   if (dismissTarget) {
     dismissDataQualityAlert(dismissTarget.dataset.alertKey || "");
@@ -5826,7 +5850,7 @@ dataQualityList.addEventListener("click", (event) => {
   beginEditInvestment(target.dataset.id || "");
 });
 
-tasksList.addEventListener("click", (event) => {
+addListener(tasksList, "click", (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) {
     return;
