@@ -469,8 +469,11 @@ function applyFormInputFormatting() {
   }
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    credentials: "include",
+    ...options
+  });
   const data = await response.json();
 
   if (!response.ok) {
