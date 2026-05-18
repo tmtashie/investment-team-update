@@ -1630,6 +1630,8 @@ function pickLatestNumericValue(updates, fieldName) {
 
 function buildPerformanceInputs(updates) {
   const updateActivities = updates.map((update) => {
+    const pipelineUpdate =
+      isPipelineStatus(update.status) || isPipelineStatus(update.stage);
     const activityRows = normalizeCapitalActivityRows(
       update.capitalActivity && update.capitalActivity.length
         ? update.capitalActivity
@@ -1663,9 +1665,9 @@ function buildPerformanceInputs(updates) {
 
   const normalizedActivities = updateActivities.flatMap(({ update, pipelineUpdate, activities }) => {
     if (!reconciliationOverride || reconciliationOverride.update.id === update.id) {
-      return activities.filter((activity) => !(
-        pipelineUpdate && isContributionCapitalType(activity.type)
-      ));
+      return activities.filter(
+        (activity) => !(pipelineUpdate && isContributionCapitalType(activity.type))
+      );
     }
 
     return activities.filter((activity) => {
@@ -1700,9 +1702,7 @@ function buildPerformanceInputs(updates) {
 
   const investedCapital = effectiveActivities.reduce((sum, activity) => {
     const amount = toNumber(activity.amount);
-    return isContributionCapitalType(activity.type)
-      ? sum + amount
-      : sum;
+    return isContributionCapitalType(activity.type) ? sum + amount : sum;
   }, 0);
   const distributions = effectiveActivities.reduce((sum, activity) => {
     const type = String(activity.type || "").toLowerCase();
