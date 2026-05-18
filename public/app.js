@@ -1154,6 +1154,15 @@ function isCommittedCapitalType(type) {
   return String(type || "").toLowerCase().includes("committed capital");
 }
 
+function isContributionCapitalType(type) {
+  const normalizedType = String(type || "").toLowerCase();
+  return (
+    normalizedType.includes("capital call") ||
+    normalizedType.includes("investment amount") ||
+    normalizedType.includes("fee")
+  );
+}
+
 function renderCapitalActivityRows(rows = []) {
   const normalizedRows = normalizeCapitalActivityRows(rows);
   const rowsToRender = normalizedRows.length
@@ -1626,9 +1635,12 @@ function buildPerformanceInputs(updates) {
         ? update.capitalActivity
         : buildLegacyCapitalActivityRows(update)
     );
+    const pipelineUpdate =
+      isPipelineStatus(update.status) || isPipelineStatus(update.stage);
 
     return {
       update,
+      pipelineUpdate,
       activities: activityRows.map((activity) => ({
         ...activity,
         fallbackDate: parseDateValue(update.createdAt, null)
@@ -1649,18 +1661,19 @@ function buildPerformanceInputs(updates) {
     })
   );
 
-  const normalizedActivities = updateActivities.flatMap(({ update, activities }) => {
+  const normalizedActivities = updateActivities.flatMap(({ update, pipelineUpdate, activities }) => {
     if (!reconciliationOverride || reconciliationOverride.update.id === update.id) {
-      return activities;
+      return activities.filter((activity) => !(
+        pipelineUpdate && isContributionCapitalType(activity.type)
+      ));
     }
 
     return activities.filter((activity) => {
-      const type = String(activity.type || "").toLowerCase();
-      return !(
-        type.includes("capital call") ||
-        type.includes("investment amount") ||
-        type.includes("fee")
-      );
+      if (pipelineUpdate && isContributionCapitalType(activity.type)) {
+        return false;
+      }
+
+      return !isContributionCapitalType(activity.type);
     });
   });
 
@@ -1686,11 +1699,8 @@ function buildPerformanceInputs(updates) {
   });
 
   const investedCapital = effectiveActivities.reduce((sum, activity) => {
-    const type = String(activity.type || "").toLowerCase();
     const amount = toNumber(activity.amount);
-    return type.includes("capital call") ||
-      type.includes("investment amount") ||
-      type.includes("fee")
+    return isContributionCapitalType(activity.type)
       ? sum + amount
       : sum;
   }, 0);
@@ -1718,7 +1728,7 @@ function buildPerformanceInputs(updates) {
       return;
     }
 
-    if (type.includes("capital call") || type.includes("investment amount") || type.includes("fee")) {
+    if (isContributionCapitalType(type)) {
       baseCashFlows.push({ date, amount: -amount });
       return;
     }
