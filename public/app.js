@@ -1128,8 +1128,10 @@ function buildLegacyCapitalActivityRows(investment) {
   const rows = [];
   const legacyInvestmentAmount = investment.capitalCallAmount || investment.amount || "";
   const legacyInvestmentDate = investment.capitalCallDate || investment.createdAt || "";
+  const pipelineInvestment =
+    isPipelineStatus(investment.status) || isPipelineStatus(investment.stage);
 
-  if (legacyInvestmentDate || legacyInvestmentAmount) {
+  if (!pipelineInvestment && (legacyInvestmentDate || legacyInvestmentAmount)) {
     rows.push({
       date: legacyInvestmentDate,
       type: "Investment Amount",
@@ -1637,8 +1639,6 @@ function buildPerformanceInputs(updates) {
         ? update.capitalActivity
         : buildLegacyCapitalActivityRows(update)
     );
-    const pipelineUpdate =
-      isPipelineStatus(update.status) || isPipelineStatus(update.stage);
 
     return {
       update,
@@ -2177,6 +2177,9 @@ function buildEntityPerformanceMap(investments) {
 function buildDashboardCards(investments) {
   const companySummaries = getCompanyCollections(investments);
   const allEntityRows = buildEntityRows(investments);
+  const performanceRows = allEntityRows.filter(
+    (row) => row && row.includeInEntityPerformance
+  );
   const qualityAlerts = buildDataQualityAlerts();
   const pipelineRows = allEntityRows.filter(isPipelineRow);
   const openCount = pipelineRows.length;
@@ -2193,15 +2196,21 @@ function buildDashboardCards(investments) {
           String(task.status || "").trim() !== "Completed"
       ).length;
   const totalCommittedCapital = sumEntityRows(
-    allEntityRows,
+    performanceRows,
     (row) => row.includedReportedAmount
   );
   const totalInvestedCapital = sumEntityRows(
-    allEntityRows,
+    performanceRows,
     (row) => row.performance.investedCapital
   );
-  const officialNav = sumEntityRows(allEntityRows, (row) => row.performance.officialValue);
-  const internalNav = sumEntityRows(allEntityRows, (row) => row.performance.internalValue);
+  const officialNav = sumEntityRows(
+    performanceRows,
+    (row) => row.performance.officialValue
+  );
+  const internalNav = sumEntityRows(
+    performanceRows,
+    (row) => row.performance.internalValue
+  );
 
   let cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
