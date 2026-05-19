@@ -916,9 +916,12 @@ function normalizeCapitalActivityRows(rows) {
       date: String((row && row.date) || "").trim(),
       type: String((row && row.type) || "").trim(),
       amount: String((row && row.amount) || "").trim(),
-      notes: String((row && row.notes) || "").trim()
+      notes: String((row && row.notes) || "").trim(),
+      legacyFallback: Boolean(row && row.legacyFallback)
     }))
-    .filter((row) => row.date || row.type || row.amount || row.notes);
+    .filter(
+      (row) => row.date || row.type || row.amount || row.notes || row.legacyFallback
+    );
 }
 
 function normalizeReportUpdateRows(rows) {
@@ -1136,7 +1139,8 @@ function buildLegacyCapitalActivityRows(investment) {
       date: legacyInvestmentDate,
       type: "Investment Amount",
       amount: legacyInvestmentAmount,
-      notes: ""
+      notes: "",
+      legacyFallback: true
     });
   }
 
@@ -1691,6 +1695,9 @@ function buildPerformanceInputs(updates) {
   const effectiveActivities = normalizedActivities.filter((activity) => {
     const type = String(activity.type || "").toLowerCase();
     if (isCommittedCapitalType(type)) {
+      return false;
+    }
+    if (activity.legacyFallback && type.includes("investment amount")) {
       return false;
     }
     if (hasActualCalledCapital && type.includes("investment amount")) {
