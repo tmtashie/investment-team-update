@@ -120,6 +120,9 @@ const addReportUpdateButton = document.getElementById("addReportUpdateButton");
 const compareLatestReportUpdatesButton = document.getElementById(
   "compareLatestReportUpdatesButton"
 );
+const generateInvestmentHistorySummaryButton = document.getElementById(
+  "generateInvestmentHistorySummaryButton"
+);
 const generateAllReportSummaryButton = document.getElementById(
   "generateAllReportSummaryButton"
 );
@@ -834,6 +837,8 @@ function buildReportAnalystPrompt(mode, rows, companyRecord) {
       ? `Compare the two most recent updates for ${companyName}.`
       : mode === "lee-single"
         ? `Create a Lee-ready internal summary for one update on ${companyName}.`
+        : mode === "history-summary"
+          ? `Create an investment history summary for ${companyName} using all provided updates over time.`
         : mode === "lee-all"
           ? `Create a Lee-ready internal summary using all provided updates for ${companyName}.`
           : `Summarize the provided update for ${companyName}.`;
@@ -861,6 +866,8 @@ function buildReportAnalystPrompt(mode, rows, companyRecord) {
   const endingInstruction =
     mode === "compare"
       ? "Focus on what changed, new risks, what improved, what worsened, and what needs follow-up."
+      : mode === "history-summary"
+        ? "Use these exact sections: Original Thesis, Key Developments Over Time, Current Status, Major Risks, Changes Since Investment, Recommended Next Step. Be concise, internal-ready, and do not make up facts. If information is missing, say what is missing."
       : mode.startsWith("lee")
         ? "Use short internal-ready sections: Executive Summary, What Changed, Risks, Key Metrics, Next Steps, Verification Note."
         : "Summarize the key wins, risks, metrics, and follow-ups.";
@@ -1121,6 +1128,9 @@ function renderReportUpdatesSection(companyRecord) {
 
   if (compareLatestReportUpdatesButton) {
     compareLatestReportUpdatesButton.disabled = reportRows.length < 2;
+  }
+  if (generateInvestmentHistorySummaryButton) {
+    generateInvestmentHistorySummaryButton.disabled = reportRows.length === 0;
   }
   if (generateAllReportSummaryButton) {
     generateAllReportSummaryButton.disabled = reportRows.length === 0;
@@ -5309,6 +5319,51 @@ if (generateAllReportSummaryButton) {
       }
     } finally {
       generateAllReportSummaryButton.disabled = false;
+    }
+  });
+}
+
+if (generateInvestmentHistorySummaryButton) {
+  generateInvestmentHistorySummaryButton.addEventListener("click", async () => {
+    const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+    const rows = companyRecord ? normalizeReportUpdateRows(companyRecord.reportUpdates) : [];
+    if (!rows.length) {
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent =
+          "Add at least one update before generating an investment history summary.";
+      }
+      return;
+    }
+
+    generateInvestmentHistorySummaryButton.disabled = true;
+
+    try {
+      const result = await runReportAnalystPrompt("history-summary", rows, companyRecord, {
+        loadingMessage: "Building investment history summary..."
+      });
+      renderReportInsight(
+        "Investment history summary",
+        result.answer,
+        result.company,
+        result.entity
+      );
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Investment history summary is ready.";
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        setSignedInState(null);
+        if (reportUpdateMessage) {
+          reportUpdateMessage.textContent = "Your session expired. Please sign in again.";
+        }
+        return;
+      }
+
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = error.message;
+      }
+    } finally {
+      generateInvestmentHistorySummaryButton.disabled = false;
     }
   });
 }
