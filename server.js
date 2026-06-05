@@ -74,6 +74,7 @@ const ENTITY_ALIASES = {
 };
 
 const DEFAULT_RECIPIENTS = splitCsv(process.env.TEAM_EMAILS || "");
+const DEFAULT_UPDATE_REQUEST_EMAIL = "Tyler@Beamanventures.com";
 
 function splitCsv(value) {
   return String(value)
@@ -3357,10 +3358,14 @@ async function sendEmail(summary, recipients, options = {}) {
 }
 
 function getUpdateRequestFromEmail() {
+  return String(process.env.UPDATE_REQUEST_FROM_EMAIL || DEFAULT_UPDATE_REQUEST_EMAIL).trim();
+}
+
+function getUpdateRequestReplyToEmail() {
   return String(
-    process.env.UPDATE_REQUEST_FROM_EMAIL ||
-      process.env.FROM_EMAIL ||
-      ""
+    process.env.UPDATE_REQUEST_REPLY_TO_EMAIL ||
+      process.env.UPDATE_REQUEST_FROM_EMAIL ||
+      DEFAULT_UPDATE_REQUEST_EMAIL
   ).trim();
 }
 
@@ -3438,7 +3443,7 @@ async function sendUpdateRequestEmail(investmentId, payload, user) {
     [recipient],
     {
       from: getUpdateRequestFromEmail(),
-      replyTo: getUpdateRequestFromEmail()
+      replyTo: getUpdateRequestReplyToEmail()
     }
   );
 
@@ -3769,6 +3774,7 @@ const server = http.createServer(async (request, response) => {
         process.env.RESEND_API_KEY && getUpdateRequestFromEmail()
       ),
       updateRequestFromEmail: getUpdateRequestFromEmail(),
+      updateRequestReplyToEmail: getUpdateRequestReplyToEmail(),
       aiConfigured: Boolean(process.env.OPENAI_API_KEY),
       entities: INVESTMENT_ENTITIES,
       familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
