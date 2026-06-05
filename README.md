@@ -22,6 +22,7 @@ A phone-friendly web app for logging investment updates and emailing your team a
    - `TEAM_ALLOWED_EMAILS`
    - `TEAM_EMAILS`
    - `FROM_EMAIL`
+   - `UPDATE_REQUEST_FROM_EMAIL`
    - `RESEND_API_KEY`
    - `OPENAI_API_KEY`
 
@@ -39,6 +40,7 @@ node server.js
 - `TEAM_ALLOWED_EMAILS`: comma-separated list of allowed sign-in emails
 - `TEAM_EMAILS`: default recipients for update emails
 - `FROM_EMAIL`: sender identity for Resend
+- `UPDATE_REQUEST_FROM_EMAIL`: sender and reply-to identity for latest-update request emails, for example `Tyler@Beamanventures.com`
 - `RESEND_API_KEY`: API key for Resend
 - `OPENAI_API_KEY`: API key for deck summarization
 - `OPENAI_MODEL`: optional override for the summarization model

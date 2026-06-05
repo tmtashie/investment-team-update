@@ -3313,9 +3313,10 @@ function buildSummary(entry) {
   return { subject, text, html };
 }
 
-async function sendEmail(summary, recipients) {
+async function sendEmail(summary, recipients, options = {}) {
   const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.FROM_EMAIL;
+  const fromEmail = String(options.from || process.env.FROM_EMAIL || "").trim();
+  const replyToEmail = String(options.replyTo || "").trim();
 
   if (!apiKey || !fromEmail || recipients.length === 0) {
     return {
@@ -3336,7 +3337,8 @@ async function sendEmail(summary, recipients) {
       to: recipients,
       subject: summary.subject,
       html: summary.html,
-      text: summary.text
+      text: summary.text,
+      ...(replyToEmail ? { reply_to: replyToEmail } : {})
     })
   });
 
@@ -3348,8 +3350,18 @@ async function sendEmail(summary, recipients) {
   const result = await resendResponse.json();
   return {
     sent: true,
-    id: result.id || null
+    id: result.id || null,
+    from: fromEmail,
+    replyTo: replyToEmail || fromEmail
   };
+}
+
+function getUpdateRequestFromEmail() {
+  return String(
+    process.env.UPDATE_REQUEST_FROM_EMAIL ||
+      process.env.FROM_EMAIL ||
+      ""
+  ).trim();
 }
 
 function plainTextToHtml(text) {
@@ -3423,7 +3435,11 @@ async function sendUpdateRequestEmail(investmentId, payload, user) {
       text: body,
       html: plainTextToHtml(body)
     },
-    [recipient]
+    [recipient],
+    {
+      from: getUpdateRequestFromEmail(),
+      replyTo: getUpdateRequestFromEmail()
+    }
   );
 
   if (!email.sent) {
@@ -3749,6 +3765,10 @@ const server = http.createServer(async (request, response) => {
     sendJson(response, 200, {
       defaultRecipients: DEFAULT_RECIPIENTS,
       emailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL),
+      updateRequestEmailConfigured: Boolean(
+        process.env.RESEND_API_KEY && getUpdateRequestFromEmail()
+      ),
+      updateRequestFromEmail: getUpdateRequestFromEmail(),
       aiConfigured: Boolean(process.env.OPENAI_API_KEY),
       entities: INVESTMENT_ENTITIES,
       familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
