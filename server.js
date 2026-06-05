@@ -2955,21 +2955,46 @@ function extractResponseText(payload) {
   return fragments.join("\n").trim();
 }
 
-async function summarizeDeck({ filename, fileData, company, stage }) {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("OpenAI summarization is not configured yet.");
+function extractJsonObject(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return null;
   }
 
-  const companyLine = company ? `Company: ${company}` : "Company: Not provided";
-  const stageLine = stage ? `Stage: ${stage}` : "Stage: Not provided";
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+    try {
+      return JSON.parse(match[0]);
+    } catch (error) {
+      return null;
+    }
+  }
+}
+
+function getUploadMimeType(filename) {
+  const extension = path.extname(String(filename || "")).toLowerCase();
+  return (
+    {
+      ".pdf": "application/pdf",
+      ".txt": "text/plain",
+      ".md": "text/markdown"
+    }[extension] || "application/octet-stream"
+  );
+}
+
+async function uploadOpenAiUserFile({ filename, fileData }) {
+  const apiKey = process.env.OPENAI_API_KEY;
   const fileBytes = Buffer.from(fileData, "base64");
   const uploadForm = new FormData();
-  const pdfBlob = new Blob([fileBytes], { type: "application/pdf" });
+  const fileBlob = new Blob([fileBytes], { type: getUploadMimeType(filename) });
 
   uploadForm.append("purpose", "user_data");
-  uploadForm.append("file", pdfBlob, filename);
+  uploadForm.append("file", fileBlob, filename);
 
   const uploadResponse = await fetch("https://api.openai.com/v1/files", {
     method: "POST",
@@ -2985,11 +3010,40 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
   }
 
   const uploadedFile = await uploadResponse.json();
-  const fileId = uploadedFile.id;
-
-  if (!fileId) {
+  if (!uploadedFile.id) {
     throw new Error("OpenAI file upload did not return a file ID.");
   }
+
+  return uploadedFile.id;
+}
+
+function formatOpenAiError(errorText, fallback) {
+  if (String(errorText || "").includes("insufficient_quota")) {
+    return "OpenAI summary failed: your OpenAI API account needs billing or more quota before summaries can run.";
+  }
+
+  try {
+    const parsed = JSON.parse(errorText);
+    if (parsed && parsed.error && parsed.error.message) {
+      return `OpenAI summary failed: ${parsed.error.message}`;
+    }
+  } catch (_) {
+    // Keep the original response below.
+  }
+
+  return `${fallback}: ${errorText}`;
+}
+
+async function summarizeDeck({ filename, fileData, company, stage }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI summarization is not configured yet.");
+  }
+
+  const companyLine = company ? `Company: ${company}` : "Company: Not provided";
+  const stageLine = stage ? `Stage: ${stage}` : "Stage: Not provided";
+  const fileId = await uploadOpenAiUserFile({ filename, fileData });
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -3052,6 +3106,87 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
   }
 
   return summary;
+}
+
+async function summarizeReportFile({ filename, fileData, company, entity, reportPeriod, updateType }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI summarization is not configured yet.");
+  }
+
+  const fileId = await uploadOpenAiUserFile({ filename, fileData });
+  const contextLines = [
+    company ? `Company: ${company}` : "Company: Not provided",
+    entity ? `Entity: ${entity}` : "Entity: Not provided",
+    reportPeriod ? `Report period: ${reportPeriod}` : "Report period: Not provided",
+    updateType ? `Update type: ${updateType}` : "Update type: Not provided"
+  ].join("\n");
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                "Read this investment update/report file and return JSON only.",
+                "Return exactly these keys:",
+                "title, originalNotes, aiSummary, keyMetrics, keyWins, keyRisks, actionItems.",
+                "",
+                "Rules:",
+                "- Be concise and practical for an internal family office update timeline.",
+                "- aiSummary should be a short paragraph or 3-5 bullets covering the overall update.",
+                "- keyMetrics should include financial, operating, runway, valuation, pipeline, or KPI details if present.",
+                "- keyWins should capture positive developments and momentum.",
+                "- keyRisks should capture risks, misses, delays, concerns, or open questions.",
+                "- actionItems should capture follow-ups, requested materials, decisions needed, or next steps.",
+                "- originalNotes should be a brief source note, not a full transcription.",
+                "- If a field is not clearly stated, use an empty string for that field.",
+                "- Do not invent facts.",
+                "",
+                contextLines
+              ].join("\n")
+            },
+            {
+              type: "input_file",
+              file_id: fileId
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(formatOpenAiError(errorText, "OpenAI report summary failed"));
+  }
+
+  const payload = await response.json();
+  const text = extractResponseText(payload);
+  const parsed = extractJsonObject(text);
+  if (!parsed) {
+    throw new Error("OpenAI did not return structured report fields.");
+  }
+
+  return {
+    title: String(parsed.title || "").trim(),
+    originalNotes: String(parsed.originalNotes || "").trim(),
+    aiSummary: String(parsed.aiSummary || "").trim(),
+    keyMetrics: String(parsed.keyMetrics || "").trim(),
+    keyWins: String(parsed.keyWins || "").trim(),
+    keyRisks: String(parsed.keyRisks || "").trim(),
+    actionItems: String(parsed.actionItems || "").trim()
+  };
 }
 
 async function summarizeEmail({ emailText, company, stage }) {
@@ -4419,6 +4554,47 @@ const server = http.createServer(async (request, response) => {
       return;
     } catch (error) {
       sendJson(response, 500, { error: error.message || "Email summarization failed." });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/summarize-report-file") {
+    const user = requireOperatingViewer(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const filename = String(payload.filename || "").trim();
+      const fileData = String(payload.fileData || "").trim();
+      const company = String(payload.company || "").trim();
+      const entity = String(payload.entity || "").trim();
+      const reportPeriod = String(payload.reportPeriod || "").trim();
+      const updateType = String(payload.updateType || "").trim();
+
+      if (!filename.match(/\.(pdf|txt|md)$/i)) {
+        sendJson(response, 400, { error: "Please upload a PDF or text file." });
+        return;
+      }
+
+      if (!fileData) {
+        sendJson(response, 400, { error: "Report file data is required." });
+        return;
+      }
+
+      const summary = await summarizeReportFile({
+        filename,
+        fileData,
+        company,
+        entity,
+        reportPeriod,
+        updateType
+      });
+      sendJson(response, 200, { summary });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Report file summarization failed." });
       return;
     }
   }

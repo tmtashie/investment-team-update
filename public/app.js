@@ -143,6 +143,9 @@ const reportUpdatePeriodField = document.getElementById("reportUpdatePeriodField
 const reportUpdateTypeField = document.getElementById("reportUpdateTypeField");
 const reportUpdateSourceTypeField = document.getElementById("reportUpdateSourceTypeField");
 const reportUpdateTitleField = document.getElementById("reportUpdateTitleField");
+const reportUpdateFileDropZone = document.getElementById("reportUpdateFileDropZone");
+const reportUpdateFileInput = document.getElementById("reportUpdateFileInput");
+const reportUpdateFileName = document.getElementById("reportUpdateFileName");
 const reportUpdateOriginalNotesField = document.getElementById("reportUpdateOriginalNotesField");
 const reportUpdateAiSummaryField = document.getElementById("reportUpdateAiSummaryField");
 const reportUpdateKeyMetricsField = document.getElementById("reportUpdateKeyMetricsField");
@@ -1068,6 +1071,16 @@ function updateDeckFileLabel(file) {
     : "No file selected yet";
 }
 
+function updateReportUpdateFileLabel(file) {
+  if (!reportUpdateFileName) {
+    return;
+  }
+
+  reportUpdateFileName.textContent = file
+    ? `Selected: ${file.name}`
+    : "PDF or text files can fill the summary fields below.";
+}
+
 function normalizeCapitalActivityRows(rows) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => ({
@@ -1145,6 +1158,10 @@ function resetReportUpdateComposer() {
   reportUpdateKeyRisksField.value = "";
   reportUpdateActionItemsField.value = "";
   reportUpdateAttachmentField.value = "";
+  updateReportUpdateFileLabel(null);
+  if (reportUpdateFileInput) {
+    reportUpdateFileInput.value = "";
+  }
   reportUpdateMessage.textContent = "";
   reportUpdateComposer.classList.add("hidden");
 }
@@ -1157,6 +1174,128 @@ function openReportUpdateComposer() {
   reportUpdateComposer.classList.remove("hidden");
   reportUpdateDateField.value = new Date().toISOString().slice(0, 10);
   reportUpdateTitleField.focus();
+}
+
+function getReportUpdateFileSourceType(file) {
+  const name = String((file && file.name) || "").toLowerCase();
+  if (name.endsWith(".pdf")) {
+    return "PDF";
+  }
+  if (name.endsWith(".txt") || name.endsWith(".md")) {
+    return "Manual Note";
+  }
+  return "Other";
+}
+
+function stripFileExtension(filename) {
+  return String(filename || "").replace(/\.[^.]+$/, "");
+}
+
+function formatReportSummaryError(error) {
+  const message = String((error && error.message) || "Report file summarization failed.");
+  try {
+    const parsed = JSON.parse(message.replace(/^AI Analyst failed:\s*/i, ""));
+    return parsed.error && parsed.error.message
+      ? `AI Analyst failed: ${parsed.error.message}`
+      : message;
+  } catch (_) {
+    return message;
+  }
+}
+
+function applyReportUpdateSummary(summary, file) {
+  const clean = summary && typeof summary === "object" ? summary : {};
+  if (reportUpdateAiSummaryField) {
+    reportUpdateAiSummaryField.value = String(clean.aiSummary || "").trim();
+  }
+  if (reportUpdateKeyMetricsField) {
+    reportUpdateKeyMetricsField.value = String(clean.keyMetrics || "").trim();
+  }
+  if (reportUpdateKeyWinsField) {
+    reportUpdateKeyWinsField.value = String(clean.keyWins || "").trim();
+  }
+  if (reportUpdateKeyRisksField) {
+    reportUpdateKeyRisksField.value = String(clean.keyRisks || "").trim();
+  }
+  if (reportUpdateActionItemsField) {
+    reportUpdateActionItemsField.value = String(clean.actionItems || "").trim();
+  }
+  if (reportUpdateOriginalNotesField && clean.originalNotes) {
+    reportUpdateOriginalNotesField.value = String(clean.originalNotes || "").trim();
+  }
+  if (reportUpdateTitleField && !String(reportUpdateTitleField.value || "").trim()) {
+    reportUpdateTitleField.value = String(clean.title || stripFileExtension(file && file.name)).trim();
+  }
+  if (reportUpdateAttachmentField && file) {
+    reportUpdateAttachmentField.value = file.name;
+  }
+  if (reportUpdateSourceTypeField && file) {
+    reportUpdateSourceTypeField.value = getReportUpdateFileSourceType(file);
+  }
+}
+
+async function summarizeReportUpdateFile(file) {
+  if (!file) {
+    return;
+  }
+
+  const lowerName = String(file.name || "").toLowerCase();
+  if (!lowerName.match(/\.(pdf|txt|md)$/)) {
+    if (reportUpdateMessage) {
+      reportUpdateMessage.textContent = "Upload a PDF or text file for report summarization.";
+    }
+    return;
+  }
+
+  updateReportUpdateFileLabel(file);
+  if (reportUpdateMessage) {
+    reportUpdateMessage.textContent = `Summarizing ${file.name} into update fields...`;
+  }
+
+  if (summarizeReportUpdateDraftButton) {
+    summarizeReportUpdateDraftButton.disabled = true;
+  }
+
+  try {
+    const fileData = await readFileAsBase64(file);
+    const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+    const latest = companyRecord && companyRecord.latest ? companyRecord.latest : {};
+    const result = await fetchJson("/api/summarize-report-file", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        filename: file.name,
+        fileData,
+        company: latest.company || selectedCompany || "",
+        entity: normalizeEntityName(latest.entity || selectedCompanyEntity || ""),
+        reportPeriod: String(reportUpdatePeriodField.value || "").trim(),
+        updateType: String(reportUpdateTypeField.value || "").trim()
+      })
+    });
+
+    applyReportUpdateSummary(result.summary, file);
+    if (reportUpdateMessage) {
+      reportUpdateMessage.textContent = "File summarized into the update fields.";
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      if (reportUpdateMessage) {
+        reportUpdateMessage.textContent = "Your session expired. Please sign in again.";
+      }
+      return;
+    }
+
+    if (reportUpdateMessage) {
+      reportUpdateMessage.textContent = formatReportSummaryError(error);
+    }
+  } finally {
+    if (summarizeReportUpdateDraftButton) {
+      summarizeReportUpdateDraftButton.disabled = false;
+    }
+  }
 }
 
 function collectReportUpdateFormData() {
@@ -4740,7 +4879,7 @@ function readFileAsBase64(file) {
       const [, base64 = ""] = result.split(",");
       resolve(base64);
     };
-    reader.onerror = () => reject(new Error("Could not read the PDF file."));
+    reader.onerror = () => reject(new Error("Could not read the selected file."));
     reader.readAsDataURL(file);
   });
 }
@@ -4928,6 +5067,36 @@ addListener(companyDocumentFile, "change", async () => {
     companyDocumentFile.value = "";
   } catch (error) {
     companyDocumentMessage.textContent = error.message;
+  }
+});
+
+["dragenter", "dragover"].forEach((eventName) => {
+  addListener(reportUpdateFileDropZone, eventName, (event) => {
+    event.preventDefault();
+    reportUpdateFileDropZone.classList.add("deck-drop-zone-active");
+  });
+});
+
+["dragleave", "drop"].forEach((eventName) => {
+  addListener(reportUpdateFileDropZone, eventName, (event) => {
+    event.preventDefault();
+    reportUpdateFileDropZone.classList.remove("deck-drop-zone-active");
+  });
+});
+
+addListener(reportUpdateFileDropZone, "drop", async (event) => {
+  const files = event.dataTransfer && event.dataTransfer.files;
+  const file = files && files[0] ? files[0] : null;
+  await summarizeReportUpdateFile(file);
+});
+
+addListener(reportUpdateFileInput, "change", async () => {
+  const file = reportUpdateFileInput.files && reportUpdateFileInput.files[0]
+    ? reportUpdateFileInput.files[0]
+    : null;
+  await summarizeReportUpdateFile(file);
+  if (reportUpdateFileInput) {
+    reportUpdateFileInput.value = "";
   }
 });
 
@@ -5474,7 +5643,7 @@ if (summarizeReportUpdateDraftButton) {
       }
 
       if (reportUpdateMessage) {
-        reportUpdateMessage.textContent = error.message;
+        reportUpdateMessage.textContent = formatReportSummaryError(error);
       }
     } finally {
       summarizeReportUpdateDraftButton.disabled = false;
@@ -5524,7 +5693,7 @@ if (saveReportUpdateButton) {
       }
 
       if (reportUpdateMessage) {
-        reportUpdateMessage.textContent = error.message;
+        reportUpdateMessage.textContent = formatReportSummaryError(error);
       }
     } finally {
       saveReportUpdateButton.disabled = false;
@@ -5563,7 +5732,7 @@ if (compareLatestReportUpdatesButton) {
       }
 
       if (reportUpdateMessage) {
-        reportUpdateMessage.textContent = error.message;
+        reportUpdateMessage.textContent = formatReportSummaryError(error);
       }
     } finally {
       compareLatestReportUpdatesButton.disabled = false;
@@ -5607,7 +5776,7 @@ if (generateAllReportSummaryButton) {
       }
 
       if (reportUpdateMessage) {
-        reportUpdateMessage.textContent = error.message;
+        reportUpdateMessage.textContent = formatReportSummaryError(error);
       }
     } finally {
       generateAllReportSummaryButton.disabled = false;
@@ -5652,7 +5821,7 @@ if (generateInvestmentHistorySummaryButton) {
       }
 
       if (reportUpdateMessage) {
-        reportUpdateMessage.textContent = error.message;
+        reportUpdateMessage.textContent = formatReportSummaryError(error);
       }
     } finally {
       generateInvestmentHistorySummaryButton.disabled = false;
@@ -6144,7 +6313,7 @@ if (reportUpdatesList) {
       }
 
       if (reportUpdateMessage) {
-        reportUpdateMessage.textContent = error.message;
+        reportUpdateMessage.textContent = formatReportSummaryError(error);
       }
     } finally {
       target.disabled = false;

@@ -914,6 +914,15 @@
                   <input id="reportUpdateTitleField" type="text" placeholder="March 2026 investor update" />
                 </label>
               </div>
+              <div class="deck-tools report-update-file-tools">
+                <label id="reportUpdateFileDropZone" class="deck-drop-zone" for="reportUpdateFileInput">
+                  <span class="deck-drop-title">Drop an update file here or tap to choose</span>
+                  <span id="reportUpdateFileName" class="deck-drop-subtitle">
+                    PDF or text files can fill the summary fields below.
+                  </span>
+                  <input id="reportUpdateFileInput" type="file" accept="application/pdf,.pdf,text/plain,.txt,.md" />
+                </label>
+              </div>
               <label>
                 Original notes or pasted text
                 <textarea id="reportUpdateOriginalNotesField" rows="5" placeholder="Paste the report text, call notes, email copy, or any original source details here."></textarea>
