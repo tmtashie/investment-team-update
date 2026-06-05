@@ -57,6 +57,7 @@ const AI_ANALYST_SYSTEM_PROMPT =
 const DATA_SCHEMA_VERSION = 2;
 const NEXT_STEP_REMINDER_DAYS = Number(process.env.NEXT_STEP_REMINDER_DAYS || 14);
 const DIGEST_WINDOW_DAYS = 14;
+const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
@@ -397,20 +398,55 @@ function normalizeStructuredRow(row, fallback = {}) {
     keyMetrics: String(row.keyMetrics || fallback.keyMetrics || "").trim(),
     actionItems: String(row.actionItems || fallback.actionItems || "").trim(),
     attachmentLink: String(row.attachmentLink || fallback.attachmentLink || "").trim(),
+    contactEmailed: String(row.contactEmailed || fallback.contactEmailed || "").trim(),
+    subjectLine: String(row.subjectLine || fallback.subjectLine || "").trim(),
+    responseStatus: String(row.responseStatus || fallback.responseStatus || "").trim(),
+    materialsRequested: Array.isArray(row.materialsRequested)
+      ? row.materialsRequested.map((item) => String(item).trim()).filter(Boolean)
+      : Array.isArray(fallback.materialsRequested)
+        ? fallback.materialsRequested.map((item) => String(item).trim()).filter(Boolean)
+        : [],
     sourceUpdateId: String(row.sourceUpdateId || fallback.sourceUpdateId || "").trim()
   };
 }
 
 function normalizeStructuredRows(rows, fallbackRows = []) {
+  const hasValue = (row) =>
+    Object.values(row).some((value) =>
+      Array.isArray(value) ? value.length > 0 : Boolean(value)
+    );
+
   if (Array.isArray(rows) && rows.length) {
     return rows
       .map((row) => normalizeStructuredRow(row))
-      .filter((row) => Object.values(row).some(Boolean));
+      .filter(hasValue);
   }
 
   return fallbackRows
     .map((row) => normalizeStructuredRow(row))
-    .filter((row) => Object.values(row).some(Boolean));
+    .filter(hasValue);
+}
+
+function normalizeReportingCadence(value) {
+  const cadence = String(value || "").trim();
+  return ["Monthly", "Quarterly", "Annual", "Ad Hoc"].includes(cadence) ? cadence : "";
+}
+
+function normalizeUpdateRequestStatus(value) {
+  const status = String(value || "").trim();
+  return ["Requested", "Received", "Follow-up Needed"].includes(status) ? status : "";
+}
+
+function getEffectiveUpdateRequestStatus(investment) {
+  const status = normalizeUpdateRequestStatus(investment && investment.updateRequestStatus);
+  if (status === "Requested") {
+    const sentAt = parseDateValue(investment && investment.lastUpdateRequestSentAt);
+    if (sentAt && Date.now() - sentAt.getTime() >= UPDATE_REQUEST_FOLLOW_UP_DAYS * 24 * 60 * 60 * 1000) {
+      return "Follow-up Needed";
+    }
+  }
+
+  return status;
 }
 
 function normalizeInvestment(entry) {
@@ -438,6 +474,11 @@ function normalizeInvestment(entry) {
   const contactPosition = String(entry.contactPosition || "").trim();
   const contactEmail = String(entry.contactEmail || "").trim();
   const contactPhone = String(entry.contactPhone || "").trim();
+  const reportingCadence = normalizeReportingCadence(entry.reportingCadence);
+  const updateRequestStatus = normalizeUpdateRequestStatus(entry.updateRequestStatus);
+  const lastUpdateRequestSentAt = String(entry.lastUpdateRequestSentAt || "").trim();
+  const lastUpdateRequestSubject = String(entry.lastUpdateRequestSubject || "").trim();
+  const lastUpdateRequestContact = String(entry.lastUpdateRequestContact || "").trim();
   const decisionDate = String(entry.decisionDate || "").trim();
   const decisionType = String(entry.decisionType || "").trim();
   const decisionSummary = String(entry.decisionSummary || "").trim();
@@ -573,6 +614,14 @@ function normalizeInvestment(entry) {
     contactPosition,
     contactEmail,
     contactPhone,
+    reportingCadence,
+    updateRequestStatus: getEffectiveUpdateRequestStatus({
+      updateRequestStatus,
+      lastUpdateRequestSentAt
+    }),
+    lastUpdateRequestSentAt,
+    lastUpdateRequestSubject,
+    lastUpdateRequestContact,
     documentLinks: String(entry.documentLinks || "").trim(),
     documents: normalizeDocuments(entry.documents),
     decisionDate,
@@ -1615,6 +1664,11 @@ function buildInvestmentsCsv(investments) {
     "Contact Position",
     "Contact Email",
     "Contact Phone",
+    "Reporting Cadence",
+    "Update Request Status",
+    "Last Update Request Sent At",
+    "Last Update Request Contact",
+    "Last Update Request Subject",
     "Document Links",
     "Uploaded Documents",
     "Decision Date",
@@ -1656,6 +1710,11 @@ function buildInvestmentsCsv(investments) {
       investment.contactPosition,
       investment.contactEmail,
       investment.contactPhone,
+      investment.reportingCadence,
+      investment.updateRequestStatus,
+      investment.lastUpdateRequestSentAt,
+      investment.lastUpdateRequestContact,
+      investment.lastUpdateRequestSubject,
       investment.documentLinks,
       investment.documents.map((document) => `${document.name} (${document.url})`).join(" | "),
       investment.decisionDate,
@@ -1704,6 +1763,11 @@ function buildInvestmentsWorkbookBuffer(investments) {
     "Contact Position": investment.contactPosition,
     "Contact Email": investment.contactEmail,
     "Contact Phone": investment.contactPhone,
+    "Reporting Cadence": investment.reportingCadence,
+    "Update Request Status": investment.updateRequestStatus,
+    "Last Update Request Sent At": investment.lastUpdateRequestSentAt,
+    "Last Update Request Contact": investment.lastUpdateRequestContact,
+    "Last Update Request Subject": investment.lastUpdateRequestSubject,
     "Document Links": investment.documentLinks,
     "Uploaded Documents": investment.documents
       .map((document) => `${document.name} (${document.url})`)
@@ -2366,6 +2430,11 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
           contactPosition: String(row["Contact Position"] || "").trim(),
           contactEmail: String(row["Contact Email"] || "").trim(),
           contactPhone: String(row["Contact Phone"] || "").trim(),
+          reportingCadence: String(row["Reporting Cadence"] || "").trim(),
+          updateRequestStatus: String(row["Update Request Status"] || "").trim(),
+          lastUpdateRequestSentAt: String(row["Last Update Request Sent At"] || "").trim(),
+          lastUpdateRequestContact: String(row["Last Update Request Contact"] || "").trim(),
+          lastUpdateRequestSubject: String(row["Last Update Request Subject"] || "").trim(),
           documentLinks: String(row["Document Links"] || "").trim(),
           documents: [],
           decisionDate: String(row["Decision Date"] || "").trim(),
@@ -2502,6 +2571,11 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
             contactPosition: "Lead contact",
             contactEmail: "",
             contactPhone: "",
+            reportingCadence: "",
+            updateRequestStatus: "",
+            lastUpdateRequestSentAt: "",
+            lastUpdateRequestContact: "",
+            lastUpdateRequestSubject: "",
             documentLinks: "",
             documents: [],
             decisionDate: "",
@@ -3278,6 +3352,118 @@ async function sendEmail(summary, recipients) {
   };
 }
 
+function plainTextToHtml(text) {
+  return `<div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6; max-width: 640px; margin: 0 auto; white-space: pre-wrap;">${escapeHtml(text)}</div>`;
+}
+
+function normalizeMaterialsRequested(value) {
+  const allowed = new Set([
+    "Latest investor update",
+    "Updated financials",
+    "Current cash balance / runway",
+    "Revenue / EBITDA metrics",
+    "Pipeline updates",
+    "Capital needs",
+    "Major risks or changes",
+    "Updated cap table"
+  ]);
+
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter((item) => allowed.has(item))
+    : [];
+}
+
+function buildUpdateRequestDraft(investment, materialsRequested = []) {
+  const companyName = investment.company || "the company";
+  const contactName = investment.contactName || "there";
+  const subject = `Request for Latest Update – ${companyName}`;
+  const materials = normalizeMaterialsRequested(materialsRequested);
+  const materialsSentence = materials.length
+    ? `\n\nSpecifically, it would be helpful to include: ${materials.join(", ")}.`
+    : "";
+  const body = [
+    `Hi ${contactName},`,
+    "",
+    `I hope you’re doing well. I’m working through our investment updates and wanted to see if you could send over the latest update for ${companyName} when you have a chance.`,
+    "",
+    `If available, it would be helpful to include any recent investor materials, updated financials, current cash/runway, revenue or operating metrics, major developments, and any expected capital needs or key risks we should be aware of.${materialsSentence}`,
+    "",
+    "Thanks,",
+    "Tyler"
+  ]
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+
+  return { subject, body, materialsRequested: materials };
+}
+
+async function sendUpdateRequestEmail(investmentId, payload, user) {
+  const investments = readInvestments();
+  const investment = investments.find((item) => item.id === investmentId);
+  if (!investment) {
+    return { error: "Investment update not found.", statusCode: 404 };
+  }
+
+  const recipient = String(payload.recipient || investment.contactEmail || "").trim();
+  if (!recipient) {
+    return { error: "Add a primary contact email before requesting an update.", statusCode: 400 };
+  }
+
+  const materialsRequested = normalizeMaterialsRequested(payload.materialsRequested);
+  const draft = buildUpdateRequestDraft(investment, materialsRequested);
+  const subject = String(payload.subject || draft.subject).trim();
+  const body = String(payload.body || draft.body).trim();
+  if (!subject || !body) {
+    return { error: "Subject and body are required before sending.", statusCode: 400 };
+  }
+
+  const email = await sendEmail(
+    {
+      subject,
+      text: body,
+      html: plainTextToHtml(body)
+    },
+    [recipient]
+  );
+
+  if (!email.sent) {
+    return { error: "Email sending is not configured yet.", statusCode: 500 };
+  }
+
+  const sentAt = new Date().toISOString();
+  const timelineEntry = normalizeStructuredRow({
+    date: sentAt,
+    type: "Update Request",
+    title: "Latest update requested",
+    sourceType: "Email",
+    contactEmailed: recipient,
+    subjectLine: subject,
+    responseStatus: "Sent",
+    materialsRequested,
+    actionItems: "Awaiting response. Follow up if no response is received within 7 days.",
+    originalNotes: body,
+    sourceUpdateId: investment.id
+  });
+  const updated = updateInvestment(investment.id, {
+    ...investment,
+    reportUpdates: [timelineEntry, ...normalizeStructuredRows(investment.reportUpdates)],
+    updateRequestStatus: "Requested",
+    lastUpdateRequestSentAt: sentAt,
+    lastUpdateRequestContact: recipient,
+    lastUpdateRequestSubject: subject
+  });
+
+  return {
+    value: {
+      message: "Update request email sent.",
+      email,
+      investment: updated,
+      timelineEntry,
+      sentBy: user.email
+    }
+  };
+}
+
 function validateLogin(payload) {
   const email = String(payload.email || "").trim().toLowerCase();
   const password = String(payload.password || "");
@@ -3389,6 +3575,11 @@ function validateSubmission(payload, sessionUser) {
     contactPosition: payload.contactPosition,
     contactEmail: payload.contactEmail,
     contactPhone: payload.contactPhone,
+    reportingCadence: payload.reportingCadence,
+    updateRequestStatus: payload.updateRequestStatus,
+    lastUpdateRequestSentAt: payload.lastUpdateRequestSentAt,
+    lastUpdateRequestSubject: payload.lastUpdateRequestSubject,
+    lastUpdateRequestContact: payload.lastUpdateRequestContact,
     documentLinks: payload.documentLinks,
     documents: payload.documents,
     decisionDate: payload.decisionDate,
@@ -3447,6 +3638,11 @@ function validateInvestmentPatch(payload) {
     contactPosition: String(payload.contactPosition || "").trim(),
     contactEmail: String(payload.contactEmail || "").trim(),
     contactPhone: String(payload.contactPhone || "").trim(),
+    reportingCadence: normalizeReportingCadence(payload.reportingCadence),
+    updateRequestStatus: normalizeUpdateRequestStatus(payload.updateRequestStatus),
+    lastUpdateRequestSentAt: String(payload.lastUpdateRequestSentAt || "").trim(),
+    lastUpdateRequestSubject: String(payload.lastUpdateRequestSubject || "").trim(),
+    lastUpdateRequestContact: String(payload.lastUpdateRequestContact || "").trim(),
     documentLinks: String(payload.documentLinks || "").trim(),
     documents: normalizeDocuments(payload.documents),
     decisionDate: String(payload.decisionDate || "").trim(),
@@ -4064,6 +4260,33 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 500, {
         error: error.message || "Unexpected server error."
       });
+      return;
+    }
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/api/investments/") &&
+    url.pathname.endsWith("/update-request")
+  ) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const investmentId = url.pathname.split("/")[3];
+      const payload = await parseRequestBody(request);
+      const result = await sendUpdateRequestEmail(investmentId, payload, user);
+      if (result.error) {
+        sendJson(response, result.statusCode || 400, { error: result.error });
+        return;
+      }
+
+      sendJson(response, 200, result.value);
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Update request email failed." });
       return;
     }
   }

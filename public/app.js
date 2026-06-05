@@ -98,6 +98,17 @@ const companyPanelTitle = document.getElementById("companyPanelTitle");
 const companyPanelCopy = document.getElementById("companyPanelCopy");
 const openAiAnalystButton = document.getElementById("openAiAnalystButton");
 const generateInvestmentSummaryButton = document.getElementById("generateInvestmentSummaryButton");
+const requestLatestUpdateButton = document.getElementById("requestLatestUpdateButton");
+const updateRequestModal = document.getElementById("updateRequestModal");
+const updateRequestForm = document.getElementById("updateRequestForm");
+const updateRequestRecipientField = document.getElementById("updateRequestRecipientField");
+const updateRequestSubjectField = document.getElementById("updateRequestSubjectField");
+const updateRequestBodyField = document.getElementById("updateRequestBodyField");
+const updateRequestMaterialsList = document.getElementById("updateRequestMaterialsList");
+const updateRequestMessage = document.getElementById("updateRequestMessage");
+const sendUpdateRequestButton = document.getElementById("sendUpdateRequestButton");
+const closeUpdateRequestModalButton = document.getElementById("closeUpdateRequestModalButton");
+const cancelUpdateRequestButton = document.getElementById("cancelUpdateRequestButton");
 const investmentSummaryPanel = document.getElementById("investmentSummaryPanel");
 const investmentSummaryDocument = document.getElementById("investmentSummaryDocument");
 const printInvestmentSummaryButton = document.getElementById("printInvestmentSummaryButton");
@@ -193,6 +204,7 @@ let investmentSummaryAiNotes = null;
 let latestReportInsight = null;
 let aiAnalystWidgetMinimized = false;
 let activePortfolioPreset = "";
+let activeUpdateRequestInvestment = null;
 let reportUpdateFilters = {
   type: "",
   period: ""
@@ -202,6 +214,7 @@ const REPORT_UPDATE_TYPES = [
   "Monthly",
   "Quarterly",
   "Annual",
+  "Update Request",
   "Capital Call",
   "Legal",
   "Call Notes",
@@ -209,6 +222,16 @@ const REPORT_UPDATE_TYPES = [
 ];
 
 const REPORT_SOURCE_TYPES = ["PDF", "Email", "Call", "Manual Note", "Other"];
+const UPDATE_REQUEST_MATERIALS = [
+  "Latest investor update",
+  "Updated financials",
+  "Current cash balance / runway",
+  "Revenue / EBITDA metrics",
+  "Pipeline updates",
+  "Capital needs",
+  "Major risks or changes",
+  "Updated cap table"
+];
 const DEFAULT_BRAND_SUBTITLE = "Family office investment workspace";
 const DEFAULT_BRAND_EYEBROW = "BVB";
 const DEFAULT_HERO_TITLE = "BVB";
@@ -794,6 +817,11 @@ function buildInvestmentPatchPayload(investment, overrides = {}) {
     contactPosition: investment.contactPosition,
     contactEmail: investment.contactEmail,
     contactPhone: investment.contactPhone,
+    reportingCadence: investment.reportingCadence,
+    updateRequestStatus: investment.updateRequestStatus,
+    lastUpdateRequestSentAt: investment.lastUpdateRequestSentAt,
+    lastUpdateRequestSubject: investment.lastUpdateRequestSubject,
+    lastUpdateRequestContact: investment.lastUpdateRequestContact,
     documentLinks: investment.documentLinks,
     documents: Array.isArray(investment.documents) ? investment.documents : [],
     decisionDate: investment.decisionDate,
@@ -803,6 +831,127 @@ function buildInvestmentPatchPayload(investment, overrides = {}) {
     reportUpdates: normalizeReportUpdateRows(investment.reportUpdates),
     ...overrides
   };
+}
+
+function getLatestCompanyInvestment() {
+  const companyRecord = findCompanyRecord(selectedCompany, selectedCompanyEntity);
+  if (companyRecord && companyRecord.latest) {
+    return companyRecord.latest;
+  }
+
+  return allInvestments.find(
+    (investment) =>
+      companyKey(investment.company) === companyKey(selectedCompany) &&
+      normalizeEntityName(investment.entity) === normalizeEntityName(selectedCompanyEntity)
+  );
+}
+
+function buildUpdateRequestDraft(investment, materials = []) {
+  const companyName = investment && investment.company ? investment.company : "the company";
+  const contactName = investment && investment.contactName ? investment.contactName : "there";
+  const subject = `Request for Latest Update – ${companyName}`;
+  const materialsLine = materials.length
+    ? `\n\nSpecifically, it would be helpful to include: ${materials.join(", ")}.`
+    : "";
+  const body = [
+    `Hi ${contactName},`,
+    "",
+    `I hope you’re doing well. I’m working through our investment updates and wanted to see if you could send over the latest update for ${companyName} when you have a chance.`,
+    "",
+    `If available, it would be helpful to include any recent investor materials, updated financials, current cash/runway, revenue or operating metrics, major developments, and any expected capital needs or key risks we should be aware of.${materialsLine}`,
+    "",
+    "Thanks,",
+    "Tyler"
+  ].join("\n");
+
+  return { subject, body };
+}
+
+function getSelectedUpdateRequestMaterials() {
+  return Array.from(
+    updateRequestMaterialsList
+      ? updateRequestMaterialsList.querySelectorAll("input[type='checkbox']:checked")
+      : []
+  ).map((input) => input.value);
+}
+
+function refreshUpdateRequestBody() {
+  if (!activeUpdateRequestInvestment || !updateRequestBodyField) {
+    return;
+  }
+
+  const draft = buildUpdateRequestDraft(
+    activeUpdateRequestInvestment,
+    getSelectedUpdateRequestMaterials()
+  );
+  updateRequestBodyField.value = draft.body;
+}
+
+function openUpdateRequestModal() {
+  const investment = getLatestCompanyInvestment();
+  activeUpdateRequestInvestment = investment || null;
+  if (!investment) {
+    if (reportUpdateMessage) {
+      reportUpdateMessage.textContent = "Open an investment detail page first.";
+    }
+    return;
+  }
+
+  if (!investment.contactEmail) {
+    if (reportUpdateMessage) {
+      reportUpdateMessage.textContent = "Add a primary contact email before requesting an update.";
+    }
+    return;
+  }
+
+  const defaultMaterials = [
+    "Latest investor update",
+    "Updated financials",
+    "Current cash balance / runway",
+    "Revenue / EBITDA metrics",
+    "Capital needs",
+    "Major risks or changes"
+  ];
+  const draft = buildUpdateRequestDraft(investment, defaultMaterials);
+
+  if (updateRequestRecipientField) {
+    updateRequestRecipientField.value = investment.contactEmail || "";
+  }
+  if (updateRequestSubjectField) {
+    updateRequestSubjectField.value = draft.subject;
+  }
+  if (updateRequestBodyField) {
+    updateRequestBodyField.value = draft.body;
+  }
+  if (updateRequestMaterialsList) {
+    updateRequestMaterialsList.innerHTML = UPDATE_REQUEST_MATERIALS.map(
+      (material) => `
+        <label class="checkbox-row">
+          <input type="checkbox" value="${escapeHtml(material)}"${defaultMaterials.includes(material) ? " checked" : ""} />
+          <span>${escapeHtml(material)}</span>
+        </label>
+      `
+    ).join("");
+  }
+  if (updateRequestMessage) {
+    updateRequestMessage.textContent = "";
+  }
+  if (updateRequestModal) {
+    updateRequestModal.classList.remove("hidden");
+  }
+}
+
+function closeUpdateRequestModal() {
+  activeUpdateRequestInvestment = null;
+  if (updateRequestModal) {
+    updateRequestModal.classList.add("hidden");
+  }
+  if (updateRequestForm) {
+    updateRequestForm.reset();
+  }
+  if (updateRequestMaterialsList) {
+    updateRequestMaterialsList.innerHTML = "";
+  }
 }
 
 async function saveCompanyReportUpdates(reportUpdates, successMessage = "Report update saved.") {
@@ -946,9 +1095,19 @@ function normalizeReportUpdateRows(rows) {
       keyMetrics: String((row && row.keyMetrics) || "").trim(),
       actionItems: String((row && row.actionItems) || "").trim(),
       attachmentLink: String((row && row.attachmentLink) || "").trim(),
+      contactEmailed: String((row && row.contactEmailed) || "").trim(),
+      subjectLine: String((row && row.subjectLine) || "").trim(),
+      responseStatus: String((row && row.responseStatus) || "").trim(),
+      materialsRequested: Array.isArray(row && row.materialsRequested)
+        ? row.materialsRequested.map((item) => String(item).trim()).filter(Boolean)
+        : [],
       sourceUpdateId: String((row && row.sourceUpdateId) || "").trim()
     }))
-    .filter((row) => Object.values(row).some(Boolean));
+    .filter((row) =>
+      Object.values(row).some((value) =>
+        Array.isArray(value) ? value.length > 0 : Boolean(value)
+      )
+    );
 }
 
 function formatDisplayDateOrText(value) {
@@ -1099,6 +1258,15 @@ function renderReportUpdatesSection(companyRecord) {
                   <span class="status-chip">${escapeHtml(row.type || "Update")}</span>
                 </div>
                 <div class="report-update-grid">
+                  ${buildReportUpdateField("Contact emailed", row.contactEmailed || "Not Available")}
+                  ${buildReportUpdateField("Subject line", row.subjectLine || "Not Available")}
+                  ${buildReportUpdateField("Response status", row.responseStatus || "Not Available")}
+                  ${buildReportUpdateField(
+                    "Requested materials",
+                    Array.isArray(row.materialsRequested) && row.materialsRequested.length
+                      ? row.materialsRequested.join(", ")
+                      : "Not Available"
+                  )}
                   ${buildReportUpdateField("AI summary", row.aiSummary || "Not Available")}
                   ${buildReportUpdateField("Key wins", row.keyWins || "Not Available")}
                   ${buildReportUpdateField("Key risks", row.keyRisks || "Not Available")}
@@ -1406,6 +1574,8 @@ function hydrateFormFromCompanyRecord(company) {
   assignIfBlank("contactPosition", latest.contactPosition || "");
   assignIfBlank("contactEmail", latest.contactEmail || "");
   assignIfBlank("contactPhone", latest.contactPhone || "");
+  assignIfBlank("reportingCadence", latest.reportingCadence || "");
+  assignIfBlank("updateRequestStatus", latest.updateRequestStatus || "");
   assignIfBlank("ownershipPercent", latest.ownershipPercent || "");
   assignIfBlank("entityOwnershipPercent", latest.entityOwnershipPercent || "");
   assignIfBlank("ownershipNotes", latest.ownershipNotes || "");
@@ -2228,6 +2398,7 @@ function buildDashboardCards(investments) {
     performanceRows,
     (row) => row.performance.internalValue
   );
+  const updateRequestStats = buildUpdateRequestStats(investments);
 
   let cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
@@ -2245,6 +2416,11 @@ function buildDashboardCards(investments) {
       status: "Approved"
     },
     { label: "Open reminders", value: String(openReminderCount), action: "tasks" },
+    {
+      label: "Update requests",
+      value: `${updateRequestStats.sent} sent / ${updateRequestStats.awaiting} awaiting / ${updateRequestStats.followUp} follow-up`,
+      action: "portfolio"
+    },
     { label: "Data alerts", value: String(qualityAlerts.length), action: "quality" },
     { label: "Total committed capital", value: formatMoney(totalCommittedCapital), action: "portfolio" },
     { label: "Called capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
@@ -2278,6 +2454,39 @@ function daysSinceDate(value) {
   }
 
   return Math.floor((Date.now() - parsed.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function getEffectiveUpdateRequestStatus(investment) {
+  const status = String((investment && investment.updateRequestStatus) || "").trim();
+  if (status === "Requested") {
+    const sentDaysAgo = daysSinceDate(investment && investment.lastUpdateRequestSentAt);
+    if (sentDaysAgo !== null && sentDaysAgo >= 7) {
+      return "Follow-up Needed";
+    }
+  }
+
+  return status;
+}
+
+function buildUpdateRequestStats(investments) {
+  const companySummaries = getCompanyCollections(investments);
+  return companySummaries.reduce(
+    (stats, company) => {
+      const latest = company.latest || {};
+      const status = getEffectiveUpdateRequestStatus(latest);
+      if (latest.lastUpdateRequestSentAt || status) {
+        stats.sent += 1;
+      }
+      if (status === "Requested") {
+        stats.awaiting += 1;
+      }
+      if (status === "Follow-up Needed") {
+        stats.followUp += 1;
+      }
+      return stats;
+    },
+    { sent: 0, awaiting: 0, followUp: 0 }
+  );
 }
 
 function addQualityAlert(alerts, row, severity, title, detail) {
@@ -2992,6 +3201,8 @@ function beginEditInvestment(investmentId) {
   form.elements.contactPosition.value = investment.contactPosition || "";
   form.elements.contactEmail.value = investment.contactEmail || "";
   form.elements.contactPhone.value = investment.contactPhone || "";
+  form.elements.reportingCadence.value = investment.reportingCadence || "";
+  form.elements.updateRequestStatus.value = investment.updateRequestStatus || "";
   form.elements.recipients.value = Array.isArray(investment.recipients)
     ? investment.recipients.join(", ")
     : "";
@@ -3275,6 +3486,11 @@ async function saveReconciliationRow(investmentId, values, options = {}) {
     contactPosition: investment.contactPosition || "",
     contactEmail: investment.contactEmail || "",
     contactPhone: investment.contactPhone || "",
+    reportingCadence: investment.reportingCadence || "",
+    updateRequestStatus: investment.updateRequestStatus || "",
+    lastUpdateRequestSentAt: investment.lastUpdateRequestSentAt || "",
+    lastUpdateRequestSubject: investment.lastUpdateRequestSubject || "",
+    lastUpdateRequestContact: investment.lastUpdateRequestContact || "",
     nextStepDueDate,
     documentLinks: investment.documentLinks || "",
     documents: Array.isArray(investment.documents) ? investment.documents : [],
@@ -3428,6 +3644,13 @@ function renderCompanyPanel() {
   companyPanelCopy.textContent = companyRecord
     ? `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} organized into one operating file for research, capital history, decisions, reminders, and source material.`
     : `${companyUpdates.length} update${companyUpdates.length === 1 ? "" : "s"} saved for this company in one operating record.`;
+  if (requestLatestUpdateButton) {
+    requestLatestUpdateButton.classList.toggle("hidden", !canEditWorkspace());
+    requestLatestUpdateButton.disabled = !latest.contactEmail;
+    requestLatestUpdateButton.title = latest.contactEmail
+      ? "Request the latest update from this investment contact"
+      : "Add a primary contact email before requesting an update";
+  }
   companySummary.innerHTML = [
     { label: "Latest status", value: normalizeStatusName(latest.status) || "Not set" },
     { label: "Latest entity", value: normalizeEntityName(latest.entity) || "Not set" },
@@ -3481,7 +3704,18 @@ function renderCompanyPanel() {
     { label: "Name", value: latest.contactName || "Not set" },
     { label: "Position", value: latest.contactPosition || "Not set" },
     { label: "Email", value: latest.contactEmail || "Not set" },
-    { label: "Phone", value: latest.contactPhone || "Not set" }
+    { label: "Phone", value: latest.contactPhone || "Not set" },
+    { label: "Reporting cadence", value: latest.reportingCadence || "Unknown" },
+    {
+      label: "Update request status",
+      value: getEffectiveUpdateRequestStatus(latest) || "Not requested"
+    },
+    {
+      label: "Last request sent",
+      value: latest.lastUpdateRequestSentAt
+        ? formatDisplayDate(latest.lastUpdateRequestSentAt)
+        : "Not sent"
+    }
   ]
     .map(
       (item) => `
@@ -5028,6 +5262,8 @@ addListener(form, "submit", async (event) => {
     contactPosition: formData.get("contactPosition"),
     contactEmail: formData.get("contactEmail"),
     contactPhone: formData.get("contactPhone"),
+    reportingCadence: formData.get("reportingCadence"),
+    updateRequestStatus: formData.get("updateRequestStatus"),
     recipients,
     notes: formData.get("notes"),
     deckSummary: formData.get("deckSummary"),
@@ -5619,6 +5855,80 @@ addListener(closeCompanyPanelButton, "click", () => {
 
 addListener(generateInvestmentSummaryButton, "click", () => {
   openInvestmentSummary();
+});
+
+addListener(requestLatestUpdateButton, "click", () => {
+  openUpdateRequestModal();
+});
+
+addListener(updateRequestMaterialsList, "change", () => {
+  refreshUpdateRequestBody();
+});
+
+addListener(closeUpdateRequestModalButton, "click", () => {
+  closeUpdateRequestModal();
+});
+
+addListener(cancelUpdateRequestButton, "click", () => {
+  closeUpdateRequestModal();
+});
+
+addListener(updateRequestModal, "click", (event) => {
+  if (event.target === updateRequestModal) {
+    closeUpdateRequestModal();
+  }
+});
+
+addListener(updateRequestForm, "submit", async (event) => {
+  event.preventDefault();
+  if (!activeUpdateRequestInvestment) {
+    updateRequestMessage.textContent = "Open an investment detail page first.";
+    return;
+  }
+
+  const recipient = String(updateRequestRecipientField.value || "").trim();
+  if (!recipient) {
+    updateRequestMessage.textContent = "Add a primary contact email before sending.";
+    return;
+  }
+
+  sendUpdateRequestButton.disabled = true;
+  updateRequestMessage.textContent = "Sending update request...";
+
+  try {
+    const result = await fetchJson(
+      `/api/investments/${activeUpdateRequestInvestment.id}/update-request`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          recipient,
+          subject: updateRequestSubjectField.value,
+          body: updateRequestBodyField.value,
+          materialsRequested: getSelectedUpdateRequestMaterials()
+        })
+      }
+    );
+
+    updateRequestMessage.textContent = result.message || "Update request email sent.";
+    await loadUpdates();
+    closeUpdateRequestModal();
+    if (reportUpdateMessage) {
+      reportUpdateMessage.textContent = "Update request email sent and logged to the timeline.";
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      updateRequestMessage.textContent = "Your session expired. Please sign in again.";
+      return;
+    }
+
+    updateRequestMessage.textContent = error.message;
+  } finally {
+    sendUpdateRequestButton.disabled = false;
+  }
 });
 
 addListener(closeInvestmentSummaryButton, "click", () => {

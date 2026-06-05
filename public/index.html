@@ -354,6 +354,27 @@
                   <input id="contactPhoneField" name="contactPhone" type="tel" inputmode="tel" placeholder="(555) 555-5555" />
                 </label>
               </div>
+              <div class="two-up">
+                <label>
+                  Reporting cadence
+                  <select id="reportingCadenceField" name="reportingCadence">
+                    <option value="">Unknown</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                    <option value="Annual">Annual</option>
+                    <option value="Ad Hoc">Ad Hoc</option>
+                  </select>
+                </label>
+                <label>
+                  Update request status
+                  <select id="updateRequestStatusField" name="updateRequestStatus">
+                    <option value="">Not requested</option>
+                    <option value="Requested">Requested</option>
+                    <option value="Received">Received</option>
+                    <option value="Follow-up Needed">Follow-up Needed</option>
+                  </select>
+                </label>
+              </div>
             </section>
 
             <label>
@@ -691,6 +712,9 @@
               <button id="generateInvestmentSummaryButton" type="button" class="secondary-button">
                 Generate Investment Summary
               </button>
+              <button id="requestLatestUpdateButton" type="button" class="secondary-button">
+                Request Latest Update
+              </button>
               <button id="closeCompanyPanelButton" type="button" class="secondary-button">
                 Close
               </button>
@@ -963,6 +987,54 @@
               <div id="companyTimeline" class="company-timeline"></div>
             </div>
           </section>
+        </section>
+
+        <section
+          id="updateRequestModal"
+          class="modal-overlay hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="updateRequestModalTitle"
+        >
+          <div class="modal-card update-request-modal-card">
+            <div class="panel-header">
+              <div>
+                <p class="feature-kicker">Update request email</p>
+                <h2 id="updateRequestModalTitle">Review email draft</h2>
+              </div>
+              <button id="closeUpdateRequestModalButton" type="button" class="secondary-button">
+                Close
+              </button>
+            </div>
+            <form id="updateRequestForm" class="investment-form">
+              <label>
+                Recipient email
+                <input id="updateRequestRecipientField" type="email" readonly />
+              </label>
+              <label>
+                Subject
+                <input id="updateRequestSubjectField" type="text" />
+              </label>
+              <section class="subsection-card">
+                <div class="subsection-copy">
+                  <p class="feature-kicker">Requested materials</p>
+                  <h3>Choose what to include</h3>
+                </div>
+                <div id="updateRequestMaterialsList" class="checkbox-grid"></div>
+              </section>
+              <label>
+                Body
+                <textarea id="updateRequestBodyField" rows="12"></textarea>
+              </label>
+              <div class="form-actions">
+                <button id="sendUpdateRequestButton" type="submit">Send Email</button>
+                <button id="cancelUpdateRequestButton" type="button" class="secondary-button">
+                  Cancel
+                </button>
+              </div>
+              <p id="updateRequestMessage" class="form-message" aria-live="polite"></p>
+            </form>
+          </div>
         </section>
 
         <section id="researchLibrarySection" class="panel workspace-view hidden" data-view="research">

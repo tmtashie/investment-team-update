@@ -646,6 +646,7 @@ button:disabled {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .update-head {
@@ -745,6 +746,57 @@ button:disabled {
   border-radius: 14px;
   background: linear-gradient(180deg, rgba(248, 251, 255, 0.96), rgba(255, 255, 255, 0.92));
   border: 1px solid rgba(19, 32, 51, 0.08);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(19, 32, 51, 0.42);
+  backdrop-filter: blur(6px);
+}
+
+.modal-card {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 20px;
+  border-radius: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-strong);
+}
+
+.update-request-modal-card {
+  display: grid;
+  gap: 14px;
+}
+
+.checkbox-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.checkbox-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(19, 32, 51, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.84);
+  font-weight: 600;
+}
+
+.checkbox-row input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
 }
 
 .report-insight-text {
