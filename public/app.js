@@ -2495,8 +2495,8 @@ function addQualityAlert(alerts, row, severity, title, detail) {
   const alertId =
     row.latest.id ||
     companyEntityKey(row.latest.company, row.latest.entity) ||
-    `${normalizeCompanyKey(row.latest.company)}::${Date.now()}`;
-  const alertKey = `${alertId}::${normalizeCompanyKey(title)}`;
+    `${companyKey(row.latest.company)}::${Date.now()}`;
+  const alertKey = `${alertId}::${companyKey(title)}`;
   alerts.push({
     id: alertId,
     alertKey,
