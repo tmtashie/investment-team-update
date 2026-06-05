@@ -206,6 +206,7 @@ let aiAnalystWidgetMinimized = false;
 let activePortfolioPreset = "";
 let activeUpdateRequestInvestment = null;
 let investmentsLoaded = false;
+let investmentsLoadError = "";
 let reportUpdateFilters = {
   type: "",
   period: ""
@@ -4433,10 +4434,6 @@ function renderReconciliation() {
 }
 
 function renderAll() {
-  if (currentUser && !investmentsLoaded) {
-    return;
-  }
-
   companyPerformanceMap = buildCompanyPerformanceMap(allInvestments);
   entityPerformanceMap = buildEntityPerformanceMap(allInvestments);
   renderRoleState();
@@ -4451,6 +4448,42 @@ function renderAll() {
   renderReconciliation();
   renderCompanyPanel();
   renderEntityDetail();
+}
+
+function renderDataLoadError(message) {
+  const text = message || "Investment data could not be loaded. Refresh or sign in again.";
+  const errorCard = `
+    <article class="dashboard-card quality-alert-card quality-alert-high">
+      <p class="dashboard-label">Investment data did not load</p>
+      <p class="update-meta">${escapeHtml(text)}</p>
+    </article>
+  `;
+
+  if (dashboardCards) {
+    dashboardCards.innerHTML = errorCard;
+  }
+  if (entityPerformanceCards) {
+    entityPerformanceCards.innerHTML = errorCard;
+  }
+  if (updatesList) {
+    updatesList.innerHTML = `<p class="update-meta">${escapeHtml(text)}</p>`;
+  }
+}
+
+function renderDataLoadingState() {
+  const loadingCard = `
+    <article class="dashboard-card">
+      <p class="dashboard-label">Loading</p>
+      <p class="update-meta">Loading investment data...</p>
+    </article>
+  `;
+
+  if (dashboardCards) {
+    dashboardCards.innerHTML = loadingCard;
+  }
+  if (entityPerformanceCards) {
+    entityPerformanceCards.innerHTML = loadingCard;
+  }
 }
 
 async function loadConfig() {
@@ -4499,8 +4532,10 @@ async function loadConfig() {
     ? "Editors can add investments, tasks, documents, and research."
     : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
 
-  if (investmentsLoaded) {
+  if (investmentsLoaded || !currentUser) {
     renderAll();
+  } else if (currentUser) {
+    renderDataLoadingState();
   }
 }
 
@@ -4552,7 +4587,7 @@ async function loadTasks() {
       return;
     }
 
-    throw error;
+    taskMessage.textContent = error.message || "Tasks could not load.";
   }
 }
 
@@ -4922,16 +4957,20 @@ async function loadUpdates() {
     allCompanies = data.companies || [];
     setSignedInState(data.user || currentUser);
     investmentsLoaded = true;
+    investmentsLoadError = "";
     renderAll();
   } catch (error) {
     if (error.status === 401) {
       setSignedInState(null);
       investmentsLoaded = false;
+      investmentsLoadError = "";
       updatesList.innerHTML = "";
       return;
     }
 
-    throw error;
+    investmentsLoaded = false;
+    investmentsLoadError = error.message || "Investment data could not be loaded.";
+    renderDataLoadError(investmentsLoadError);
   }
 }
 
@@ -4965,7 +5004,10 @@ addListener(loginForm, "submit", async (event) => {
       loginMessage.textContent = "Signed in. Your workspace is ready.";
     }
     await loadConfig();
-    await Promise.all([loadUpdates(), loadTasks()]);
+    await loadUpdates();
+    if (investmentsLoaded) {
+      await loadTasks();
+    }
   } catch (error) {
     if (loginMessage) {
       loginMessage.textContent = error.message;
@@ -6279,7 +6321,10 @@ addListener(tasksList, "click", (event) => {
 
 (async function initializeApp() {
   await loadConfig();
-  await Promise.all([loadUpdates(), loadTasks()]);
+  await loadUpdates();
+  if (investmentsLoaded) {
+    await loadTasks();
+  }
 })().catch((error) => {
   if (error.status === 401) {
     setSignedInState(null);
