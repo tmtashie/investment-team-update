@@ -205,6 +205,7 @@ let latestReportInsight = null;
 let aiAnalystWidgetMinimized = false;
 let activePortfolioPreset = "";
 let activeUpdateRequestInvestment = null;
+let investmentsLoaded = false;
 let reportUpdateFilters = {
   type: "",
   period: ""
@@ -4432,6 +4433,10 @@ function renderReconciliation() {
 }
 
 function renderAll() {
+  if (currentUser && !investmentsLoaded) {
+    return;
+  }
+
   companyPerformanceMap = buildCompanyPerformanceMap(allInvestments);
   entityPerformanceMap = buildEntityPerformanceMap(allInvestments);
   renderRoleState();
@@ -4494,7 +4499,9 @@ async function loadConfig() {
     ? "Editors can add investments, tasks, documents, and research."
     : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
 
-  renderAll();
+  if (investmentsLoaded) {
+    renderAll();
+  }
 }
 
 async function dismissDataQualityAlert(alertKey) {
@@ -4527,7 +4534,9 @@ async function loadTasks() {
   try {
     const data = await fetchJson("/api/tasks");
     allTasks = data.tasks || [];
-    renderAll();
+    if (investmentsLoaded) {
+      renderAll();
+    }
   } catch (error) {
     if (error.status === 401) {
       setSignedInState(null);
@@ -4537,7 +4546,9 @@ async function loadTasks() {
 
     if (error.status === 403 && isDashboardViewer()) {
       allTasks = [];
-      renderAll();
+      if (investmentsLoaded) {
+        renderAll();
+      }
       return;
     }
 
@@ -4907,13 +4918,15 @@ addListener(workspaceMenu, "click", (event) => {
 async function loadUpdates() {
   try {
     const data = await fetchJson("/api/investments");
-    allInvestments = data.investments;
+    allInvestments = Array.isArray(data.investments) ? data.investments : [];
     allCompanies = data.companies || [];
-    renderAll();
     setSignedInState(data.user || currentUser);
+    investmentsLoaded = true;
+    renderAll();
   } catch (error) {
     if (error.status === 401) {
       setSignedInState(null);
+      investmentsLoaded = false;
       updatesList.innerHTML = "";
       return;
     }
@@ -4951,7 +4964,8 @@ addListener(loginForm, "submit", async (event) => {
     if (loginMessage) {
       loginMessage.textContent = "Signed in. Your workspace is ready.";
     }
-    await Promise.all([loadConfig(), loadUpdates()]);
+    await loadConfig();
+    await Promise.all([loadUpdates(), loadTasks()]);
   } catch (error) {
     if (loginMessage) {
       loginMessage.textContent = error.message;
@@ -6263,7 +6277,10 @@ addListener(tasksList, "click", (event) => {
   }
 });
 
-Promise.all([loadConfig(), loadUpdates(), loadTasks()]).catch((error) => {
+(async function initializeApp() {
+  await loadConfig();
+  await Promise.all([loadUpdates(), loadTasks()]);
+})().catch((error) => {
   if (error.status === 401) {
     setSignedInState(null);
     return;
