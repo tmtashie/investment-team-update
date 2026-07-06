@@ -67,6 +67,11 @@ const dashboardCards = document.getElementById("dashboardCards");
 const entityPerformanceCards = document.getElementById("entityPerformanceCards");
 const dataQualitySummary = document.getElementById("dataQualitySummary");
 const dataQualityList = document.getElementById("dataQualityList");
+const publicStockSummary = document.getElementById("publicStockSummary");
+const publicStockList = document.getElementById("publicStockList");
+const addPublicSquareStockButton = document.getElementById("addPublicSquareStockButton");
+const addSpaceXStockButton = document.getElementById("addSpaceXStockButton");
+const stockValuePreview = document.getElementById("stockValuePreview");
 const entityDetailSection = document.getElementById("entityDetailSection");
 const entityDetailTitle = document.getElementById("entityDetailTitle");
 const entityDetailCopy = document.getElementById("entityDetailCopy");
@@ -227,6 +232,30 @@ const REPORT_UPDATE_TYPES = [
 ];
 
 const REPORT_SOURCE_TYPES = ["PDF", "Email", "Call", "Manual Note", "Other"];
+const PUBLIC_STOCK_PRESETS = [
+  {
+    company: "SpaceX",
+    entity: "Beaman Ventures",
+    assetType: "Public Stock",
+    ticker: "SPCX",
+    exchange: "NASDAQ",
+    currency: "USD",
+    stage: "Public Equity",
+    status: "Active",
+    notes: "SpaceX public stock position."
+  },
+  {
+    company: "PublicSquare",
+    entity: "Beaman Ventures",
+    assetType: "Public Stock",
+    ticker: "PSQH",
+    exchange: "NYSE",
+    currency: "USD",
+    stage: "Public Equity",
+    status: "Active",
+    notes: "PublicSquare public stock position."
+  }
+];
 const UPDATE_REQUEST_MATERIALS = [
   "Latest investor update",
   "Updated financials",
@@ -341,7 +370,9 @@ const moneyFieldNames = [
   "officialValue",
   "internalValue",
   "exitValue",
-  "followOnCapitalAmount"
+  "followOnCapitalAmount",
+  "costBasisPerShare",
+  "marketPrice"
 ];
 
 const CANONICAL_STATUSES = [
@@ -798,6 +829,14 @@ function buildInvestmentPatchPayload(investment, overrides = {}) {
   return {
     company: investment.company,
     entity: investment.entity,
+    assetType: investment.assetType,
+    ticker: investment.ticker,
+    exchange: investment.exchange,
+    shareCount: investment.shareCount,
+    costBasisPerShare: investment.costBasisPerShare,
+    marketPrice: investment.marketPrice,
+    marketPriceDate: investment.marketPriceDate,
+    marketValue: investment.marketValue,
     amount: investment.amount,
     currency: investment.currency,
     stage: investment.stage,
@@ -1705,6 +1744,13 @@ function hydrateFormFromCompanyRecord(company) {
   };
 
   assignIfBlank("entity", latest.entity || "");
+  assignIfBlank("assetType", latest.assetType || "Private Investment");
+  assignIfBlank("ticker", latest.ticker || "");
+  assignIfBlank("exchange", latest.exchange || "");
+  assignIfBlank("shareCount", latest.shareCount || "");
+  assignIfBlank("costBasisPerShare", latest.costBasisPerShare || "");
+  assignIfBlank("marketPrice", latest.marketPrice || "");
+  assignIfBlank("marketPriceDate", latest.marketPriceDate || "");
   assignIfBlank("currency", latest.currency || "USD");
   assignIfBlank("stage", latest.stage || "");
   assignIfBlank("status", normalizeStatusName(latest.status) || "");
@@ -1744,6 +1790,7 @@ function hydrateFormFromCompanyRecord(company) {
   }
 
   applyFormInputFormatting();
+  updateStockValuePreview();
   return true;
 }
 
@@ -1753,6 +1800,9 @@ function filterInvestments(investments) {
     const searchHaystack = [
       investment.entity,
       investment.company,
+      investment.assetType,
+      investment.ticker,
+      investment.exchange,
       investment.notes,
       investment.deckSummary,
       investment.owner,
@@ -1762,6 +1812,10 @@ function filterInvestments(investments) {
       investment.officialValue,
       investment.internalValue,
       investment.exitValue,
+      investment.shareCount,
+      investment.costBasisPerShare,
+      investment.marketPrice,
+      investment.marketPriceDate,
       investment.ownershipPercent,
       investment.entityOwnershipPercent,
       investment.ownershipNotes,
@@ -1815,6 +1869,83 @@ function toNumber(value) {
 
 function formatMoney(value) {
   return `$${toNumber(value).toLocaleString()}`;
+}
+
+function isStockInvestment(investment) {
+  const assetType = String((investment && investment.assetType) || "").trim().toLowerCase();
+  return assetType.includes("stock") || Boolean(String((investment && investment.ticker) || "").trim());
+}
+
+function stockKey(investment) {
+  const ticker = String((investment && investment.ticker) || "").trim().toUpperCase();
+  return ticker || companyKey(investment && investment.company);
+}
+
+function getPublicStockRows(investments) {
+  const savedStocks = sortInvestmentsAlphabetically(investments.filter(isStockInvestment));
+  const savedKeys = new Set(savedStocks.map(stockKey).filter(Boolean));
+  const watchlistRows = PUBLIC_STOCK_PRESETS.filter(
+    (preset) => !savedKeys.has(stockKey(preset))
+  ).map((preset) => ({
+    ...preset,
+    id: "",
+    shareCount: "",
+    costBasisPerShare: "",
+    marketPrice: "",
+    marketPriceDate: "",
+    marketValue: "",
+    amount: "",
+    isWatchlistOnly: true
+  }));
+
+  return sortInvestmentsAlphabetically(savedStocks.concat(watchlistRows));
+}
+
+function getStockMarketValue(investment) {
+  const shares = toNumber(investment && investment.shareCount);
+  const price = toNumber(investment && investment.marketPrice);
+  const manualValue = toNumber(investment && investment.marketValue);
+  return shares && price ? shares * price : manualValue;
+}
+
+function getStockCostBasis(investment) {
+  const shares = toNumber(investment && investment.shareCount);
+  const costPerShare = toNumber(investment && investment.costBasisPerShare);
+  return shares && costPerShare ? shares * costPerShare : toNumber(investment && investment.amount);
+}
+
+function getStockGainLoss(investment) {
+  const marketValue = getStockMarketValue(investment);
+  const costBasis = getStockCostBasis(investment);
+  return marketValue && costBasis ? marketValue - costBasis : 0;
+}
+
+function getStockTickerLabel(investment) {
+  const ticker = String((investment && investment.ticker) || "").trim().toUpperCase();
+  const exchange = String((investment && investment.exchange) || "").trim().toUpperCase();
+  if (!ticker) {
+    return "No public ticker";
+  }
+  return exchange ? `${exchange}: ${ticker}` : ticker;
+}
+
+function updateStockValuePreview() {
+  if (!stockValuePreview || !form || !form.elements) {
+    return;
+  }
+
+  const previewInvestment = {
+    amount: form.elements.amount ? form.elements.amount.value : "",
+    shareCount: form.elements.shareCount ? form.elements.shareCount.value : "",
+    costBasisPerShare: form.elements.costBasisPerShare ? form.elements.costBasisPerShare.value : "",
+    marketPrice: form.elements.marketPrice ? form.elements.marketPrice.value : ""
+  };
+  const marketValue = getStockMarketValue(previewInvestment);
+  const costBasis = getStockCostBasis(previewInvestment);
+  const gainLoss = getStockGainLoss(previewInvestment);
+  stockValuePreview.textContent = marketValue
+    ? `Market value ${formatMoney(marketValue)}${costBasis ? ` • Cost basis ${formatMoney(costBasis)} • Gain/loss ${formatMoney(gainLoss)}` : ""}`
+    : "Market value will calculate from shares and current price.";
 }
 
 function formatPercent(value) {
@@ -2540,6 +2671,11 @@ function buildDashboardCards(investments) {
     (row) => row.performance.internalValue
   );
   const updateRequestStats = buildUpdateRequestStats(investments);
+  const stockRows = getPublicStockRows(investments);
+  const publicStockRows = stockRows.filter((investment) =>
+    String(investment.assetType || "").toLowerCase().includes("public")
+  );
+  const stockMarketValue = stockRows.reduce((sum, investment) => sum + getStockMarketValue(investment), 0);
 
   let cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
@@ -2562,6 +2698,8 @@ function buildDashboardCards(investments) {
       value: `${updateRequestStats.sent} sent / ${updateRequestStats.awaiting} awaiting / ${updateRequestStats.followUp} follow-up`,
       action: "portfolio"
     },
+    { label: "Public stocks", value: String(publicStockRows.length), action: "public-stocks" },
+    { label: "Stock market value", value: formatMoney(stockMarketValue), action: "public-stocks" },
     { label: "Data alerts", value: String(qualityAlerts.length), action: "quality" },
     { label: "Total committed capital", value: formatMoney(totalCommittedCapital), action: "portfolio" },
     { label: "Called capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
@@ -3331,6 +3469,13 @@ function beginEditInvestment(investmentId) {
   editingInvestmentId.value = investment.id;
   form.elements.company.value = investment.company || "";
   form.elements.entity.value = investment.entity || "";
+  form.elements.assetType.value = investment.assetType || "Private Investment";
+  form.elements.ticker.value = investment.ticker || "";
+  form.elements.exchange.value = investment.exchange || "";
+  form.elements.shareCount.value = investment.shareCount || "";
+  form.elements.costBasisPerShare.value = investment.costBasisPerShare || "";
+  form.elements.marketPrice.value = investment.marketPrice || "";
+  form.elements.marketPriceDate.value = investment.marketPriceDate || "";
   form.elements.amount.value = investment.amount || "";
   form.elements.currency.value = investment.currency || "USD";
   form.elements.stage.value = investment.stage || "";
@@ -3376,6 +3521,7 @@ function beginEditInvestment(investmentId) {
   cancelEditButton.classList.remove("hidden");
   formMessage.textContent = `Editing ${investment.company}.`;
   applyFormInputFormatting();
+  updateStockValuePreview();
   showWorkspaceView("capture");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -3394,6 +3540,38 @@ function resetFormToCreateMode() {
   documentMessage.textContent = "";
   renderCapitalActivityRows([]);
   applyFormInputFormatting();
+  updateStockValuePreview();
+}
+
+function prefillStockPosition(preset) {
+  resetFormToCreateMode();
+  const defaults = {
+    company: "",
+    entity: "Beaman Ventures",
+    assetType: "Public Stock",
+    ticker: "",
+    exchange: "NASDAQ",
+    currency: "USD",
+    stage: "Public Equity",
+    status: "Active",
+    notes: ""
+  };
+  const stock = { ...defaults, ...preset };
+
+  Object.entries(stock).forEach(([fieldName, value]) => {
+    if (form.elements[fieldName]) {
+      form.elements[fieldName].value = value;
+    }
+  });
+
+  if (notesField && stock.notes) {
+    notesField.value = stock.notes;
+  }
+
+  formMessage.textContent = `${stock.company} stock position ready. Add shares, cost basis, current price, and save.`;
+  updateStockValuePreview();
+  showWorkspaceView("capture");
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function beginEditTask(taskId) {
@@ -3600,6 +3778,14 @@ async function saveReconciliationRow(investmentId, values, options = {}) {
   const payload = {
     company: String(values.company || investment.company || "").trim(),
     entity: values.entity || investment.entity,
+    assetType: investment.assetType || "",
+    ticker: investment.ticker || "",
+    exchange: investment.exchange || "",
+    shareCount: investment.shareCount || "",
+    costBasisPerShare: investment.costBasisPerShare || "",
+    marketPrice: investment.marketPrice || "",
+    marketPriceDate: investment.marketPriceDate || "",
+    marketValue: investment.marketValue || "",
     amount: reportedAmount,
     currency: investment.currency || "USD",
     stage: values.stage || "",
@@ -4572,6 +4758,91 @@ function renderReconciliation() {
     .join("");
 }
 
+function renderPublicStocks() {
+  if (!publicStockSummary || !publicStockList) {
+    return;
+  }
+
+  const stocks = getPublicStockRows(allInvestments);
+  const totalMarketValue = stocks.reduce((sum, investment) => sum + getStockMarketValue(investment), 0);
+  const totalCostBasis = stocks.reduce((sum, investment) => sum + getStockCostBasis(investment), 0);
+  const totalGainLoss = totalMarketValue && totalCostBasis ? totalMarketValue - totalCostBasis : 0;
+  const publicCount = stocks.filter((investment) =>
+    String(investment.assetType || "").toLowerCase().includes("public")
+  ).length;
+
+  publicStockSummary.innerHTML = [
+    { label: "Tracked stocks", value: String(stocks.length) },
+    { label: "Public tickers", value: String(publicCount) },
+    { label: "Market value", value: formatMoney(totalMarketValue) },
+    { label: "Gain / loss", value: totalMarketValue && totalCostBasis ? formatMoney(totalGainLoss) : "N/A" }
+  ]
+    .map(
+      (card) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(card.label)}</p>
+          <p class="dashboard-value">${escapeHtml(card.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  publicStockList.innerHTML = stocks.length
+    ? stocks
+        .map((investment) => {
+          const marketValue = getStockMarketValue(investment);
+          const costBasis = getStockCostBasis(investment);
+          const gainLoss = marketValue && costBasis ? marketValue - costBasis : 0;
+          return `
+            <article class="update-card public-stock-card">
+              <div class="update-head">
+                ${
+                  investment.isWatchlistOnly
+                    ? `<h3>${escapeHtml(investment.company)}</h3>`
+                    : `<button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
+                        ${escapeHtml(investment.company)}
+                      </button>`
+                }
+                <span class="status-chip">${escapeHtml(getStockTickerLabel(investment))}</span>
+              </div>
+              <p class="update-meta">
+                ${escapeHtml(investment.entity || "Entity not specified")} • ${escapeHtml(investment.assetType || "Stock")} • ${escapeHtml(normalizeStatusName(investment.status) || "Status not set")}
+              </p>
+              <div class="stock-metric-grid">
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Shares</p>
+                  <p class="highlight-value">${escapeHtml(investment.shareCount || "Not set")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Current price</p>
+                  <p class="highlight-value">${investment.marketPrice ? escapeHtml(formatMoney(investment.marketPrice)) : "Not set"}</p>
+                  <p class="update-meta">${escapeHtml(investment.marketPriceDate || "No price date")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Market value</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(marketValue))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Gain / loss</p>
+                  <p class="highlight-value">${marketValue && costBasis ? escapeHtml(formatMoney(gainLoss)) : "N/A"}</p>
+                </div>
+              </div>
+              <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+              <div class="card-actions">
+                ${
+                  investment.isWatchlistOnly
+                    ? `<button class="secondary-button card-action-button" type="button" data-action="add-stock" data-ticker="${escapeHtml(investment.ticker)}">Add position</button>`
+                    : `<button class="secondary-button card-action-button" type="button" data-action="view-company" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">View company</button>
+                      <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${escapeHtml(investment.id)}">Edit</button>`
+                }
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="update-meta">No public stock companies are configured yet.</p>';
+}
+
 function renderAll() {
   companyPerformanceMap = buildCompanyPerformanceMap(allInvestments);
   entityPerformanceMap = buildEntityPerformanceMap(allInvestments);
@@ -4581,6 +4852,7 @@ function renderAll() {
   const filteredInvestments = filterInvestments(allInvestments);
   renderDashboard(allInvestments);
   renderDataQuality();
+  renderPublicStocks();
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
   renderTasks();
@@ -5476,6 +5748,13 @@ addListener(form, "submit", async (event) => {
   const payload = {
     company: formData.get("company"),
     entity: formData.get("entity"),
+    assetType: formData.get("assetType"),
+    ticker: formData.get("ticker"),
+    exchange: formData.get("exchange"),
+    shareCount: formData.get("shareCount"),
+    costBasisPerShare: formData.get("costBasisPerShare"),
+    marketPrice: formData.get("marketPrice"),
+    marketPriceDate: formData.get("marketPriceDate"),
     amount: formData.get("amount"),
     currency: formData.get("currency"),
     stage: formData.get("stage"),
@@ -5857,6 +6136,31 @@ addListener(capitalActivityList, "input", (event) => {
 
 attachFormattedInputHandlers();
 applyFormInputFormatting();
+updateStockValuePreview();
+
+["shareCount", "costBasisPerShare", "marketPrice", "amount"].forEach((fieldName) => {
+  if (form && form.elements && form.elements[fieldName]) {
+    form.elements[fieldName].addEventListener("input", updateStockValuePreview);
+  }
+});
+
+addListener(addPublicSquareStockButton, "click", () => {
+  prefillStockPosition({
+    company: "PublicSquare",
+    ticker: "PSQH",
+    exchange: "NYSE",
+    notes: "PublicSquare public stock position."
+  });
+});
+
+addListener(addSpaceXStockButton, "click", () => {
+  prefillStockPosition({
+    company: "SpaceX",
+    ticker: "SPCX",
+    exchange: "NASDAQ",
+    notes: "SpaceX public stock position."
+  });
+});
 
 addListener(loadCompanyDetailsButton, "click", () => {
   const company = String(form.elements.company.value || "").trim();
@@ -6223,6 +6527,12 @@ addListener(dashboardCards, "click", (event) => {
     return;
   }
 
+  if (action === "public-stocks") {
+    showWorkspaceView("public-stocks");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
   if (action === "pipeline") {
     activePortfolioPreset = "pipeline";
     if (statusFilter) {
@@ -6331,6 +6641,17 @@ addListener(updatesList, "click", (event) => {
   const entity = target.dataset.entity || "";
   const action = target.dataset.action || "";
   const investmentId = target.dataset.id || "";
+  const ticker = target.dataset.ticker || "";
+
+  if (action === "add-stock" && ticker) {
+    const preset = PUBLIC_STOCK_PRESETS.find(
+      (stock) => String(stock.ticker || "").toUpperCase() === String(ticker).toUpperCase()
+    );
+    if (preset) {
+      prefillStockPosition(preset);
+    }
+    return;
+  }
 
   if (company && (!action || action === "view-company")) {
     selectedCompany = company;
@@ -6348,6 +6669,42 @@ addListener(updatesList, "click", (event) => {
 
   if (action === "delete" && investmentId) {
     deleteInvestmentById(investmentId);
+  }
+});
+
+addListener(publicStockList, "click", (event) => {
+  const target = event.target.closest("[data-action], [data-company]");
+  if (!target) {
+    return;
+  }
+
+  const company = target.dataset.company || "";
+  const entity = target.dataset.entity || "";
+  const action = target.dataset.action || "";
+  const investmentId = target.dataset.id || "";
+  const ticker = target.dataset.ticker || "";
+
+  if (action === "add-stock" && ticker) {
+    const preset = PUBLIC_STOCK_PRESETS.find(
+      (stock) => String(stock.ticker || "").toUpperCase() === String(ticker).toUpperCase()
+    );
+    if (preset) {
+      prefillStockPosition(preset);
+    }
+    return;
+  }
+
+  if (company && (!action || action === "view-company")) {
+    selectedCompany = company;
+    selectedCompanyEntity = entity;
+    renderCompanyPanel();
+    showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  if (action === "edit" && investmentId) {
+    beginEditInvestment(investmentId);
   }
 });
 

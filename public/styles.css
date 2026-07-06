@@ -606,6 +606,13 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
+.stock-metric-grid {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+
 .entity-metric-box {
   min-height: 104px;
   padding: 14px;

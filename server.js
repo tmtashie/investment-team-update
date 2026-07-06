@@ -450,6 +450,20 @@ function getEffectiveUpdateRequestStatus(investment) {
   return status;
 }
 
+function parseNumericString(value) {
+  const parsed = Number(
+    String(value || "")
+      .trim()
+      .replace(/[$,\s]/g, "")
+      .replace(/[^\d.-]/g, "")
+  );
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatNumericString(value) {
+  return Number.isFinite(value) && value ? value.toLocaleString("en-US", { maximumFractionDigits: 4 }) : "";
+}
+
 function normalizeInvestment(entry) {
   const entity = String(entry.entity || "").trim();
   const investmentId = entry.id || makeId();
@@ -457,6 +471,16 @@ function normalizeInvestment(entry) {
   const notes = String(entry.notes || "").trim();
   const deckSummary = String(entry.deckSummary || "").trim();
   const updatedAt = String(entry.updatedAt || entry.createdAt || new Date().toISOString());
+  const assetType = String(entry.assetType || "Private Investment").trim() || "Private Investment";
+  const ticker = String(entry.ticker || "").trim().toUpperCase();
+  const exchange = String(entry.exchange || "").trim().toUpperCase();
+  const shareCount = String(entry.shareCount || "").trim();
+  const costBasisPerShare = String(entry.costBasisPerShare || "").trim();
+  const marketPrice = String(entry.marketPrice || "").trim();
+  const marketPriceDate = String(entry.marketPriceDate || "").trim();
+  const calculatedMarketValue = parseNumericString(shareCount) * parseNumericString(marketPrice);
+  const marketValue =
+    String(entry.marketValue || "").trim() || formatNumericString(calculatedMarketValue);
   const capitalCallDate = String(entry.capitalCallDate || "").trim();
   const capitalCallAmount = String(entry.capitalCallAmount || "").trim();
   const distributionDate = String(entry.distributionDate || "").trim();
@@ -588,6 +612,14 @@ function normalizeInvestment(entry) {
     company: String(entry.company || "").trim(),
     companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
     entity,
+    assetType,
+    ticker,
+    exchange,
+    shareCount,
+    costBasisPerShare,
+    marketPrice,
+    marketPriceDate,
+    marketValue,
     amount: String(entry.amount || "").trim(),
     currency: String(entry.currency || "USD").trim() || "USD",
     stage: String(entry.stage || "").trim(),
@@ -1638,6 +1670,14 @@ function buildInvestmentsCsv(investments) {
   const headers = [
     "Entity",
     "Company",
+    "Asset Type",
+    "Ticker",
+    "Exchange",
+    "Shares",
+    "Cost Basis Per Share",
+    "Market Price",
+    "Market Price Date",
+    "Market Value",
     "Amount",
     "Currency",
     "Stage",
@@ -1684,6 +1724,14 @@ function buildInvestmentsCsv(investments) {
     [
       investment.entity,
       investment.company,
+      investment.assetType,
+      investment.ticker,
+      investment.exchange,
+      investment.shareCount,
+      investment.costBasisPerShare,
+      investment.marketPrice,
+      investment.marketPriceDate,
+      investment.marketValue,
       investment.amount,
       investment.currency,
       investment.stage,
@@ -1737,6 +1785,14 @@ function buildInvestmentsWorkbookBuffer(investments) {
   const rows = investments.map((investment) => ({
     Entity: investment.entity,
     Company: investment.company,
+    "Asset Type": investment.assetType,
+    Ticker: investment.ticker,
+    Exchange: investment.exchange,
+    Shares: investment.shareCount,
+    "Cost Basis Per Share": investment.costBasisPerShare,
+    "Market Price": investment.marketPrice,
+    "Market Price Date": investment.marketPriceDate,
+    "Market Value": investment.marketValue,
     Amount: investment.amount,
     Currency: investment.currency,
     Stage: investment.stage,
