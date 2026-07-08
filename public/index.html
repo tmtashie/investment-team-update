@@ -333,13 +333,13 @@
 
             <section class="subsection-card">
               <div class="subsection-copy">
-                <p class="feature-kicker">Public stock tracking</p>
-                <h3>Track ticker positions and manual marks</h3>
+                <p class="feature-kicker">Investment type</p>
+                <h3>Select how this investment should be tracked</h3>
                 <p class="section-copy">
-                  Use this for listed equities or private shares that need stock-style share counts, cost basis, and market-value tracking.
+                  Choose public or private stock only when this position needs ticker, share count, cost basis, and price tracking.
                 </p>
               </div>
-              <div class="three-up">
+              <div class="two-up">
                 <label>
                   Asset type
                   <select id="assetTypeField" name="assetType">
@@ -350,41 +350,45 @@
                     <option value="Other">Other</option>
                   </select>
                 </label>
-
-                <label>
-                  Ticker
-                  <input id="tickerField" name="ticker" type="text" placeholder="PSQH" />
-                </label>
-
-                <label>
-                  Exchange
-                  <input id="exchangeField" name="exchange" type="text" placeholder="NYSE" />
-                </label>
               </div>
-              <div class="three-up">
-                <label>
-                  Shares
-                  <input id="shareCountField" name="shareCount" type="text" inputmode="decimal" placeholder="10,000" />
-                </label>
 
-                <label>
-                  Cost / share
-                  <input id="costBasisPerShareField" name="costBasisPerShare" type="text" inputmode="decimal" placeholder="5.00" />
-                </label>
+              <div id="stockDetailsPanel" class="stock-details-panel hidden">
+                <div class="two-up">
+                  <label>
+                    Ticker
+                    <input id="tickerField" name="ticker" type="text" placeholder="PSQH" />
+                  </label>
 
-                <label>
-                  Current price
-                  <input id="marketPriceField" name="marketPrice" type="text" inputmode="decimal" placeholder="7.50" />
-                </label>
-              </div>
-              <div class="two-up">
-                <label>
-                  Price date
-                  <input id="marketPriceDateField" name="marketPriceDate" type="date" />
-                </label>
+                  <label>
+                    Exchange
+                    <input id="exchangeField" name="exchange" type="text" placeholder="NYSE" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Shares
+                    <input id="shareCountField" name="shareCount" type="text" inputmode="decimal" placeholder="10,000" />
+                  </label>
 
-                <div class="section-copy subsection-helper" id="stockValuePreview">
-                  Market value will calculate from shares and current price.
+                  <label>
+                    Cost / share
+                    <input id="costBasisPerShareField" name="costBasisPerShare" type="text" inputmode="decimal" placeholder="5.00" />
+                  </label>
+
+                  <label>
+                    Current price
+                    <input id="marketPriceField" name="marketPrice" type="text" inputmode="decimal" placeholder="7.50" />
+                  </label>
+                </div>
+                <div class="two-up">
+                  <label>
+                    Price date
+                    <input id="marketPriceDateField" name="marketPriceDate" type="date" />
+                  </label>
+
+                  <div class="section-copy subsection-helper" id="stockValuePreview">
+                    Market value will calculate from shares and current price.
+                  </div>
                 </div>
               </div>
             </section>

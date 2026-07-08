@@ -613,6 +613,11 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
 }
 
+.stock-details-panel {
+  display: grid;
+  gap: 16px;
+}
+
 .entity-metric-box {
   min-height: 104px;
   padding: 14px;

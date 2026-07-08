@@ -71,6 +71,7 @@ const publicStockSummary = document.getElementById("publicStockSummary");
 const publicStockList = document.getElementById("publicStockList");
 const addPublicSquareStockButton = document.getElementById("addPublicSquareStockButton");
 const addSpaceXStockButton = document.getElementById("addSpaceXStockButton");
+const stockDetailsPanel = document.getElementById("stockDetailsPanel");
 const stockValuePreview = document.getElementById("stockValuePreview");
 const entityDetailSection = document.getElementById("entityDetailSection");
 const entityDetailTitle = document.getElementById("entityDetailTitle");
@@ -1790,7 +1791,7 @@ function hydrateFormFromCompanyRecord(company) {
   }
 
   applyFormInputFormatting();
-  updateStockValuePreview();
+  updateStockDetailsVisibility();
   return true;
 }
 
@@ -1876,6 +1877,10 @@ function isStockInvestment(investment) {
   return assetType.includes("stock") || Boolean(String((investment && investment.ticker) || "").trim());
 }
 
+function isStockAssetType(value) {
+  return String(value || "").toLowerCase().includes("stock");
+}
+
 function stockKey(investment) {
   const ticker = String((investment && investment.ticker) || "").trim().toUpperCase();
   return ticker || companyKey(investment && investment.company);
@@ -1927,6 +1932,29 @@ function getStockTickerLabel(investment) {
     return "No public ticker";
   }
   return exchange ? `${exchange}: ${ticker}` : ticker;
+}
+
+function clearStockFields() {
+  ["ticker", "exchange", "shareCount", "costBasisPerShare", "marketPrice", "marketPriceDate"].forEach(
+    (fieldName) => {
+      if (form && form.elements && form.elements[fieldName]) {
+        form.elements[fieldName].value = "";
+      }
+    }
+  );
+}
+
+function updateStockDetailsVisibility(options = {}) {
+  if (!stockDetailsPanel || !form || !form.elements || !form.elements.assetType) {
+    return;
+  }
+
+  const showStockDetails = isStockAssetType(form.elements.assetType.value);
+  stockDetailsPanel.classList.toggle("hidden", !showStockDetails);
+  if (!showStockDetails && options.clearHiddenFields) {
+    clearStockFields();
+  }
+  updateStockValuePreview();
 }
 
 function updateStockValuePreview() {
@@ -3521,7 +3549,7 @@ function beginEditInvestment(investmentId) {
   cancelEditButton.classList.remove("hidden");
   formMessage.textContent = `Editing ${investment.company}.`;
   applyFormInputFormatting();
-  updateStockValuePreview();
+  updateStockDetailsVisibility();
   showWorkspaceView("capture");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -3540,7 +3568,7 @@ function resetFormToCreateMode() {
   documentMessage.textContent = "";
   renderCapitalActivityRows([]);
   applyFormInputFormatting();
-  updateStockValuePreview();
+  updateStockDetailsVisibility({ clearHiddenFields: true });
 }
 
 function prefillStockPosition(preset) {
@@ -3569,7 +3597,7 @@ function prefillStockPosition(preset) {
   }
 
   formMessage.textContent = `${stock.company} stock position ready. Add shares, cost basis, current price, and save.`;
-  updateStockValuePreview();
+  updateStockDetailsVisibility();
   showWorkspaceView("capture");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -6136,13 +6164,19 @@ addListener(capitalActivityList, "input", (event) => {
 
 attachFormattedInputHandlers();
 applyFormInputFormatting();
-updateStockValuePreview();
+updateStockDetailsVisibility();
 
 ["shareCount", "costBasisPerShare", "marketPrice", "amount"].forEach((fieldName) => {
   if (form && form.elements && form.elements[fieldName]) {
     form.elements[fieldName].addEventListener("input", updateStockValuePreview);
   }
 });
+
+if (form && form.elements && form.elements.assetType) {
+  form.elements.assetType.addEventListener("change", () => {
+    updateStockDetailsVisibility({ clearHiddenFields: true });
+  });
+}
 
 addListener(addPublicSquareStockButton, "click", () => {
   prefillStockPosition({
