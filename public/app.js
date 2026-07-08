@@ -73,6 +73,8 @@ const addPublicSquareStockButton = document.getElementById("addPublicSquareStock
 const addSpaceXStockButton = document.getElementById("addSpaceXStockButton");
 const stockDetailsPanel = document.getElementById("stockDetailsPanel");
 const stockValuePreview = document.getElementById("stockValuePreview");
+const fetchStockQuoteButton = document.getElementById("fetchStockQuoteButton");
+const stockQuoteMessage = document.getElementById("stockQuoteMessage");
 const entityDetailSection = document.getElementById("entityDetailSection");
 const entityDetailTitle = document.getElementById("entityDetailTitle");
 const entityDetailCopy = document.getElementById("entityDetailCopy");
@@ -375,6 +377,11 @@ const moneyFieldNames = [
   "costBasisPerShare",
   "marketPrice"
 ];
+const moneyFieldDecimalPlaces = {
+  shareCount: 6,
+  costBasisPerShare: 6,
+  marketPrice: 6
+};
 
 const CANONICAL_STATUSES = [
   "New Lead",
@@ -480,7 +487,7 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function normalizeMoneyString(value) {
+function normalizeMoneyString(value, decimalPlaces = 2) {
   const text = String(value || "").trim();
   if (!text) {
     return "";
@@ -489,7 +496,7 @@ function normalizeMoneyString(value) {
   const cleaned = text.replace(/[^0-9.]/g, "");
   const [integerPartRaw, decimalPartRaw = ""] = cleaned.split(".");
   const integerPart = integerPartRaw.replace(/^0+(?=\d)/, "") || integerPartRaw || "0";
-  const decimalPart = decimalPartRaw.replace(/\./g, "").slice(0, 2);
+  const decimalPart = decimalPartRaw.replace(/\./g, "").slice(0, decimalPlaces);
   const withCommas = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return decimalPart ? `${withCommas}.${decimalPart}` : withCommas;
 }
@@ -516,7 +523,7 @@ function formatMoneyField(field) {
     return;
   }
 
-  field.value = normalizeMoneyString(field.value);
+  field.value = normalizeMoneyString(field.value, moneyFieldDecimalPlaces[field.name] || 2);
 }
 
 function applyFormInputFormatting() {
@@ -1595,10 +1602,10 @@ function attachFormattedInputHandlers() {
     }
 
     field.dataset.formattedBound = "true";
-    field.addEventListener("input", () => {
+    field.addEventListener("blur", () => {
       formatMoneyField(field);
     });
-    field.addEventListener("blur", () => {
+    field.addEventListener("change", () => {
       formatMoneyField(field);
     });
   });
@@ -1974,6 +1981,62 @@ function updateStockValuePreview() {
   stockValuePreview.textContent = marketValue
     ? `Market value ${formatMoney(marketValue)}${costBasis ? ` • Cost basis ${formatMoney(costBasis)} • Gain/loss ${formatMoney(gainLoss)}` : ""}`
     : "Market value will calculate from shares and current price.";
+}
+
+async function fetchStockQuoteForForm() {
+  if (!form || !form.elements || !form.elements.ticker) {
+    return;
+  }
+
+  const ticker = String(form.elements.ticker.value || "").trim().toUpperCase();
+  if (!ticker) {
+    if (stockQuoteMessage) {
+      stockQuoteMessage.textContent = "Enter a ticker first.";
+    }
+    return;
+  }
+
+  if (fetchStockQuoteButton) {
+    fetchStockQuoteButton.disabled = true;
+    fetchStockQuoteButton.textContent = "Updating...";
+  }
+  if (stockQuoteMessage) {
+    stockQuoteMessage.textContent = `Looking up ${ticker}...`;
+  }
+
+  try {
+    const quote = await fetchJson(`/api/stock-quote?ticker=${encodeURIComponent(ticker)}`);
+    if (form.elements.marketPrice) {
+      form.elements.marketPrice.value = normalizeMoneyString(String(quote.price || ""), 6);
+    }
+    if (form.elements.marketPriceDate) {
+      form.elements.marketPriceDate.value = quote.priceDate || "";
+    }
+    if (form.elements.exchange && quote.exchangeName && !form.elements.exchange.value) {
+      form.elements.exchange.value = quote.exchangeName;
+    }
+    updateStockValuePreview();
+    if (stockQuoteMessage) {
+      stockQuoteMessage.textContent = `Updated ${quote.symbol || ticker} at ${formatMoney(quote.price)}${quote.priceDate ? ` on ${quote.priceDate}` : ""}.`;
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      if (stockQuoteMessage) {
+        stockQuoteMessage.textContent = "Your session expired. Please sign in again.";
+      }
+      return;
+    }
+
+    if (stockQuoteMessage) {
+      stockQuoteMessage.textContent = error.message || "Stock price could not be loaded.";
+    }
+  } finally {
+    if (fetchStockQuoteButton) {
+      fetchStockQuoteButton.disabled = false;
+      fetchStockQuoteButton.textContent = "Update price from ticker";
+    }
+  }
 }
 
 function formatPercent(value) {
@@ -6155,11 +6218,23 @@ addListener(capitalActivityList, "click", (event) => {
 
 addListener(capitalActivityList, "input", (event) => {
   const amountField = event.target.closest('[data-capital-field="amount"]');
-  if (!amountField) {
-    return;
+  if (amountField) {
+    updateStockValuePreview();
   }
+});
 
-  amountField.value = normalizeMoneyString(amountField.value);
+addListener(capitalActivityList, "blur", (event) => {
+  const amountField = event.target.closest('[data-capital-field="amount"]');
+  if (amountField) {
+    amountField.value = normalizeMoneyString(amountField.value);
+  }
+}, true);
+
+addListener(capitalActivityList, "change", (event) => {
+  const amountField = event.target.closest('[data-capital-field="amount"]');
+  if (amountField) {
+    amountField.value = normalizeMoneyString(amountField.value);
+  }
 });
 
 attachFormattedInputHandlers();
@@ -6177,6 +6252,10 @@ if (form && form.elements && form.elements.assetType) {
     updateStockDetailsVisibility({ clearHiddenFields: true });
   });
 }
+
+addListener(fetchStockQuoteButton, "click", () => {
+  fetchStockQuoteForForm();
+});
 
 addListener(addPublicSquareStockButton, "click", () => {
   prefillStockPosition({
@@ -6832,7 +6911,10 @@ function handleReconciliationFieldEdit(event) {
     return;
   }
 
-  if (editableTarget.dataset.moneyInput === "true") {
+  if (
+    editableTarget.dataset.moneyInput === "true" &&
+    (event.type === "change" || event.type === "blur")
+  ) {
     editableTarget.value = normalizeMoneyString(editableTarget.value);
   }
 
@@ -6844,6 +6926,7 @@ function handleReconciliationFieldEdit(event) {
 
 addListener(reconciliationList, "input", handleReconciliationFieldEdit);
 addListener(reconciliationList, "change", handleReconciliationFieldEdit);
+addListener(reconciliationList, "blur", handleReconciliationFieldEdit, true);
 
 addListener(dataQualityList, "click", (event) => {
   const dismissTarget = event.target.closest("[data-action='dismiss-quality-alert']");

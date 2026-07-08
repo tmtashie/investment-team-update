@@ -464,6 +464,76 @@ function formatNumericString(value) {
   return Number.isFinite(value) && value ? value.toLocaleString("en-US", { maximumFractionDigits: 4 }) : "";
 }
 
+function formatQuotePrice(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return "";
+  }
+
+  return parsed.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6
+  });
+}
+
+async function fetchStockQuote(ticker) {
+  const symbol = String(ticker || "").trim().toUpperCase();
+  if (!/^[A-Z0-9.^=-]{1,24}$/.test(symbol)) {
+    throw new Error("Enter a valid ticker symbol.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const quoteUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+      symbol
+    )}?range=1d&interval=1d`;
+    const quoteResponse = await fetch(quoteUrl, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "investment-team-updates/1.0"
+      }
+    });
+
+    if (!quoteResponse.ok) {
+      throw new Error(`Quote lookup failed with status ${quoteResponse.status}.`);
+    }
+
+    const payload = await quoteResponse.json();
+    const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
+    const meta = (result && result.meta) || {};
+    const closeValues =
+      result &&
+      result.indicators &&
+      result.indicators.quote &&
+      result.indicators.quote[0] &&
+      Array.isArray(result.indicators.quote[0].close)
+        ? result.indicators.quote[0].close
+        : [];
+    const latestClose = [...closeValues].reverse().find((value) => Number.isFinite(Number(value)));
+    const price = Number(meta.regularMarketPrice || latestClose);
+    const marketTime = Number(meta.regularMarketTime || 0);
+    const priceDate = marketTime
+      ? new Date(marketTime * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error(`No current price was found for ${symbol}.`);
+    }
+
+    return {
+      symbol: String(meta.symbol || symbol).toUpperCase(),
+      price: formatQuotePrice(price),
+      priceDate,
+      exchangeName: String(meta.exchangeName || meta.fullExchangeName || "").trim(),
+      currency: String(meta.currency || "USD").trim() || "USD",
+      source: "Yahoo Finance"
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function normalizeInvestment(entry) {
   const entity = String(entry.entity || "").trim();
   const investmentId = entry.id || makeId();
@@ -3986,6 +4056,26 @@ const server = http.createServer(async (request, response) => {
       user
     });
     return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/stock-quote") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const quote = await fetchStockQuote(url.searchParams.get("ticker"));
+      sendJson(response, 200, quote);
+      return;
+    } catch (error) {
+      const message =
+        error && error.name === "AbortError"
+          ? "Stock quote lookup timed out. Try again in a moment."
+          : error.message || "Stock quote could not be loaded.";
+      sendJson(response, 502, { error: message });
+      return;
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/data-alerts/dismiss") {
