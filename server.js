@@ -1601,6 +1601,78 @@ function dxnpv(rate, cashFlows) {
   }, 0);
 }
 
+function bisectXirrRoot(cashFlows, low, high) {
+  let lowValue = xnpv(low, cashFlows);
+  let highValue = xnpv(high, cashFlows);
+
+  if (Math.abs(lowValue) < 1e-7) {
+    return low;
+  }
+
+  if (Math.abs(highValue) < 1e-7) {
+    return high;
+  }
+
+  if (lowValue * highValue > 0) {
+    return null;
+  }
+
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const mid = (low + high) / 2;
+    const midValue = xnpv(mid, cashFlows);
+
+    if (Math.abs(midValue) < 1e-7) {
+      return mid;
+    }
+
+    if (lowValue * midValue <= 0) {
+      high = mid;
+      highValue = midValue;
+    } else {
+      low = mid;
+      lowValue = midValue;
+    }
+  }
+
+  return (low + high) / 2;
+}
+
+function findXirrByBrackets(cashFlows) {
+  const guesses = [
+    -0.9999, -0.95, -0.75, -0.5, -0.25, -0.1, -0.05, 0, 0.05, 0.1, 0.15, 0.25,
+    0.5, 0.75, 1, 1.5, 2, 3, 5, 10, 25, 50, 100, 250, 1000
+  ];
+  const roots = [];
+
+  for (let index = 0; index < guesses.length - 1; index += 1) {
+    const low = guesses[index];
+    const high = guesses[index + 1];
+    const lowValue = xnpv(low, cashFlows);
+    const highValue = xnpv(high, cashFlows);
+
+    if (!Number.isFinite(lowValue) || !Number.isFinite(highValue)) {
+      continue;
+    }
+
+    if (Math.abs(lowValue) < 1e-7) {
+      roots.push(low);
+      continue;
+    }
+
+    if (lowValue * highValue <= 0) {
+      const root = bisectXirrRoot(cashFlows, low, high);
+      if (Number.isFinite(root)) {
+        roots.push(root);
+      }
+    }
+  }
+
+  const uniqueRoots = roots.filter(
+    (root, index) => roots.findIndex((candidate) => Math.abs(candidate - root) < 1e-6) === index
+  );
+  return uniqueRoots.sort((left, right) => Math.abs(left - 0.15) - Math.abs(right - 0.15))[0] ?? null;
+}
+
 function calculateXirr(cashFlows) {
   if (!Array.isArray(cashFlows) || cashFlows.length < 2) {
     return null;
@@ -1638,37 +1710,7 @@ function calculateXirr(cashFlows) {
     rate = nextRate;
   }
 
-  let low = -0.9999;
-  let high = 1;
-  let lowValue = xnpv(low, sorted);
-  let highValue = xnpv(high, sorted);
-
-  for (let attempt = 0; attempt < 12 && lowValue * highValue > 0; attempt += 1) {
-    high *= 2;
-    highValue = xnpv(high, sorted);
-  }
-
-  if (lowValue * highValue > 0) {
-    return null;
-  }
-
-  for (let iteration = 0; iteration < 80; iteration += 1) {
-    const mid = (low + high) / 2;
-    const midValue = xnpv(mid, sorted);
-
-    if (Math.abs(midValue) < 1e-7) {
-      return mid;
-    }
-
-    if (lowValue * midValue <= 0) {
-      high = mid;
-    } else {
-      low = mid;
-      lowValue = midValue;
-    }
-  }
-
-  return (low + high) / 2;
+  return findXirrByBrackets(sorted);
 }
 
 function normalizeHeaderKey(value) {

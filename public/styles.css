@@ -618,6 +618,12 @@ button:disabled {
   gap: 16px;
 }
 
+.cash-flow-audit {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .entity-metric-box {
   min-height: 104px;
   padding: 14px;

@@ -2069,6 +2069,25 @@ function yearFraction(startDate, endDate) {
   return (endDate.getTime() - startDate.getTime()) / (365 * 24 * 60 * 60 * 1000);
 }
 
+function getLatestCashFlowDate(cashFlows) {
+  return (Array.isArray(cashFlows) ? cashFlows : []).reduce((latest, cashFlow) => {
+    if (!(cashFlow.date instanceof Date) || !Number.isFinite(cashFlow.date.getTime())) {
+      return latest;
+    }
+
+    return !latest || cashFlow.date > latest ? cashFlow.date : latest;
+  }, null);
+}
+
+function isTerminalMarkAfterCashFlows(cashFlows, terminalMark) {
+  if (!terminalMark || !terminalMark.date) {
+    return false;
+  }
+
+  const latestCashFlowDate = getLatestCashFlowDate(cashFlows);
+  return !latestCashFlowDate || terminalMark.date >= latestCashFlowDate;
+}
+
 function xnpv(rate, cashFlows) {
   const firstDate = cashFlows[0].date;
   return cashFlows.reduce(
@@ -2088,6 +2107,74 @@ function dxnpv(rate, cashFlows) {
 
     return sum - (fraction * cashFlow.amount) / Math.pow(1 + rate, fraction + 1);
   }, 0);
+}
+
+function bisectXirrRoot(cashFlows, low, high) {
+  let lowValue = xnpv(low, cashFlows);
+  let highValue = xnpv(high, cashFlows);
+
+  if (Math.abs(lowValue) < 1e-7) {
+    return low;
+  }
+  if (Math.abs(highValue) < 1e-7) {
+    return high;
+  }
+  if (lowValue * highValue > 0) {
+    return null;
+  }
+
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const mid = (low + high) / 2;
+    const midValue = xnpv(mid, cashFlows);
+    if (Math.abs(midValue) < 1e-7) {
+      return mid;
+    }
+
+    if (lowValue * midValue <= 0) {
+      high = mid;
+      highValue = midValue;
+    } else {
+      low = mid;
+      lowValue = midValue;
+    }
+  }
+
+  return (low + high) / 2;
+}
+
+function findXirrByBrackets(cashFlows) {
+  const guesses = [
+    -0.9999, -0.95, -0.75, -0.5, -0.25, -0.1, -0.05, 0, 0.05, 0.1, 0.15, 0.25,
+    0.5, 0.75, 1, 1.5, 2, 3, 5, 10, 25, 50, 100, 250, 1000
+  ];
+  const roots = [];
+
+  for (let index = 0; index < guesses.length - 1; index += 1) {
+    const low = guesses[index];
+    const high = guesses[index + 1];
+    const lowValue = xnpv(low, cashFlows);
+    const highValue = xnpv(high, cashFlows);
+    if (!Number.isFinite(lowValue) || !Number.isFinite(highValue)) {
+      continue;
+    }
+
+    if (Math.abs(lowValue) < 1e-7) {
+      roots.push(low);
+      continue;
+    }
+
+    if (lowValue * highValue <= 0) {
+      const root = bisectXirrRoot(cashFlows, low, high);
+      if (Number.isFinite(root)) {
+        roots.push(root);
+      }
+    }
+  }
+
+  const uniqueRoots = roots.filter(
+    (root, index) => roots.findIndex((candidate) => Math.abs(candidate - root) < 1e-6) === index
+  );
+  return uniqueRoots.sort((left, right) => Math.abs(left - 0.15) - Math.abs(right - 0.15))[0] ?? null;
 }
 
 function calculateXirr(cashFlows) {
@@ -2125,36 +2212,7 @@ function calculateXirr(cashFlows) {
     rate = nextRate;
   }
 
-  let low = -0.9999;
-  let high = 1;
-  let lowValue = xnpv(low, sorted);
-  let highValue = xnpv(high, sorted);
-
-  for (let attempt = 0; attempt < 12 && lowValue * highValue > 0; attempt += 1) {
-    high *= 2;
-    highValue = xnpv(high, sorted);
-  }
-
-  if (lowValue * highValue > 0) {
-    return null;
-  }
-
-  for (let iteration = 0; iteration < 80; iteration += 1) {
-    const mid = (low + high) / 2;
-    const midValue = xnpv(mid, sorted);
-    if (Math.abs(midValue) < 1e-7) {
-      return mid;
-    }
-
-    if (lowValue * midValue <= 0) {
-      high = mid;
-    } else {
-      low = mid;
-      lowValue = midValue;
-    }
-  }
-
-  return (low + high) / 2;
+  return findXirrByBrackets(sorted);
 }
 
 function pickLatestNumericValue(updates, fieldName) {
@@ -2301,7 +2359,7 @@ function buildPerformanceView(baseCashFlows, terminalMark, investedCapital, dist
   const terminalValue = terminalMark && terminalMark.value ? terminalMark.value : 0;
   const terminalDate = terminalMark && terminalMark.date ? terminalMark.date : null;
   const cashFlows = [...baseCashFlows];
-  if (terminalValue > 0 && terminalDate) {
+  if (terminalValue > 0 && terminalDate && isTerminalMarkAfterCashFlows(baseCashFlows, terminalMark)) {
     cashFlows.push({ date: terminalDate, amount: terminalValue });
   }
 
@@ -2465,7 +2523,11 @@ function buildAggregatePerformance(companyCollections) {
     companyInputs.forEach(({ inputs }) => {
       cashFlows.push(...inputs.baseCashFlows);
       const terminalMark = inputs[markName];
-      if (terminalMark.value > 0 && terminalMark.date) {
+      if (
+        terminalMark.value > 0 &&
+        terminalMark.date &&
+        isTerminalMarkAfterCashFlows(inputs.baseCashFlows, terminalMark)
+      ) {
         cashFlows.push({ date: terminalMark.date, amount: terminalMark.value });
         terminalTotal += terminalMark.value;
       }
@@ -2578,6 +2640,48 @@ function buildEntityRowTotals(rows) {
     internal: aggregatePerformance.internal,
     exit: aggregatePerformance.exit
   };
+}
+
+function buildEntityCashFlowAuditRows(rows, markName = "internalMark") {
+  return rows
+    .filter((row) => row.includeInEntityPerformance)
+    .flatMap((row) => {
+      const companyName = row.latest && row.latest.company ? row.latest.company : "Unnamed investment";
+      const inputs = buildPerformanceInputs(row.company.updates);
+      const cashFlowRows = inputs.baseCashFlows.map((cashFlow) => ({
+        company: companyName,
+        date: cashFlow.date,
+        type: cashFlow.amount < 0 ? "Contribution" : "Distribution",
+        amount: cashFlow.amount,
+        includedInXirr: true
+      }));
+      const terminalMark = inputs[markName];
+      const terminalIncluded =
+        terminalMark &&
+        terminalMark.value > 0 &&
+        terminalMark.date &&
+        isTerminalMarkAfterCashFlows(inputs.baseCashFlows, terminalMark);
+
+      if (terminalMark && terminalMark.value > 0 && terminalMark.date) {
+        cashFlowRows.push({
+          company: companyName,
+          date: terminalMark.date,
+          type: "Terminal NAV",
+          amount: terminalMark.value,
+          includedInXirr: terminalIncluded
+        });
+      }
+
+      return cashFlowRows;
+    })
+    .sort((left, right) => {
+      const dateDelta = (left.date || new Date(0)) - (right.date || new Date(0));
+      if (dateDelta) {
+        return dateDelta;
+      }
+
+      return left.company.localeCompare(right.company);
+    });
 }
 
 function csvEscape(value) {
@@ -2942,6 +3046,24 @@ function buildDataQualityAlerts() {
       );
     }
 
+    const performanceInputs = buildPerformanceInputs(row.company.updates);
+    const latestCashFlowDate = getLatestCashFlowDate(performanceInputs.baseCashFlows);
+    const valuationDate = parseDateValue(latest.valuationDate, null);
+    if (
+      latestCashFlowDate &&
+      valuationDate &&
+      latestCashFlowDate > valuationDate &&
+      (performance.officialValue > 0 || performance.internalValue > 0)
+    ) {
+      addQualityAlert(
+        alerts,
+        row,
+        "High",
+        "Cash flow after valuation date",
+        `Latest cash flow is ${formatDisplayDate(latestCashFlowDate)}, after the valuation date ${formatDisplayDate(valuationDate)}. Update the valuation date so XIRR can be calculated correctly.`
+      );
+    }
+
     if ((hasCommittedStatus || statusEquals(normalizedStatus, "Funded") || statusEquals(normalizedStatus, "Active")) && !latest.nextStep) {
       addQualityAlert(alerts, row, "Low", "No next step", "Add a next step if this investment needs an upcoming follow-up or valuation review.");
     }
@@ -3107,6 +3229,7 @@ function renderEntityDetail() {
   );
   const entityRows = buildEntityRows(allInvestments, selectedEntity);
   const performance = buildEntityRowTotals(entityRows);
+  const cashFlowAuditRows = buildEntityCashFlowAuditRows(entityRows, "internalMark");
 
   entityDetailSection.classList.remove("hidden");
   entityDetailTitle.textContent = selectedEntity;
@@ -3122,6 +3245,8 @@ function renderEntityDetail() {
     { label: "Distributions", value: formatMoney(performance.distributions) },
     { label: "Official NAV", value: formatMoney(performance.officialValue) },
     { label: "Internal NAV", value: formatMoney(performance.internalValue) },
+    { label: "Internal XIRR", value: formatPercent(performance.internal.xirr) },
+    { label: "Internal MOIC", value: formatTurns(performance.internal.moic) },
     { label: "Official XIRR", value: formatPercent(performance.official.xirr) },
     { label: "Official MOIC", value: formatTurns(performance.official.moic) },
     { label: "Current investments", value: String(investmentCount) }
@@ -3136,7 +3261,46 @@ function renderEntityDetail() {
     )
     .join("");
 
-  entityDetailInvestments.innerHTML = investments.length
+  const cashFlowAuditMarkup = cashFlowAuditRows.length
+    ? `
+      <section class="cash-flow-audit">
+        <div class="panel-header panel-header-stack">
+          <div>
+            <h3>XIRR cash-flow audit</h3>
+            <p class="section-copy">These dated cash flows feed the entity Internal XIRR. Excluded NAV rows usually mean the valuation date is before the latest contribution.</p>
+          </div>
+        </div>
+        <table class="reconciliation-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Company</th>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>XIRR use</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${cashFlowAuditRows
+              .map(
+                (row) => `
+                  <tr>
+                    <td>${escapeHtml(formatDisplayDate(row.date))}</td>
+                    <td>${escapeHtml(row.company)}</td>
+                    <td>${escapeHtml(row.type)}</td>
+                    <td>${escapeHtml(formatMoney(row.amount))}</td>
+                    <td>${escapeHtml(row.includedInXirr ? "Included" : "Excluded: valuation before cash flow")}</td>
+                  </tr>
+                `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </section>
+    `
+    : '<p class="update-meta">No dated cash flows are available for XIRR yet.</p>';
+
+  const investmentMarkup = investments.length
     ? investments
         .map((investment) => {
           const companyPerformance =
@@ -3178,6 +3342,8 @@ function renderEntityDetail() {
         })
         .join("")
     : '<p class="update-meta">No investments are assigned to this entity yet.</p>';
+
+  entityDetailInvestments.innerHTML = `${cashFlowAuditMarkup}${investmentMarkup}`;
 }
 
 function renderFilterOptions() {
