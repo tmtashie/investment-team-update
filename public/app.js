@@ -79,6 +79,7 @@ const stockDetailsPanel = document.getElementById("stockDetailsPanel");
 const stockValuePreview = document.getElementById("stockValuePreview");
 const fetchStockQuoteButton = document.getElementById("fetchStockQuoteButton");
 const stockQuoteMessage = document.getElementById("stockQuoteMessage");
+const valuationHelperText = document.getElementById("valuationHelperText");
 const entityDetailSection = document.getElementById("entityDetailSection");
 const entityDetailTitle = document.getElementById("entityDetailTitle");
 const entityDetailCopy = document.getElementById("entityDetailCopy");
@@ -231,6 +232,8 @@ let publicStockFilters = {
   entity: "",
   search: ""
 };
+let publicStockQuoteRequestKeys = new Set();
+let automaticPublicStockRefreshInFlight = false;
 
 const REPORT_UPDATE_TYPES = [
   "Monthly",
@@ -643,6 +646,15 @@ function showWorkspaceView(viewName) {
   workspaceMenuLinks.forEach((link) => {
     link.classList.toggle("is-active", link.dataset.view === activeWorkspaceView);
   });
+
+  maybeAutoRefreshPublicStockPrices();
+}
+
+function maybeAutoRefreshPublicStockPrices() {
+  if (activeWorkspaceView !== "public-stocks" || !investmentsLoaded || !canEditWorkspace()) {
+    return;
+  }
+  refreshPublicStockPrices({ automatic: true });
 }
 
 function canEditWorkspace() {
@@ -1893,8 +1905,16 @@ function isStockInvestment(investment) {
   return assetType.includes("stock") || Boolean(String((investment && investment.ticker) || "").trim());
 }
 
+function isPublicStockInvestment(investment) {
+  return String((investment && investment.assetType) || "").trim() === "Public Stock";
+}
+
 function isStockAssetType(value) {
   return String(value || "").toLowerCase().includes("stock");
+}
+
+function isPublicStockAssetType(value) {
+  return String(value || "").trim() === "Public Stock";
 }
 
 function stockKey(investment) {
@@ -1961,6 +1981,90 @@ function getStockMetrics(investment) {
   };
 }
 
+function getPublicStockMarketValue(investment) {
+  const metrics = getStockMetrics(investment);
+  return metrics.shares && metrics.currentPrice ? metrics.shares * metrics.currentPrice : 0;
+}
+
+function getPublicStockSyncedValuation(investment) {
+  if (!isPublicStockInvestment(investment)) {
+    return null;
+  }
+
+  const marketValue = getPublicStockMarketValue(investment);
+  if (!marketValue) {
+    return null;
+  }
+
+  const normalizedMarketValue = normalizeMoneyString(String(marketValue), 6);
+  return {
+    marketValue: normalizedMarketValue,
+    valuationDate: String(investment.marketPriceDate || "").trim(),
+    officialValue: normalizedMarketValue,
+    internalValue: normalizedMarketValue
+  };
+}
+
+function applyPublicStockValuationSync(payload) {
+  if (!isPublicStockInvestment(payload)) {
+    return payload;
+  }
+
+  const syncedValuation = getPublicStockSyncedValuation(payload);
+  if (!syncedValuation) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    marketValue: syncedValuation.marketValue,
+    valuationDate: syncedValuation.valuationDate,
+    officialValue: syncedValuation.officialValue,
+    internalValue: syncedValuation.internalValue
+  };
+}
+
+function publicStockValuationNeedsPatch(investment, quote) {
+  const nextPayload = getQuotePatchPayload(investment, quote);
+  return (
+    normalizeMoneyString(investment.marketPrice || "", 6) !==
+      normalizeMoneyString(nextPayload.marketPrice || "", 6) ||
+    String(investment.marketPriceDate || "") !== String(nextPayload.marketPriceDate || "") ||
+    normalizeMoneyString(investment.marketValue || "", 6) !==
+      normalizeMoneyString(nextPayload.marketValue || "", 6) ||
+    String(investment.valuationDate || "") !== String(nextPayload.valuationDate || "") ||
+    normalizeMoneyString(investment.officialValue || "", 6) !==
+      normalizeMoneyString(nextPayload.officialValue || "", 6) ||
+    normalizeMoneyString(investment.internalValue || "", 6) !==
+      normalizeMoneyString(nextPayload.internalValue || "", 6)
+  );
+}
+
+function getPublicStockQuoteRequestKey(investment) {
+  return `${investment.id || stockKey(investment)}::${String(investment.ticker || "").trim().toUpperCase()}`;
+}
+
+function buildPublicHoldingsSummary(entity) {
+  const positions = allInvestments.filter(
+    (investment) =>
+      isPublicStockInvestment(investment) &&
+      normalizeEntityName(investment.entity) === normalizeEntityName(entity)
+  );
+  const marketValue = positions.reduce((sum, investment) => sum + getStockMetrics(investment).marketValue, 0);
+  const costBasis = positions.reduce((sum, investment) => sum + getStockMetrics(investment).totalCostBasis, 0);
+  const gainLoss = marketValue - costBasis;
+  const gainLossPercent = costBasis > 0 ? gainLoss / costBasis : null;
+
+  return {
+    positions,
+    marketValue,
+    costBasis,
+    gainLoss,
+    gainLossPercent,
+    ytdChangePercent: null
+  };
+}
+
 function formatSignedMoney(value) {
   const amount = toNumber(value);
   if (!amount) {
@@ -1995,13 +2099,7 @@ function getFilteredPublicStockRows(stocks) {
 }
 
 function isPublicStockRow(investment) {
-  const assetType = String((investment && investment.assetType) || "").toLowerCase();
-  const ticker = String((investment && investment.ticker) || "").trim();
-  return Boolean(
-    (investment && investment.isWatchlistOnly) ||
-      assetType.includes("public") ||
-      (ticker && !assetType.includes("private"))
-  );
+  return Boolean((investment && investment.isWatchlistOnly) || isPublicStockInvestment(investment));
 }
 
 function renderPublicStockFilterOptions(stocks) {
@@ -2022,7 +2120,7 @@ function renderPublicStockFilterOptions(stocks) {
 }
 
 function getQuotePatchPayload(investment, quote) {
-  return {
+  return applyPublicStockValuationSync({
     company: investment.company || "",
     entity: investment.entity || "",
     assetType: investment.assetType || "",
@@ -2073,7 +2171,7 @@ function getQuotePatchPayload(investment, quote) {
     decisionSummary: investment.decisionSummary || "",
     reportUpdates: Array.isArray(investment.reportUpdates) ? investment.reportUpdates : [],
     recipients: Array.isArray(investment.recipients) ? investment.recipients : []
-  };
+  });
 }
 
 function getStockTickerLabel(investment) {
@@ -2101,17 +2199,57 @@ function updateStockDetailsVisibility(options = {}) {
   }
 
   const showStockDetails = isStockAssetType(form.elements.assetType.value);
+  const publicStockDetails = isPublicStockAssetType(form.elements.assetType.value);
   stockDetailsPanel.classList.toggle("hidden", !showStockDetails);
   if (!showStockDetails && options.clearHiddenFields) {
     clearStockFields();
   }
+  ["valuationDate", "officialValue", "internalValue"].forEach((fieldName) => {
+    if (form.elements[fieldName]) {
+      form.elements[fieldName].readOnly = publicStockDetails;
+    }
+  });
+  if (valuationHelperText) {
+    valuationHelperText.textContent = publicStockDetails
+      ? "For Public Stocks, valuation date, official value, and internal value are driven by share count and current market price. Exit value stays manual."
+      : "Use the latest valuation date when you update official, internal, or exit marks.";
+  }
+  syncPublicStockFormValuation();
   updateStockValuePreview();
+}
+
+function syncPublicStockFormValuation() {
+  if (!form || !form.elements || !isPublicStockAssetType(form.elements.assetType.value)) {
+    return;
+  }
+
+  const previewInvestment = {
+    assetType: "Public Stock",
+    shareCount: form.elements.shareCount ? form.elements.shareCount.value : "",
+    marketPrice: form.elements.marketPrice ? form.elements.marketPrice.value : "",
+    marketPriceDate: form.elements.marketPriceDate ? form.elements.marketPriceDate.value : ""
+  };
+  const syncedValuation = getPublicStockSyncedValuation(previewInvestment);
+  if (!syncedValuation) {
+    return;
+  }
+
+  if (form.elements.valuationDate) {
+    form.elements.valuationDate.value = syncedValuation.valuationDate;
+  }
+  if (form.elements.officialValue) {
+    form.elements.officialValue.value = syncedValuation.officialValue;
+  }
+  if (form.elements.internalValue) {
+    form.elements.internalValue.value = syncedValuation.internalValue;
+  }
 }
 
 function updateStockValuePreview() {
   if (!stockValuePreview || !form || !form.elements) {
     return;
   }
+  syncPublicStockFormValuation();
 
   const previewInvestment = {
     amount: form.elements.amount ? form.elements.amount.value : "",
@@ -3010,11 +3148,9 @@ function buildDashboardCards(investments) {
     (row) => row.performance.internalValue
   );
   const updateRequestStats = buildUpdateRequestStats(investments);
-  const stockRows = getPublicStockRows(investments);
-  const publicStockRows = stockRows.filter((investment) =>
-    String(investment.assetType || "").toLowerCase().includes("public")
-  );
-  const stockMarketValue = stockRows.reduce((sum, investment) => sum + getStockMarketValue(investment), 0);
+  const publicStockRows = getPublicStockRows(investments).filter(isPublicStockRow);
+  const savedPublicStockRows = publicStockRows.filter((investment) => !investment.isWatchlistOnly);
+  const stockMarketValue = savedPublicStockRows.reduce((sum, investment) => sum + getStockMarketValue(investment), 0);
 
   let cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
@@ -3037,7 +3173,7 @@ function buildDashboardCards(investments) {
       value: `${updateRequestStats.sent} sent / ${updateRequestStats.awaiting} awaiting / ${updateRequestStats.followUp} follow-up`,
       action: "portfolio"
     },
-    { label: "Public stocks", value: String(publicStockRows.length), action: "public-stocks" },
+    { label: "Public stocks", value: String(savedPublicStockRows.length), action: "public-stocks" },
     { label: "Stock market value", value: formatMoney(stockMarketValue), action: "public-stocks" },
     { label: "Data alerts", value: String(qualityAlerts.length), action: "quality" },
     { label: "Total committed capital", value: formatMoney(totalCommittedCapital), action: "portfolio" },
@@ -3263,6 +3399,7 @@ function renderDashboard(investments) {
     .map(
       ({ entity, rows }) => {
         const totals = buildEntityRowTotals(rows);
+        const publicHoldings = buildPublicHoldingsSummary(entity);
         const metrics = [
           { label: "Total committed capital", value: formatMoney(totals.reportedAmount) },
           { label: "Called capital", value: formatMoney(totals.investedCapital) },
@@ -3298,6 +3435,40 @@ function renderDashboard(investments) {
               .join("")}
           </div>
         </article>
+        ${
+          publicHoldings.positions.length
+            ? `
+              <article class="dashboard-card entity-performance-card public-holdings-card" data-entity="${escapeHtml(entity)}">
+                <div class="entity-performance-header">
+                  <div>
+                    <p class="dashboard-label">Public Holdings</p>
+                    <h3>${escapeHtml(entity)}</h3>
+                  </div>
+                  <span class="status-chip">${escapeHtml(String(publicHoldings.positions.length))} position${publicHoldings.positions.length === 1 ? "" : "s"}</span>
+                </div>
+                <div class="entity-metric-grid">
+                  ${[
+                    { label: "Current public holdings value", value: formatMoney(publicHoldings.marketValue) },
+                    { label: "Total public stock cost basis", value: formatMoney(publicHoldings.costBasis) },
+                    { label: "Unrealized gain/loss $", value: formatSignedMoney(publicHoldings.gainLoss), performance: publicHoldings.gainLoss },
+                    { label: "Unrealized gain/loss %", value: formatStockPercent(publicHoldings.gainLossPercent), performance: publicHoldings.gainLossPercent },
+                    { label: "Public stock positions", value: String(publicHoldings.positions.length) },
+                    { label: "YTD change %", value: formatStockPercent(publicHoldings.ytdChangePercent) }
+                  ]
+                    .map(
+                      (metric) => `
+                        <div class="entity-metric-box">
+                          <p class="dashboard-label">${escapeHtml(metric.label)}</p>
+                          <p class="dashboard-value ${metric.performance === undefined ? "" : escapeHtml(getStockPerformanceClass(metric.performance))}">${escapeHtml(metric.value)}</p>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+            : ""
+        }
       `;
       }
     )
@@ -5563,42 +5734,63 @@ function renderPublicStocks() {
     : '<p class="update-meta">No public stock positions match those filters.</p>';
 }
 
-async function refreshPublicStockPrices() {
+async function refreshPublicStockPrices(options = {}) {
   if (!refreshPublicStockPricesButton) {
     return;
   }
 
+  const automatic = Boolean(options.automatic);
+  const force = Boolean(options.force);
   const positions = getFilteredPublicStockRows(getPublicStockRows(allInvestments).filter(isPublicStockRow)).filter(
-    (investment) => !investment.isWatchlistOnly && investment.id && investment.ticker
+    (investment) =>
+      !investment.isWatchlistOnly &&
+      isPublicStockInvestment(investment) &&
+      investment.id &&
+      investment.ticker &&
+      (force || !publicStockQuoteRequestKeys.has(getPublicStockQuoteRequestKey(investment)))
   );
   if (!positions.length) {
-    if (publicStockPriceMessage) {
+    if (!automatic && publicStockPriceMessage) {
       publicStockPriceMessage.textContent = "No saved public stock positions with tickers are visible.";
     }
     return;
   }
 
-  refreshPublicStockPricesButton.disabled = true;
-  refreshPublicStockPricesButton.textContent = "Refreshing...";
+  if (automaticPublicStockRefreshInFlight && automatic) {
+    return;
+  }
+  automaticPublicStockRefreshInFlight = automatic;
+  if (!automatic) {
+    refreshPublicStockPricesButton.disabled = true;
+    refreshPublicStockPricesButton.textContent = "Refreshing...";
+  }
   if (publicStockPriceMessage) {
-    publicStockPriceMessage.textContent = `Refreshing ${positions.length} position${positions.length === 1 ? "" : "s"}...`;
+    publicStockPriceMessage.textContent = automatic
+      ? `Refreshing latest public stock prices...`
+      : `Refreshing ${positions.length} position${positions.length === 1 ? "" : "s"}...`;
   }
 
   const updated = [];
+  const checked = [];
   const failed = [];
   try {
     for (const investment of positions) {
       const ticker = String(investment.ticker || "").trim().toUpperCase();
+      publicStockQuoteRequestKeys.add(getPublicStockQuoteRequestKey(investment));
       try {
         const quote = await fetchJson(`/api/stock-quote?ticker=${encodeURIComponent(ticker)}`);
-        await fetchJson(`/api/investments/${investment.id}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(getQuotePatchPayload(investment, quote))
-        });
-        updated.push(`${quote.symbol || ticker}${quote.priceDate ? ` (${quote.priceDate})` : ""}`);
+        if (publicStockValuationNeedsPatch(investment, quote)) {
+          await fetchJson(`/api/investments/${investment.id}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(getQuotePatchPayload(investment, quote))
+          });
+          updated.push(`${quote.symbol || ticker}${quote.priceDate ? ` (${quote.priceDate})` : ""}`);
+        } else {
+          checked.push(`${quote.symbol || ticker}${quote.priceDate ? ` (${quote.priceDate})` : ""}`);
+        }
       } catch (error) {
         if (error.status === 401) {
           setSignedInState(null);
@@ -5608,18 +5800,27 @@ async function refreshPublicStockPrices() {
       }
     }
 
-    await loadUpdates();
+    if (updated.length) {
+      await loadUpdates();
+    } else {
+      renderPublicStocks();
+    }
     if (publicStockPriceMessage) {
       const successMessage = updated.length
         ? `Updated ${updated.length} position${updated.length === 1 ? "" : "s"}: ${updated.join(", ")}.`
-        : "No prices were updated.";
+        : checked.length
+          ? `Prices already current for ${checked.length} position${checked.length === 1 ? "" : "s"}: ${checked.join(", ")}.`
+          : "No prices were updated.";
       publicStockPriceMessage.textContent = failed.length
-        ? `${successMessage} ${failed.length} failed: ${failed.join("; ")}.`
+        ? `${successMessage} ${failed.length} quote warning${failed.length === 1 ? "" : "s"}: ${failed.join("; ")}. Last saved prices were kept.`
         : successMessage;
     }
   } finally {
-    refreshPublicStockPricesButton.disabled = false;
-    refreshPublicStockPricesButton.textContent = "Refresh prices";
+    automaticPublicStockRefreshInFlight = false;
+    if (!automatic) {
+      refreshPublicStockPricesButton.disabled = false;
+      refreshPublicStockPricesButton.textContent = "Refresh prices";
+    }
   }
 }
 
@@ -6180,6 +6381,7 @@ async function loadUpdates() {
     investmentsLoaded = true;
     investmentsLoadError = "";
     renderAll();
+    maybeAutoRefreshPublicStockPrices();
   } catch (error) {
     if (error.status === 401) {
       setSignedInState(null);
@@ -6525,7 +6727,7 @@ addListener(form, "submit", async (event) => {
     .map((email) => email.trim())
     .filter(Boolean);
 
-  const payload = {
+  const payload = applyPublicStockValuationSync({
     company: formData.get("company"),
     entity: formData.get("entity"),
     assetType: formData.get("assetType"),
@@ -6567,7 +6769,7 @@ addListener(form, "submit", async (event) => {
     decisionDate: formData.get("decisionDate"),
     decisionType: formData.get("decisionType"),
     decisionSummary: formData.get("decisionSummary")
-  };
+  });
 
   try {
     const editingId = editingInvestmentId.value;
@@ -6930,9 +7132,10 @@ attachFormattedInputHandlers();
 applyFormInputFormatting();
 updateStockDetailsVisibility();
 
-["shareCount", "costBasisPerShare", "marketPrice", "amount"].forEach((fieldName) => {
+["shareCount", "costBasisPerShare", "marketPrice", "marketPriceDate", "amount"].forEach((fieldName) => {
   if (form && form.elements && form.elements[fieldName]) {
     form.elements[fieldName].addEventListener("input", updateStockValuePreview);
+    form.elements[fieldName].addEventListener("change", updateStockValuePreview);
   }
 });
 
@@ -7521,7 +7724,7 @@ addListener(publicStockSearchFilter, "input", () => {
 });
 
 addListener(refreshPublicStockPricesButton, "click", () => {
-  refreshPublicStockPrices();
+  refreshPublicStockPrices({ force: true });
 });
 
 addListener(entityDetailInvestments, "click", (event) => {

@@ -641,6 +641,12 @@ button:disabled {
   color: var(--muted);
 }
 
+.public-holdings-card {
+  border-color: rgba(35, 95, 67, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(244, 250, 247, 0.92));
+}
+
 .stock-details-panel {
   display: grid;
   gap: 16px;
