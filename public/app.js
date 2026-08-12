@@ -69,6 +69,10 @@ const dataQualitySummary = document.getElementById("dataQualitySummary");
 const dataQualityList = document.getElementById("dataQualityList");
 const publicStockSummary = document.getElementById("publicStockSummary");
 const publicStockList = document.getElementById("publicStockList");
+const publicStockEntityFilter = document.getElementById("publicStockEntityFilter");
+const publicStockSearchFilter = document.getElementById("publicStockSearchFilter");
+const refreshPublicStockPricesButton = document.getElementById("refreshPublicStockPricesButton");
+const publicStockPriceMessage = document.getElementById("publicStockPriceMessage");
 const addPublicSquareStockButton = document.getElementById("addPublicSquareStockButton");
 const addSpaceXStockButton = document.getElementById("addSpaceXStockButton");
 const stockDetailsPanel = document.getElementById("stockDetailsPanel");
@@ -222,6 +226,10 @@ let investmentsLoadError = "";
 let reportUpdateFilters = {
   type: "",
   period: ""
+};
+let publicStockFilters = {
+  entity: "",
+  search: ""
 };
 
 const REPORT_UPDATE_TYPES = [
@@ -1928,9 +1936,144 @@ function getStockCostBasis(investment) {
 }
 
 function getStockGainLoss(investment) {
+  return getStockMetrics(investment).gainLoss;
+}
+
+function getStockMetrics(investment) {
+  const shares = toNumber(investment && investment.shareCount);
+  const costPerShare = toNumber(investment && investment.costBasisPerShare);
+  const currentPrice = toNumber(investment && investment.marketPrice);
+  const totalCostBasis = getStockCostBasis(investment);
   const marketValue = getStockMarketValue(investment);
-  const costBasis = getStockCostBasis(investment);
-  return marketValue && costBasis ? marketValue - costBasis : 0;
+  const gainLoss = marketValue - totalCostBasis;
+  const gainLossPercent = totalCostBasis > 0 ? gainLoss / totalCostBasis : null;
+
+  return {
+    shares,
+    costPerShare,
+    currentPrice,
+    totalCostBasis,
+    marketValue,
+    gainLoss,
+    gainLossPercent,
+    hasCostBasis: totalCostBasis > 0,
+    hasMarketValue: marketValue > 0
+  };
+}
+
+function formatSignedMoney(value) {
+  const amount = toNumber(value);
+  if (!amount) {
+    return "$0";
+  }
+  return amount > 0 ? `+${formatMoney(amount)}` : `-${formatMoney(Math.abs(amount))}`;
+}
+
+function formatStockPercent(value) {
+  return Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${formatPercent(value)}` : "N/A";
+}
+
+function getStockPerformanceClass(value) {
+  if (!Number.isFinite(value) || value === 0) {
+    return "stock-performance-flat";
+  }
+  return value > 0 ? "stock-performance-positive" : "stock-performance-negative";
+}
+
+function getFilteredPublicStockRows(stocks) {
+  const search = String(publicStockFilters.search || "").trim().toLowerCase();
+  return stocks.filter((investment) => {
+    const matchesEntity =
+      !publicStockFilters.entity ||
+      normalizeEntityName(investment.entity) === normalizeEntityName(publicStockFilters.entity);
+    const matchesSearch =
+      !search ||
+      String(investment.company || "").toLowerCase().includes(search) ||
+      String(investment.ticker || "").toLowerCase().includes(search);
+    return matchesEntity && matchesSearch;
+  });
+}
+
+function isPublicStockRow(investment) {
+  const assetType = String((investment && investment.assetType) || "").toLowerCase();
+  const ticker = String((investment && investment.ticker) || "").trim();
+  return Boolean(
+    (investment && investment.isWatchlistOnly) ||
+      assetType.includes("public") ||
+      (ticker && !assetType.includes("private"))
+  );
+}
+
+function renderPublicStockFilterOptions(stocks) {
+  if (!publicStockEntityFilter) {
+    return;
+  }
+
+  const selectedEntity = publicStockFilters.entity;
+  const entities = Array.from(
+    new Set(stocks.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right));
+  publicStockEntityFilter.innerHTML = [
+    '<option value="">All entities</option>',
+    ...entities.map((entity) => `<option value="${escapeHtml(entity)}">${escapeHtml(entity)}</option>`)
+  ].join("");
+  publicStockEntityFilter.value = entities.includes(selectedEntity) ? selectedEntity : "";
+  publicStockFilters.entity = publicStockEntityFilter.value;
+}
+
+function getQuotePatchPayload(investment, quote) {
+  return {
+    company: investment.company || "",
+    entity: investment.entity || "",
+    assetType: investment.assetType || "",
+    ticker: quote.symbol || investment.ticker || "",
+    exchange: quote.exchangeName || investment.exchange || "",
+    shareCount: investment.shareCount || "",
+    costBasisPerShare: investment.costBasisPerShare || "",
+    marketPrice: quote.price || investment.marketPrice || "",
+    marketPriceDate: quote.priceDate || investment.marketPriceDate || "",
+    marketValue: investment.marketValue || "",
+    amount: investment.amount || "",
+    currency: quote.currency || investment.currency || "USD",
+    stage: investment.stage || "",
+    status: investment.status || "",
+    owner: investment.owner || "",
+    nextStep: investment.nextStep || "",
+    nextStepDueDate: investment.nextStepDueDate || "",
+    notes: investment.notes || "",
+    deckSummary: investment.deckSummary || "",
+    capitalActivity: Array.isArray(investment.capitalActivity) ? investment.capitalActivity : [],
+    capitalCallDate: investment.capitalCallDate || "",
+    capitalCallAmount: investment.capitalCallAmount || "",
+    distributionDate: investment.distributionDate || "",
+    distributionAmount: investment.distributionAmount || "",
+    valuationDate: investment.valuationDate || "",
+    officialValue: investment.officialValue || "",
+    internalValue: investment.internalValue || "",
+    exitValue: investment.exitValue || "",
+    ownershipPercent: investment.ownershipPercent || "",
+    entityOwnershipPercent: investment.entityOwnershipPercent || "",
+    ownershipNotes: investment.ownershipNotes || "",
+    followOnCapitalAmount: investment.followOnCapitalAmount || "",
+    followOnCapitalStatus: investment.followOnCapitalStatus || "",
+    followOnCapitalNotes: investment.followOnCapitalNotes || "",
+    contactName: investment.contactName || "",
+    contactPosition: investment.contactPosition || "",
+    contactEmail: investment.contactEmail || "",
+    contactPhone: investment.contactPhone || "",
+    reportingCadence: investment.reportingCadence || "",
+    updateRequestStatus: investment.updateRequestStatus || "",
+    lastUpdateRequestSentAt: investment.lastUpdateRequestSentAt || "",
+    lastUpdateRequestSubject: investment.lastUpdateRequestSubject || "",
+    lastUpdateRequestContact: investment.lastUpdateRequestContact || "",
+    documentLinks: investment.documentLinks || "",
+    documents: Array.isArray(investment.documents) ? investment.documents : [],
+    decisionDate: investment.decisionDate || "",
+    decisionType: investment.decisionType || "",
+    decisionSummary: investment.decisionSummary || "",
+    reportUpdates: Array.isArray(investment.reportUpdates) ? investment.reportUpdates : [],
+    recipients: Array.isArray(investment.recipients) ? investment.recipients : []
+  };
 }
 
 function getStockTickerLabel(investment) {
@@ -5308,23 +5451,31 @@ function renderPublicStocks() {
     return;
   }
 
-  const stocks = getPublicStockRows(allInvestments);
-  const totalMarketValue = stocks.reduce((sum, investment) => sum + getStockMarketValue(investment), 0);
-  const totalCostBasis = stocks.reduce((sum, investment) => sum + getStockCostBasis(investment), 0);
-  const totalGainLoss = totalMarketValue && totalCostBasis ? totalMarketValue - totalCostBasis : 0;
-  const publicCount = stocks.filter((investment) =>
-    String(investment.assetType || "").toLowerCase().includes("public")
-  ).length;
+  const stocks = getPublicStockRows(allInvestments).filter(isPublicStockRow);
+  renderPublicStockFilterOptions(stocks);
+  const filteredStocks = getFilteredPublicStockRows(stocks);
+  const savedFilteredStocks = filteredStocks.filter((investment) => !investment.isWatchlistOnly);
+  const totalMarketValue = savedFilteredStocks.reduce(
+    (sum, investment) => sum + getStockMetrics(investment).marketValue,
+    0
+  );
+  const totalCostBasis = savedFilteredStocks.reduce(
+    (sum, investment) => sum + getStockMetrics(investment).totalCostBasis,
+    0
+  );
+  const totalGainLoss = totalMarketValue - totalCostBasis;
+  const totalGainLossPercent = totalCostBasis > 0 ? totalGainLoss / totalCostBasis : null;
 
   publicStockSummary.innerHTML = [
-    { label: "Tracked stocks", value: String(stocks.length) },
-    { label: "Public tickers", value: String(publicCount) },
-    { label: "Market value", value: formatMoney(totalMarketValue) },
-    { label: "Gain / loss", value: totalMarketValue && totalCostBasis ? formatMoney(totalGainLoss) : "N/A" }
+    { label: "Public equity market value", value: formatMoney(totalMarketValue) },
+    { label: "Total cost basis", value: formatMoney(totalCostBasis) },
+    { label: "Total unrealized gain/loss", value: formatSignedMoney(totalGainLoss) },
+    { label: "Total unrealized gain/loss %", value: formatStockPercent(totalGainLossPercent) },
+    { label: "Public equity positions", value: String(savedFilteredStocks.length) }
   ]
     .map(
       (card) => `
-        <article class="dashboard-card">
+        <article class="dashboard-card ${card.label.includes("gain/loss") ? getStockPerformanceClass(totalGainLoss) : ""}">
           <p class="dashboard-label">${escapeHtml(card.label)}</p>
           <p class="dashboard-value">${escapeHtml(card.value)}</p>
         </article>
@@ -5332,12 +5483,20 @@ function renderPublicStocks() {
     )
     .join("");
 
-  publicStockList.innerHTML = stocks.length
-    ? stocks
+  if (publicStockSearchFilter && publicStockSearchFilter.value !== publicStockFilters.search) {
+    publicStockSearchFilter.value = publicStockFilters.search;
+  }
+
+  publicStockList.innerHTML = filteredStocks.length
+    ? filteredStocks
         .map((investment) => {
-          const marketValue = getStockMarketValue(investment);
-          const costBasis = getStockCostBasis(investment);
-          const gainLoss = marketValue && costBasis ? marketValue - costBasis : 0;
+          const metrics = getStockMetrics(investment);
+          const gainLossLabel = metrics.hasCostBasis
+            ? formatSignedMoney(metrics.gainLoss)
+            : "N/A";
+          const gainLossPercentLabel = metrics.hasCostBasis
+            ? formatStockPercent(metrics.gainLossPercent)
+            : "N/A";
           return `
             <article class="update-card public-stock-card">
               <div class="update-head">
@@ -5356,20 +5515,36 @@ function renderPublicStocks() {
               <div class="stock-metric-grid">
                 <div class="entity-metric-box">
                   <p class="dashboard-label">Shares</p>
-                  <p class="highlight-value">${escapeHtml(investment.shareCount || "Not set")}</p>
+                  <p class="highlight-value">${metrics.shares ? escapeHtml(metrics.shares.toLocaleString()) : "Not set"}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Average cost / share</p>
+                  <p class="highlight-value">${metrics.costPerShare ? escapeHtml(formatMoney(metrics.costPerShare)) : "Not set"}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Total cost basis</p>
+                  <p class="highlight-value">${metrics.totalCostBasis ? escapeHtml(formatMoney(metrics.totalCostBasis)) : "Not set"}</p>
                 </div>
                 <div class="entity-metric-box">
                   <p class="dashboard-label">Current price</p>
-                  <p class="highlight-value">${investment.marketPrice ? escapeHtml(formatMoney(investment.marketPrice)) : "Not set"}</p>
+                  <p class="highlight-value">${metrics.currentPrice ? escapeHtml(formatMoney(metrics.currentPrice)) : "Not set"}</p>
                   <p class="update-meta">${escapeHtml(investment.marketPriceDate || "No price date")}</p>
                 </div>
                 <div class="entity-metric-box">
                   <p class="dashboard-label">Market value</p>
-                  <p class="highlight-value">${escapeHtml(formatMoney(marketValue))}</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.marketValue))}</p>
                 </div>
                 <div class="entity-metric-box">
-                  <p class="dashboard-label">Gain / loss</p>
-                  <p class="highlight-value">${marketValue && costBasis ? escapeHtml(formatMoney(gainLoss)) : "N/A"}</p>
+                  <p class="dashboard-label">Unrealized gain/loss $</p>
+                  <p class="highlight-value ${escapeHtml(getStockPerformanceClass(metrics.hasCostBasis ? metrics.gainLoss : null))}">${escapeHtml(gainLossLabel)}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Unrealized gain/loss %</p>
+                  <p class="highlight-value ${escapeHtml(getStockPerformanceClass(metrics.gainLossPercent))}">${escapeHtml(gainLossPercentLabel)}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Price as of</p>
+                  <p class="highlight-value">${escapeHtml(investment.marketPriceDate || "Not set")}</p>
                 </div>
               </div>
               <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
@@ -5385,7 +5560,67 @@ function renderPublicStocks() {
           `;
         })
         .join("")
-    : '<p class="update-meta">No public stock companies are configured yet.</p>';
+    : '<p class="update-meta">No public stock positions match those filters.</p>';
+}
+
+async function refreshPublicStockPrices() {
+  if (!refreshPublicStockPricesButton) {
+    return;
+  }
+
+  const positions = getFilteredPublicStockRows(getPublicStockRows(allInvestments).filter(isPublicStockRow)).filter(
+    (investment) => !investment.isWatchlistOnly && investment.id && investment.ticker
+  );
+  if (!positions.length) {
+    if (publicStockPriceMessage) {
+      publicStockPriceMessage.textContent = "No saved public stock positions with tickers are visible.";
+    }
+    return;
+  }
+
+  refreshPublicStockPricesButton.disabled = true;
+  refreshPublicStockPricesButton.textContent = "Refreshing...";
+  if (publicStockPriceMessage) {
+    publicStockPriceMessage.textContent = `Refreshing ${positions.length} position${positions.length === 1 ? "" : "s"}...`;
+  }
+
+  const updated = [];
+  const failed = [];
+  try {
+    for (const investment of positions) {
+      const ticker = String(investment.ticker || "").trim().toUpperCase();
+      try {
+        const quote = await fetchJson(`/api/stock-quote?ticker=${encodeURIComponent(ticker)}`);
+        await fetchJson(`/api/investments/${investment.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(getQuotePatchPayload(investment, quote))
+        });
+        updated.push(`${quote.symbol || ticker}${quote.priceDate ? ` (${quote.priceDate})` : ""}`);
+      } catch (error) {
+        if (error.status === 401) {
+          setSignedInState(null);
+          throw error;
+        }
+        failed.push(`${ticker}: ${error.message || "price unavailable"}`);
+      }
+    }
+
+    await loadUpdates();
+    if (publicStockPriceMessage) {
+      const successMessage = updated.length
+        ? `Updated ${updated.length} position${updated.length === 1 ? "" : "s"}: ${updated.join(", ")}.`
+        : "No prices were updated.";
+      publicStockPriceMessage.textContent = failed.length
+        ? `${successMessage} ${failed.length} failed: ${failed.join("; ")}.`
+        : successMessage;
+    }
+  } finally {
+    refreshPublicStockPricesButton.disabled = false;
+    refreshPublicStockPricesButton.textContent = "Refresh prices";
+  }
 }
 
 function renderAll() {
@@ -7273,6 +7508,20 @@ addListener(publicStockList, "click", (event) => {
   if (action === "edit" && investmentId) {
     beginEditInvestment(investmentId);
   }
+});
+
+addListener(publicStockEntityFilter, "change", () => {
+  publicStockFilters.entity = publicStockEntityFilter.value;
+  renderPublicStocks();
+});
+
+addListener(publicStockSearchFilter, "input", () => {
+  publicStockFilters.search = publicStockSearchFilter.value;
+  renderPublicStocks();
+});
+
+addListener(refreshPublicStockPricesButton, "click", () => {
+  refreshPublicStockPrices();
 });
 
 addListener(entityDetailInvestments, "click", (event) => {

@@ -153,6 +153,24 @@
               </button>
             </div>
           </div>
+          <div class="public-stock-toolbar">
+            <div class="public-stock-filters">
+              <label>
+                Entity
+                <select id="publicStockEntityFilter">
+                  <option value="">All entities</option>
+                </select>
+              </label>
+              <label>
+                Search
+                <input id="publicStockSearchFilter" type="search" placeholder="Search ticker or company" />
+              </label>
+            </div>
+            <button id="refreshPublicStockPricesButton" type="button" class="secondary-button">
+              Refresh prices
+            </button>
+          </div>
+          <p id="publicStockPriceMessage" class="update-meta"></p>
           <div id="publicStockSummary" class="dashboard-grid"></div>
           <div id="publicStockList" class="updates-list"></div>
         </section>

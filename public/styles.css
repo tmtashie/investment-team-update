@@ -545,6 +545,22 @@ button:disabled {
   gap: 10px;
 }
 
+.public-stock-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.public-stock-filters {
+  display: grid;
+  gap: 12px;
+  flex: 1;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
 .updates-list {
   display: grid;
   gap: 12px;
@@ -610,7 +626,19 @@ button:disabled {
   display: grid;
   gap: 10px;
   margin: 12px 0;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.stock-performance-positive {
+  color: var(--success);
+}
+
+.stock-performance-negative {
+  color: var(--accent-dark);
+}
+
+.stock-performance-flat {
+  color: var(--muted);
 }
 
 .stock-details-panel {
