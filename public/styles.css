@@ -1443,6 +1443,74 @@ a.secondary-button.inline-action-button {
   margin-bottom: 12px;
 }
 
+.investment-timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.investment-timeline-event {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(23, 50, 77, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.investment-timeline-marker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.investment-timeline-body {
+  display: grid;
+  gap: 6px;
+}
+
+.timeline-type-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(23, 50, 77, 0.08);
+  color: var(--navy);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.investment-timeline-capital-call .timeline-type-label {
+  background: rgba(186, 104, 55, 0.14);
+  color: var(--accent-dark);
+}
+
+.investment-timeline-distribution .timeline-type-label {
+  background: rgba(35, 95, 67, 0.12);
+  color: var(--success);
+}
+
+.investment-timeline-valuation .timeline-type-label,
+.investment-timeline-ownership .timeline-type-label {
+  background: rgba(23, 50, 77, 0.1);
+  color: var(--navy);
+}
+
+.investment-timeline-document .timeline-type-label,
+.investment-timeline-research .timeline-type-label {
+  background: rgba(77, 124, 171, 0.14);
+  color: #244d78;
+}
+
+.investment-timeline-decision .timeline-type-label,
+.investment-timeline-follow-on .timeline-type-label,
+.investment-timeline-task .timeline-type-label {
+  background: rgba(138, 90, 0, 0.12);
+  color: var(--warning);
+}
+
 .document-pill-with-action {
   display: inline-flex;
   align-items: center;

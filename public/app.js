@@ -132,6 +132,7 @@ const companyDecisionLog = document.getElementById("companyDecisionLog");
 const companyNextSteps = document.getElementById("companyNextSteps");
 const companyFollowOnCapital = document.getElementById("companyFollowOnCapital");
 const companyValuationHistory = document.getElementById("companyValuationHistory");
+const investmentTimeline = document.getElementById("investmentTimeline");
 const companyTimeline = document.getElementById("companyTimeline");
 const reportUpdateTypeFilter = document.getElementById("reportUpdateTypeFilter");
 const reportUpdatePeriodFilter = document.getElementById("reportUpdatePeriodFilter");
@@ -4097,6 +4098,289 @@ async function saveReconciliationRow(investmentId, values, options = {}) {
   }
 }
 
+function timelineDateValue(value, fallback = "") {
+  return String(value || fallback || "").trim();
+}
+
+function timelineAmountValue(value, currency = "USD") {
+  const amount = toNumber(value);
+  return amount ? `${currency || "USD"} ${normalizeMoneyString(value)}` : "";
+}
+
+function addTimelineEvent(events, event) {
+  const date = timelineDateValue(event.date, event.fallbackDate);
+  const hasContent = date || event.title || event.description || event.amount;
+  if (!hasContent) {
+    return;
+  }
+
+  const timelineEvent = {
+    date,
+    type: String(event.type || "Update").trim() || "Update",
+    title: String(event.title || event.type || "Timeline event").trim(),
+    amount: String(event.amount || "").trim(),
+    description: String(event.description || "").trim(),
+    source: String(event.source || "").trim(),
+    category: String(event.category || event.type || "Update").trim()
+  };
+  const eventKey = [
+    timelineEvent.date,
+    timelineEvent.type,
+    timelineEvent.title,
+    timelineEvent.amount,
+    timelineEvent.description,
+    timelineEvent.source
+  ]
+    .join("::")
+    .toLowerCase();
+  const alreadyIncluded = events.some((existingEvent) => {
+    const existingKey = [
+      existingEvent.date,
+      existingEvent.type,
+      existingEvent.title,
+      existingEvent.amount,
+      existingEvent.description,
+      existingEvent.source
+    ]
+      .join("::")
+      .toLowerCase();
+    return existingKey === eventKey;
+  });
+  if (!alreadyIncluded) {
+    events.push(timelineEvent);
+  }
+}
+
+function buildInvestmentTimelineEvents(companyRecord, companyUpdates, relatedTasks) {
+  const events = [];
+  const companyDocuments = companyRecord && Array.isArray(companyRecord.documents)
+    ? companyRecord.documents
+    : [];
+
+  companyUpdates.forEach((investment) => {
+    const currency = investment.currency || "USD";
+    addTimelineEvent(events, {
+      date: investment.createdAt,
+      type: "Update",
+      title: investment.createdAt === (companyUpdates[companyUpdates.length - 1] || {}).createdAt
+        ? "Initial investment record"
+        : "Investment update saved",
+      amount: timelineAmountValue(investment.amount, currency),
+      description: summarizeText(investment.notes, investment.nextStep || investment.status || ""),
+      source: investment.submittedBy ? `Submitted by ${investment.submittedBy}` : "Investment record"
+    });
+
+    normalizeCapitalActivityRows(
+      investment.capitalActivity && investment.capitalActivity.length
+        ? investment.capitalActivity
+        : buildLegacyCapitalActivityRows(investment)
+    ).forEach((activity) => {
+      const normalizedType = String(activity.type || "").toLowerCase();
+      const eventType = normalizedType.includes("distribution") ||
+        normalizedType.includes("dividend") ||
+        normalizedType.includes("return") ||
+        normalizedType.includes("exit")
+        ? "Distribution"
+        : "Capital Call";
+      addTimelineEvent(events, {
+        date: activity.date,
+        fallbackDate: investment.createdAt,
+        type: eventType,
+        title: activity.type || eventType,
+        amount: timelineAmountValue(activity.amount, currency),
+        description: activity.notes || "",
+        source: "Capital activity"
+      });
+    });
+
+    if (investment.valuationDate || investment.officialValue || investment.internalValue || investment.exitValue) {
+      const marks = [
+        investment.officialValue ? `Official ${formatMoney(investment.officialValue)}` : "",
+        investment.internalValue ? `Internal ${formatMoney(investment.internalValue)}` : "",
+        investment.exitValue ? `Exit ${formatMoney(investment.exitValue)}` : ""
+      ].filter(Boolean);
+      addTimelineEvent(events, {
+        date: investment.valuationDate,
+        fallbackDate: investment.createdAt,
+        type: "Valuation",
+        title: "Valuation updated",
+        amount: marks.join(" / "),
+        description: "Latest mark captured for this investment.",
+        source: "Valuation"
+      });
+    }
+
+    if (investment.ownershipPercent || investment.entityOwnershipPercent || investment.ownershipNotes) {
+      addTimelineEvent(events, {
+        date: investment.createdAt,
+        type: "Ownership",
+        title: "Ownership updated",
+        amount: [
+          investment.ownershipPercent ? `Total ${investment.ownershipPercent}%` : "",
+          investment.entityOwnershipPercent ? `Entity ${investment.entityOwnershipPercent}%` : ""
+        ].filter(Boolean).join(" / "),
+        description: investment.ownershipNotes || "",
+        source: "Ownership"
+      });
+    }
+
+    if (investment.followOnCapitalAmount || investment.followOnCapitalStatus || investment.followOnCapitalNotes) {
+      addTimelineEvent(events, {
+        date: investment.createdAt,
+        type: "Follow-on",
+        title: investment.followOnCapitalStatus || "Follow-on capital update",
+        amount: timelineAmountValue(investment.followOnCapitalAmount, currency),
+        description: investment.followOnCapitalNotes || "",
+        source: "Follow-on"
+      });
+    }
+
+    if (investment.decisionDate || investment.decisionType || investment.decisionSummary) {
+      addTimelineEvent(events, {
+        date: investment.decisionDate,
+        fallbackDate: investment.createdAt,
+        type: "Decision",
+        title: investment.decisionType || "Decision logged",
+        description: investment.decisionSummary || "",
+        source: "Decision log"
+      });
+    }
+
+    if (investment.deckSummary) {
+      addTimelineEvent(events, {
+        date: investment.createdAt,
+        type: "Research",
+        title: "Deck summary saved",
+        description: summarizeText(investment.deckSummary, ""),
+        source: "AI research"
+      });
+    }
+
+    if (investment.documentLinks) {
+      addTimelineEvent(events, {
+        date: investment.createdAt,
+        type: "Document",
+        title: "Document links added",
+        description: summarizeText(investment.documentLinks, ""),
+        source: "Linked documents"
+      });
+    }
+
+    if (Array.isArray(investment.documents)) {
+      investment.documents.forEach((document) => {
+        addTimelineEvent(events, {
+          date: document.uploadedAt,
+          fallbackDate: investment.createdAt,
+          type: "Document",
+          title: document.name || "Document uploaded",
+          description: document.url || "",
+          source: "Uploaded document"
+        });
+      });
+    }
+
+    if (investment.lastUpdateRequestSentAt) {
+      addTimelineEvent(events, {
+        date: investment.lastUpdateRequestSentAt,
+        type: "Update",
+        title: "Update request sent",
+        description: investment.lastUpdateRequestSubject || investment.lastUpdateRequestContact || "",
+        source: investment.lastUpdateRequestContact || "Update request"
+      });
+    }
+  });
+
+  const structuredCollections = [
+    { rows: companyRecord ? companyRecord.valuationHistory : [], type: "Valuation", source: "Valuation history" },
+    { rows: companyRecord ? companyRecord.ownershipHistory : [], type: "Ownership", source: "Ownership history" },
+    { rows: companyRecord ? companyRecord.followOnHistory : [], type: "Follow-on", source: "Follow-on history" },
+    { rows: companyRecord ? companyRecord.decisionLog : [], type: "Decision", source: "Decision log" },
+    { rows: companyRecord ? companyRecord.researchEntries : [], type: "Research", source: "Research" },
+    { rows: companyRecord ? companyRecord.reportUpdates : [], type: "Update", source: "Investor update" }
+  ];
+
+  structuredCollections.forEach(({ rows, type, source }) => {
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      addTimelineEvent(events, {
+        date: row.date,
+        type: row.type || type,
+        title: row.title || row.type || type,
+        amount: row.amount || [
+          row.officialValue ? `Official ${formatMoney(row.officialValue)}` : "",
+          row.internalValue ? `Internal ${formatMoney(row.internalValue)}` : "",
+          row.exitValue ? `Exit ${formatMoney(row.exitValue)}` : ""
+        ].filter(Boolean).join(" / "),
+        description:
+          row.aiSummary ||
+          row.summary ||
+          row.notes ||
+          row.originalNotes ||
+          row.keyMetrics ||
+          row.actionItems ||
+          "",
+        source: row.sourceType || row.reportPeriod || source
+      });
+    });
+  });
+
+  companyDocuments.forEach((document) => {
+    addTimelineEvent(events, {
+      date: document.uploadedAt,
+      type: "Document",
+      title: document.name || "Document uploaded",
+      description: document.notes || document.url || "",
+      source: document.source || "Company vault"
+    });
+  });
+
+  relatedTasks.forEach((task) => {
+    addTimelineEvent(events, {
+      date: task.completedAt || task.dueDate || task.createdAt,
+      type: "Task",
+      title: task.title || "Task",
+      description: task.description || task.status || "",
+      source: [task.category, task.status, task.assignee].filter(Boolean).join(" / ")
+    });
+  });
+
+  return events.sort((left, right) => {
+    const rightTime = parseDateValue(right.date, new Date(0)).getTime();
+    const leftTime = parseDateValue(left.date, new Date(0)).getTime();
+    return rightTime - leftTime;
+  });
+}
+
+function renderInvestmentTimeline(events) {
+  if (!investmentTimeline) {
+    return;
+  }
+
+  investmentTimeline.innerHTML = events.length
+    ? events
+        .map(
+          (event) => `
+            <article class="investment-timeline-event investment-timeline-${escapeHtml(
+              event.type.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+            )}">
+              <div class="investment-timeline-marker">
+                <span class="timeline-type-label">${escapeHtml(event.type)}</span>
+                <span class="dashboard-label">${escapeHtml(formatDisplayDateOrText(event.date))}</span>
+              </div>
+              <div class="investment-timeline-body">
+                <div class="update-head">
+                  <h4>${escapeHtml(event.title)}</h4>
+                  ${event.amount ? `<span class="status-chip">${escapeHtml(event.amount)}</span>` : ""}
+                </div>
+                ${event.description ? `<p class="update-meta">${escapeHtml(summarizeText(event.description, ""))}</p>` : ""}
+                ${event.source ? `<p class="dashboard-label">${escapeHtml(event.source)}</p>` : ""}
+              </div>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No dated investment history is available yet.</p>';
+}
+
 function renderCompanyPanel() {
   if (!selectedCompany) {
     companyPanel.classList.add("hidden");
@@ -4115,6 +4399,9 @@ function renderCompanyPanel() {
     companyTasks.innerHTML = "";
     companyFollowOnCapital.innerHTML = "";
     companyValuationHistory.innerHTML = "";
+    if (investmentTimeline) {
+      investmentTimeline.innerHTML = "";
+    }
     companyTimeline.innerHTML = "";
     reportUpdatesList.innerHTML = "";
     companyDocumentMessage.textContent = "";
@@ -4221,6 +4508,7 @@ function renderCompanyPanel() {
     )
   }));
   companyPanel.classList.remove("hidden");
+  renderInvestmentTimeline(buildInvestmentTimelineEvents(companyRecord, companyUpdates, relatedTasks));
   const performance =
     companyPerformanceMap.get(companyEntityKey(selectedCompany, selectedCompanyEntity)) ||
     buildCompanyPerformance(companyUpdates);
