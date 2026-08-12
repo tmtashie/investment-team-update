@@ -2,6 +2,10 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { createJsonStore } = require("./storage/jsonStore");
+const { createBackupService } = require("./services/backupService");
+const { createInvestmentService } = require("./services/investmentService");
+const { createTaskService } = require("./services/taskService");
 
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -142,65 +146,19 @@ const ALLOWED_EMAILS = Array.from(
   )
 );
 
-function ensureDataFile() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(BACKUPS_DIR)) {
-    fs.mkdirSync(BACKUPS_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, "[]\n", "utf8");
-  }
-
-  if (!fs.existsSync(TASKS_FILE)) {
-    fs.writeFileSync(TASKS_FILE, "[]\n", "utf8");
-  }
-
-  if (!fs.existsSync(COMPANY_DOCUMENTS_FILE)) {
-    fs.writeFileSync(COMPANY_DOCUMENTS_FILE, "[]\n", "utf8");
-  }
-
-  if (!fs.existsSync(METADATA_FILE)) {
-    fs.writeFileSync(
-      METADATA_FILE,
-      JSON.stringify(
-        {
-          schemaVersion: DATA_SCHEMA_VERSION,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        },
-        null,
-        2
-      ) + "\n",
-      "utf8"
-    );
-  }
-}
+const { ensureDataFile, readJsonFile, writeJsonFile } = createJsonStore({
+  DATA_DIR,
+  DATA_FILE,
+  TASKS_FILE,
+  COMPANY_DOCUMENTS_FILE,
+  METADATA_FILE,
+  BACKUPS_DIR,
+  UPLOADS_DIR,
+  DATA_SCHEMA_VERSION
+});
 
 function makeId() {
   return crypto.randomUUID();
-}
-
-function readJsonFile(filePath, fallback) {
-  ensureDataFile();
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(raw);
-  } catch (error) {
-    return fallback;
-  }
-}
-
-function writeJsonFile(filePath, value) {
-  ensureDataFile();
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + "\n", "utf8");
 }
 
 function readMetadata() {
@@ -248,44 +206,18 @@ function writeMetadata(partial) {
   });
 }
 
-function createBackupSnapshot(reason = "manual") {
-  ensureDataFile();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backup = {
-    schemaVersion: DATA_SCHEMA_VERSION,
-    reason,
-    createdAt: new Date().toISOString(),
-    metadata: readMetadata(),
-    investments: readJsonFile(DATA_FILE, []),
-    tasks: readJsonFile(TASKS_FILE, []),
-    companyDocuments: readJsonFile(COMPANY_DOCUMENTS_FILE, [])
-  };
-  const fileName = `bvb-backup-${timestamp}-${String(reason)
-    .replace(/[^a-z0-9_-]+/gi, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40) || "snapshot"}.json`;
-  const filePath = path.join(BACKUPS_DIR, fileName);
-  fs.writeFileSync(filePath, JSON.stringify(backup, null, 2) + "\n", "utf8");
-  writeMetadata({
-    lastBackupAt: backup.createdAt,
-    lastBackupReason: reason
-  });
-  return { fileName, filePath, backup };
-}
-
-function restoreFromBackupPayload(payload) {
-  const investments = Array.isArray(payload.investments) ? payload.investments : [];
-  const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
-  const companyDocuments = Array.isArray(payload.companyDocuments) ? payload.companyDocuments : [];
-  writeJsonFile(DATA_FILE, investments);
-  writeJsonFile(TASKS_FILE, tasks);
-  writeJsonFile(COMPANY_DOCUMENTS_FILE, companyDocuments);
-  writeMetadata({
-    schemaVersion: DATA_SCHEMA_VERSION,
-    lastMigrationAt: new Date().toISOString()
-  });
-}
+const { createBackupSnapshot, restoreFromBackupPayload } = createBackupService({
+  BACKUPS_DIR,
+  DATA_FILE,
+  TASKS_FILE,
+  COMPANY_DOCUMENTS_FILE,
+  DATA_SCHEMA_VERSION,
+  ensureDataFile,
+  readJsonFile,
+  writeJsonFile,
+  readMetadata,
+  writeMetadata
+});
 
 function normalizeCompanyKey(value) {
   return String(value || "")
@@ -770,45 +702,33 @@ function normalizeTask(entry) {
   };
 }
 
-function writeInvestments(investments) {
-  writeJsonFile(DATA_FILE, investments);
-}
+const { readTasks, writeTasks, saveTask, updateTask, deleteTask } = createTaskService({
+  TASKS_FILE,
+  readJsonFile,
+  writeJsonFile,
+  writeMetadata,
+  normalizeTask,
+  createBackupSnapshot
+});
 
-function readInvestments() {
-  const parsed = readJsonFile(DATA_FILE, []);
-  if (!Array.isArray(parsed)) {
-    return [];
-  }
-
-  const normalized = parsed.map(normalizeInvestment);
-  const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
-  if (changed) {
-    writeInvestments(normalized);
-    writeMetadata({ lastMigrationAt: new Date().toISOString() });
-  }
-
-  return normalized;
-}
-
-function writeTasks(tasks) {
-  writeJsonFile(TASKS_FILE, tasks);
-}
-
-function readTasks() {
-  const parsed = readJsonFile(TASKS_FILE, []);
-  if (!Array.isArray(parsed)) {
-    return [];
-  }
-
-  const normalized = parsed.map(normalizeTask);
-  const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
-  if (changed) {
-    writeTasks(normalized);
-    writeMetadata({ lastMigrationAt: new Date().toISOString() });
-  }
-
-  return normalized;
-}
+const {
+  readInvestments,
+  writeInvestments,
+  saveInvestment,
+  updateInvestment,
+  deleteInvestment
+} = createInvestmentService({
+  DATA_FILE,
+  readJsonFile,
+  writeJsonFile,
+  writeMetadata,
+  normalizeInvestment,
+  createBackupSnapshot,
+  findLatestByPositionKey,
+  getInvestmentPositionKey,
+  normalizeCompanyKey,
+  syncNextStepReminderTasks
+});
 
 function writeCompanyDocuments(documents) {
   writeJsonFile(COMPANY_DOCUMENTS_FILE, documents);
@@ -850,60 +770,6 @@ function deleteCompanyDocument(id) {
   createBackupSnapshot("before-company-document-delete");
   writeCompanyDocuments(remaining);
   return match;
-}
-
-function saveTask(entry) {
-  const tasks = readTasks();
-  createBackupSnapshot("before-task-create");
-  const normalized = normalizeTask({
-    ...entry,
-    updatedAt: new Date().toISOString()
-  });
-  tasks.unshift(normalized);
-  writeTasks(tasks);
-  return normalized;
-}
-
-function updateTask(id, updates) {
-  const tasks = readTasks();
-  const index = tasks.findIndex((task) => task.id === id);
-
-  if (index === -1) {
-    return null;
-  }
-
-  createBackupSnapshot("before-task-update");
-  const merged = normalizeTask({
-    ...tasks[index],
-    ...updates,
-    id: tasks[index].id,
-    createdAt: tasks[index].createdAt,
-    createdBy: tasks[index].createdBy,
-    completedAt:
-      updates.status === "Completed" && !tasks[index].completedAt
-        ? new Date().toISOString()
-        : updates.status && updates.status !== "Completed"
-          ? ""
-          : tasks[index].completedAt,
-    updatedAt: new Date().toISOString()
-  });
-
-  tasks[index] = merged;
-  writeTasks(tasks);
-  return merged;
-}
-
-function deleteTask(id) {
-  const tasks = readTasks();
-  const remaining = tasks.filter((task) => task.id !== id);
-
-  if (remaining.length === tasks.length) {
-    return false;
-  }
-
-  createBackupSnapshot("before-task-delete");
-  writeTasks(remaining);
-  return true;
 }
 
 function parseDateValue(value) {
@@ -1209,75 +1075,6 @@ function buildBiweeklyDigest(investments, tasks, metadata, recipients = DEFAULT_
       upcomingTasks: upcomingTasks.length
     }
   };
-}
-
-function saveInvestment(entry) {
-  const investments = readInvestments();
-  createBackupSnapshot("before-investment-create");
-  const normalizedEntry = normalizeInvestment({
-    ...entry,
-    updatedAt: new Date().toISOString()
-  });
-  const latestMatch = findLatestByPositionKey(
-    getInvestmentPositionKey(normalizedEntry),
-    investments
-  );
-
-  if (latestMatch && latestMatch.company) {
-    normalizedEntry.company = latestMatch.company;
-  }
-
-  investments.unshift(normalizedEntry);
-  writeInvestments(investments);
-  syncNextStepReminderTasks(investments);
-}
-
-function updateInvestment(id, updates) {
-  const investments = readInvestments();
-  const index = investments.findIndex((investment) => investment.id === id);
-
-  if (index === -1) {
-    return null;
-  }
-
-  createBackupSnapshot("before-investment-update");
-  const merged = normalizeInvestment({
-    ...investments[index],
-    ...updates,
-    id: investments[index].id,
-    companyKey: normalizeCompanyKey(updates.company || investments[index].company),
-    createdAt: investments[index].createdAt,
-    submittedBy: investments[index].submittedBy,
-    updatedAt: new Date().toISOString()
-  });
-
-  const latestMatch = findLatestByPositionKey(
-    getInvestmentPositionKey(merged),
-    investments.filter((investment) => investment.id !== id)
-  );
-
-  if (latestMatch && latestMatch.company) {
-    merged.company = latestMatch.company;
-  }
-
-  investments[index] = merged;
-  writeInvestments(investments);
-  syncNextStepReminderTasks(investments);
-  return merged;
-}
-
-function deleteInvestment(id) {
-  const investments = readInvestments();
-  const remaining = investments.filter((investment) => investment.id !== id);
-
-  if (remaining.length === investments.length) {
-    return false;
-  }
-
-  createBackupSnapshot("before-investment-delete");
-  writeInvestments(remaining);
-  syncNextStepReminderTasks(remaining);
-  return true;
 }
 
 function sortStructuredRows(rows) {
