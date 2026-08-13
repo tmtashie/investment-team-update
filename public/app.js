@@ -86,6 +86,9 @@ const entityDetailCopy = document.getElementById("entityDetailCopy");
 const entityDetailSummary = document.getElementById("entityDetailSummary");
 const entityDetailInvestments = document.getElementById("entityDetailInvestments");
 const closeEntityDetailButton = document.getElementById("closeEntityDetailButton");
+const xirrAuditEntitySelect = document.getElementById("xirrAuditEntitySelect");
+const xirrAuditSummary = document.getElementById("xirrAuditSummary");
+const xirrAuditTable = document.getElementById("xirrAuditTable");
 const entityFilter = document.getElementById("entityFilter");
 const searchFilter = document.getElementById("searchFilter");
 const statusFilter = document.getElementById("statusFilter");
@@ -207,6 +210,7 @@ let uploadedDocuments = [];
 let allTasks = [];
 let activeWorkspaceView = "home";
 let selectedEntity = "";
+let selectedXirrAuditEntity = "";
 let digestStatus = {
   lastDigestSentAt: "",
   nextDigestDueAt: "",
@@ -3544,7 +3548,6 @@ function renderEntityDetail() {
   );
   const entityRows = buildEntityRows(allInvestments, selectedEntity);
   const performance = buildEntityRowTotals(entityRows);
-  const cashFlowAuditRows = buildEntityCashFlowAuditRows(entityRows, "internalMark");
 
   entityDetailSection.classList.remove("hidden");
   entityDetailTitle.textContent = selectedEntity;
@@ -3575,45 +3578,6 @@ function renderEntityDetail() {
       `
     )
     .join("");
-
-  const cashFlowAuditMarkup = cashFlowAuditRows.length
-    ? `
-      <section class="cash-flow-audit">
-        <div class="panel-header panel-header-stack">
-          <div>
-            <h3>XIRR cash-flow audit</h3>
-            <p class="section-copy">These dated cash flows feed the entity Internal XIRR. Excluded NAV rows usually mean the valuation date is before the latest contribution.</p>
-          </div>
-        </div>
-        <table class="reconciliation-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Company</th>
-              <th>Type</th>
-              <th>Amount</th>
-              <th>XIRR use</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${cashFlowAuditRows
-              .map(
-                (row) => `
-                  <tr>
-                    <td>${escapeHtml(formatDisplayDate(row.date))}</td>
-                    <td>${escapeHtml(row.company)}</td>
-                    <td>${escapeHtml(row.type)}</td>
-                    <td>${escapeHtml(formatMoney(row.amount))}</td>
-                    <td>${escapeHtml(row.includedInXirr ? "Included" : "Excluded: valuation before cash flow")}</td>
-                  </tr>
-                `
-              )
-              .join("")}
-          </tbody>
-        </table>
-      </section>
-    `
-    : '<p class="update-meta">No dated cash flows are available for XIRR yet.</p>';
 
   const investmentMarkup = investments.length
     ? investments
@@ -3658,17 +3622,113 @@ function renderEntityDetail() {
         .join("")
     : '<p class="update-meta">No investments are assigned to this entity yet.</p>';
 
-  entityDetailInvestments.innerHTML = `${cashFlowAuditMarkup}${investmentMarkup}`;
+  entityDetailInvestments.innerHTML = investmentMarkup;
 }
 
-function renderFilterOptions() {
-  const entities = Array.from(
+function getAllEntityNames() {
+  return Array.from(
     new Set(
       configuredEntities
         .concat(allInvestments.map((item) => normalizeEntityName(item.entity)).filter(Boolean))
         .map(normalizeEntityName)
     )
   ).sort();
+}
+
+function renderXirrAuditOptions() {
+  if (!xirrAuditEntitySelect) {
+    return;
+  }
+
+  const entities = getAllEntityNames();
+  if (!selectedXirrAuditEntity && entities.length) {
+    selectedXirrAuditEntity = entities[0];
+  }
+
+  xirrAuditEntitySelect.innerHTML = ['<option value="">Select an entity</option>']
+    .concat(entities.map((entity) => `<option value="${escapeHtml(entity)}">${escapeHtml(entity)}</option>`))
+    .join("");
+  xirrAuditEntitySelect.value = entities.includes(selectedXirrAuditEntity) ? selectedXirrAuditEntity : "";
+  selectedXirrAuditEntity = xirrAuditEntitySelect.value;
+}
+
+function buildXirrAuditMarkup(cashFlowAuditRows) {
+  return cashFlowAuditRows.length
+    ? `
+      <section class="cash-flow-audit">
+        <div class="panel-header panel-header-stack">
+          <div>
+            <h3>XIRR cash-flow audit</h3>
+            <p class="section-copy">These dated cash flows feed the entity Internal XIRR. Excluded NAV rows usually mean the valuation date is before the latest contribution.</p>
+          </div>
+        </div>
+        <table class="reconciliation-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Company</th>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>XIRR use</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${cashFlowAuditRows
+              .map(
+                (row) => `
+                  <tr>
+                    <td>${escapeHtml(formatDisplayDate(row.date))}</td>
+                    <td>${escapeHtml(row.company)}</td>
+                    <td>${escapeHtml(row.type)}</td>
+                    <td>${escapeHtml(formatMoney(row.amount))}</td>
+                    <td>${escapeHtml(row.includedInXirr ? "Included" : "Excluded: valuation before cash flow")}</td>
+                  </tr>
+                `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </section>
+    `
+    : '<p class="update-meta">No dated cash flows are available for XIRR yet.</p>';
+}
+
+function renderXirrAudit() {
+  if (!xirrAuditSummary || !xirrAuditTable) {
+    return;
+  }
+
+  renderXirrAuditOptions();
+  if (!selectedXirrAuditEntity) {
+    xirrAuditSummary.innerHTML = "";
+    xirrAuditTable.innerHTML = '<p class="update-meta">Select an entity to review XIRR cash flows.</p>';
+    return;
+  }
+
+  const entityRows = buildEntityRows(allInvestments, selectedXirrAuditEntity);
+  const performance = buildEntityRowTotals(entityRows);
+  const cashFlowAuditRows = buildEntityCashFlowAuditRows(entityRows, "internalMark");
+
+  xirrAuditSummary.innerHTML = [
+    { label: "Entity", value: selectedXirrAuditEntity },
+    { label: "Internal XIRR", value: formatPercent(performance.internal.xirr) },
+    { label: "Internal NAV", value: formatMoney(performance.internalValue) },
+    { label: "Cash-flow rows", value: String(cashFlowAuditRows.length) }
+  ]
+    .map(
+      (item) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="dashboard-value">${escapeHtml(item.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+  xirrAuditTable.innerHTML = buildXirrAuditMarkup(cashFlowAuditRows);
+}
+
+function renderFilterOptions() {
+  const entities = getAllEntityNames();
   const statuses = CANONICAL_STATUSES;
   const stages = Array.from(new Set(allInvestments.map((item) => item.stage).filter(Boolean))).sort();
   const owners = Array.from(new Set(allInvestments.map((item) => item.owner).filter(Boolean))).sort();
@@ -5838,6 +5898,7 @@ function renderAll() {
   renderUpdates(filteredInvestments);
   renderTasks();
   renderReconciliation();
+  renderXirrAudit();
   renderCompanyPanel();
   renderEntityDetail();
 }
@@ -7481,6 +7542,11 @@ addListener(closeEntityDetailButton, "click", () => {
   selectedEntity = "";
   renderEntityDetail();
   showWorkspaceView("home");
+});
+
+addListener(xirrAuditEntitySelect, "change", () => {
+  selectedXirrAuditEntity = xirrAuditEntitySelect.value;
+  renderXirrAudit();
 });
 
 addListener(entityPerformanceCards, "click", (event) => {

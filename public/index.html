@@ -36,6 +36,7 @@
           <button type="button" class="menu-link" data-view="research">Decks and notes</button>
           <button type="button" class="menu-link" data-view="tasks">Tasks and reminders</button>
           <button type="button" class="menu-link" data-view="quality">Data quality</button>
+          <button type="button" class="menu-link" data-view="xirr-audit">XIRR Audit</button>
           <button type="button" class="menu-link" data-view="exports">Exports and backup</button>
           <button type="button" class="menu-link" data-view="reconciliation">Entity reconciliation</button>
         </nav>
@@ -270,6 +271,27 @@
             <p id="taskMessage" class="form-message" aria-live="polite"></p>
           </form>
           <div id="tasksList" class="updates-list"></div>
+        </section>
+
+        <section id="xirrAuditSection" class="panel workspace-view hidden" data-view="xirr-audit">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>XIRR Audit</h2>
+              <p class="section-copy">
+                Review the dated cash flows that feed each entity's Internal XIRR.
+              </p>
+            </div>
+          </div>
+          <div class="xirr-audit-controls">
+            <label>
+              Entity
+              <select id="xirrAuditEntitySelect">
+                <option value="">Select an entity</option>
+              </select>
+            </label>
+          </div>
+          <div id="xirrAuditSummary" class="dashboard-grid"></div>
+          <div id="xirrAuditTable"></div>
         </section>
 
         <section id="addInvestmentSection" class="panel workspace-view hidden" data-view="capture">

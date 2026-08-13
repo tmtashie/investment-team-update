@@ -658,6 +658,13 @@ button:disabled {
   margin-bottom: 16px;
 }
 
+.xirr-audit-controls {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .entity-metric-box {
   min-height: 104px;
   padding: 14px;
