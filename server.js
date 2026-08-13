@@ -408,16 +408,55 @@ function formatQuotePrice(value) {
   });
 }
 
+const STOCK_QUOTE_CACHE_TTL_MS = 15 * 60 * 1000;
+const STOCK_QUOTE_BASE_URL =
+  process.env.STOCK_QUOTE_BASE_URL || "https://query1.finance.yahoo.com/v8/finance/chart";
+const stockQuoteCache = new Map();
+const stockQuoteRequests = new Map();
+
+function createQuoteError(message, options = {}) {
+  const error = new Error(message);
+  error.statusCode = options.statusCode || 502;
+  error.publicMessage = options.publicMessage || message;
+  return error;
+}
+
 async function fetchStockQuote(ticker) {
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!/^[A-Z0-9.^=-]{1,24}$/.test(symbol)) {
     throw new Error("Enter a valid ticker symbol.");
   }
 
+  const cachedQuote = stockQuoteCache.get(symbol);
+  if (cachedQuote && Date.now() - cachedQuote.cachedAt < STOCK_QUOTE_CACHE_TTL_MS) {
+    return { ...cachedQuote.quote };
+  }
+
+  if (stockQuoteRequests.has(symbol)) {
+    return stockQuoteRequests.get(symbol);
+  }
+
+  const quoteRequest = fetchFreshStockQuote(symbol)
+    .then((quote) => {
+      stockQuoteCache.set(symbol, {
+        cachedAt: Date.now(),
+        quote
+      });
+      return quote;
+    })
+    .finally(() => {
+      stockQuoteRequests.delete(symbol);
+    });
+
+  stockQuoteRequests.set(symbol, quoteRequest);
+  return quoteRequest;
+}
+
+async function fetchFreshStockQuote(symbol) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const quoteUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+    const quoteUrl = `${STOCK_QUOTE_BASE_URL.replace(/\/+$/, "")}/${encodeURIComponent(
       symbol
     )}?range=1d&interval=1d`;
     const quoteResponse = await fetch(quoteUrl, {
@@ -428,7 +467,16 @@ async function fetchStockQuote(ticker) {
     });
 
     if (!quoteResponse.ok) {
-      throw new Error(`Quote lookup failed with status ${quoteResponse.status}.`);
+      if (quoteResponse.status === 429) {
+        throw createQuoteError("Yahoo Finance quote lookup was rate limited.", {
+          statusCode: 503,
+          publicMessage: "Price update temporarily unavailable — previous price retained."
+        });
+      }
+      throw createQuoteError(`Quote lookup failed with status ${quoteResponse.status}.`, {
+        statusCode: 502,
+        publicMessage: "Price update temporarily unavailable — previous price retained."
+      });
     }
 
     const payload = await quoteResponse.json();
@@ -450,7 +498,9 @@ async function fetchStockQuote(ticker) {
       : new Date().toISOString().slice(0, 10);
 
     if (!Number.isFinite(price) || price <= 0) {
-      throw new Error(`No current price was found for ${symbol}.`);
+      throw createQuoteError(`No current price was found for ${symbol}.`, {
+        publicMessage: "Price update temporarily unavailable — previous price retained."
+      });
     }
 
     return {
@@ -3927,8 +3977,8 @@ const server = http.createServer(async (request, response) => {
       const message =
         error && error.name === "AbortError"
           ? "Stock quote lookup timed out. Try again in a moment."
-          : error.message || "Stock quote could not be loaded.";
-      sendJson(response, 502, { error: message });
+          : error.publicMessage || error.message || "Stock quote could not be loaded.";
+      sendJson(response, error.statusCode || 502, { error: message });
       return;
     }
   }

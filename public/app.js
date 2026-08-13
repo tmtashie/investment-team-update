@@ -2045,7 +2045,28 @@ function publicStockValuationNeedsPatch(investment, quote) {
 }
 
 function getPublicStockQuoteRequestKey(investment) {
-  return `${investment.id || stockKey(investment)}::${String(investment.ticker || "").trim().toUpperCase()}`;
+  return String(investment.ticker || "").trim().toUpperCase();
+}
+
+function waitForPublicStockQuoteSlot(delayMs = 650) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+}
+
+function groupPublicStockPositionsByTicker(positions) {
+  const groups = new Map();
+  positions.forEach((investment) => {
+    const ticker = String(investment.ticker || "").trim().toUpperCase();
+    if (!ticker) {
+      return;
+    }
+    if (!groups.has(ticker)) {
+      groups.set(ticker, []);
+    }
+    groups.get(ticker).push(investment);
+  });
+  return groups;
 }
 
 function buildPublicHoldingsSummary(entity) {
@@ -5809,7 +5830,9 @@ async function refreshPublicStockPrices(options = {}) {
       investment.ticker &&
       (force || !publicStockQuoteRequestKeys.has(getPublicStockQuoteRequestKey(investment)))
   );
-  if (!positions.length) {
+  const positionGroups = groupPublicStockPositionsByTicker(positions);
+  const tickerGroups = Array.from(positionGroups.entries());
+  if (!tickerGroups.length) {
     if (!automatic && publicStockPriceMessage) {
       publicStockPriceMessage.textContent = "No saved public stock positions with tickers are visible.";
     }
@@ -5827,19 +5850,36 @@ async function refreshPublicStockPrices(options = {}) {
   if (publicStockPriceMessage) {
     publicStockPriceMessage.textContent = automatic
       ? `Refreshing latest public stock prices...`
-      : `Refreshing ${positions.length} position${positions.length === 1 ? "" : "s"}...`;
+      : `Refreshing ${tickerGroups.length} ticker${tickerGroups.length === 1 ? "" : "s"} across ${positions.length} position${positions.length === 1 ? "" : "s"}...`;
   }
 
   const updated = [];
   const checked = [];
   const failed = [];
   try {
-    for (const investment of positions) {
-      const ticker = String(investment.ticker || "").trim().toUpperCase();
-      publicStockQuoteRequestKeys.add(getPublicStockQuoteRequestKey(investment));
+    for (let groupIndex = 0; groupIndex < tickerGroups.length; groupIndex += 1) {
+      const [ticker, tickerPositions] = tickerGroups[groupIndex];
+      publicStockQuoteRequestKeys.add(ticker);
+      if (groupIndex > 0) {
+        await waitForPublicStockQuoteSlot();
+      }
       try {
         const quote = await fetchJson(`/api/stock-quote?ticker=${encodeURIComponent(ticker)}`);
-        if (publicStockValuationNeedsPatch(investment, quote)) {
+        let tickerUpdated = 0;
+        tickerPositions.forEach((investment) => {
+          if (publicStockValuationNeedsPatch(investment, quote)) {
+            tickerUpdated += 1;
+          }
+        });
+        if (!tickerUpdated) {
+          checked.push(`${quote.symbol || ticker}${quote.priceDate ? ` (${quote.priceDate})` : ""}`);
+          continue;
+        }
+
+        for (const investment of tickerPositions) {
+          if (!publicStockValuationNeedsPatch(investment, quote)) {
+            continue;
+          }
           await fetchJson(`/api/investments/${investment.id}`, {
             method: "PATCH",
             headers: {
@@ -5847,16 +5887,16 @@ async function refreshPublicStockPrices(options = {}) {
             },
             body: JSON.stringify(getQuotePatchPayload(investment, quote))
           });
-          updated.push(`${quote.symbol || ticker}${quote.priceDate ? ` (${quote.priceDate})` : ""}`);
-        } else {
-          checked.push(`${quote.symbol || ticker}${quote.priceDate ? ` (${quote.priceDate})` : ""}`);
         }
+        updated.push(
+          `${quote.symbol || ticker}${quote.priceDate ? ` (${quote.priceDate})` : ""} for ${tickerUpdated} position${tickerUpdated === 1 ? "" : "s"}`
+        );
       } catch (error) {
         if (error.status === 401) {
           setSignedInState(null);
           throw error;
         }
-        failed.push(`${ticker}: ${error.message || "price unavailable"}`);
+        failed.push(`${ticker}: Price update temporarily unavailable — previous price retained`);
       }
     }
 
