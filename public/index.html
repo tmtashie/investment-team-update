@@ -33,6 +33,7 @@
           <button type="button" class="menu-link" data-view="capture">Add investment / AI research</button>
           <button type="button" class="menu-link" data-view="portfolio">Current investments</button>
           <button type="button" class="menu-link" data-view="public-stocks">Public stocks</button>
+          <button type="button" class="menu-link" data-view="fixed-income">Fixed Income</button>
           <button type="button" class="menu-link" data-view="cash">Cash</button>
           <button type="button" class="menu-link" data-view="research">Decks and notes</button>
           <button type="button" class="menu-link" data-view="tasks">Tasks and reminders</button>
@@ -204,6 +205,46 @@
           </div>
           <div id="cashSummary" class="dashboard-grid"></div>
           <div id="cashList" class="updates-list"></div>
+        </section>
+
+        <section id="fixedIncomeSection" class="panel workspace-view hidden" data-view="fixed-income">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>Fixed Income</h2>
+              <p class="section-copy">
+                Track bonds, par exposure, coupons, yields, maturity timing, and entity ownership.
+              </p>
+            </div>
+          </div>
+          <div class="fixed-income-toolbar">
+            <div class="fixed-income-filters">
+              <label>
+                Entity
+                <select id="fixedIncomeEntityFilter">
+                  <option value="">All entities</option>
+                </select>
+              </label>
+              <label>
+                Bond type
+                <select id="fixedIncomeTypeFilter">
+                  <option value="">All bond types</option>
+                </select>
+              </label>
+              <label>
+                Search
+                <input id="fixedIncomeSearchFilter" type="search" placeholder="Search issuer or CUSIP" />
+              </label>
+              <label>
+                Maturity year
+                <select id="fixedIncomeMaturityFilter">
+                  <option value="">All maturities</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div id="fixedIncomeSummary" class="dashboard-grid"></div>
+          <div id="fixedIncomeLadder" class="updates-list"></div>
+          <div id="fixedIncomeList" class="updates-list"></div>
         </section>
 
         <section id="entityDetailSection" class="panel workspace-view hidden" data-view="entity">
@@ -418,9 +459,172 @@
                     <option value="Private Stock">Private stock / secondary</option>
                     <option value="Fund">Fund</option>
                     <option value="Cash">Cash</option>
+                    <option value="Bond / Fixed Income">Bond / Fixed Income</option>
                     <option value="Other">Other</option>
                   </select>
                 </label>
+              </div>
+
+              <div id="bondDetailsPanel" class="bond-details-panel hidden">
+                <div class="two-up">
+                  <label>
+                    Issuer
+                    <input id="bondIssuerField" name="bondIssuer" type="text" placeholder="Bell County TX Water Control & Improvement District No. 1" />
+                  </label>
+
+                  <label>
+                    Security description
+                    <input id="bondDescriptionField" name="bondDescription" type="text" placeholder="Water Revenue System Bonds, Series 2024" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Bond type
+                    <select id="bondTypeField" name="bondType">
+                      <option value="">Select bond type</option>
+                      <option value="Municipal General Obligation">Municipal General Obligation</option>
+                      <option value="Municipal Revenue">Municipal Revenue</option>
+                      <option value="Corporate">Corporate</option>
+                      <option value="U.S. Treasury">U.S. Treasury</option>
+                      <option value="Agency">Agency</option>
+                      <option value="Mortgage-backed">Mortgage-backed</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    CUSIP
+                    <input id="bondCusipField" name="bondCusip" type="text" placeholder="123456AB7" />
+                  </label>
+
+                  <label>
+                    Entity owner
+                    <input id="bondEntityOwnerField" name="bondEntityOwner" type="text" placeholder="Custodian or owner" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Par value
+                    <input id="bondParValueField" name="bondParValue" type="text" inputmode="decimal" placeholder="250,000" />
+                  </label>
+
+                  <label>
+                    Purchase price per $100
+                    <input id="bondPurchasePriceField" name="bondPurchasePrice" type="text" inputmode="decimal" placeholder="99.50" />
+                  </label>
+
+                  <label>
+                    Purchase date
+                    <input id="bondPurchaseDateField" name="bondPurchaseDate" type="date" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Cost basis
+                    <input id="bondCostBasisField" name="bondCostBasis" type="text" inputmode="decimal" placeholder="248,750" />
+                  </label>
+
+                  <label>
+                    Coupon rate %
+                    <input id="bondCouponRateField" name="bondCouponRate" type="number" min="0" step="0.001" placeholder="4.125" />
+                  </label>
+
+                  <label>
+                    Coupon frequency
+                    <select id="bondCouponFrequencyField" name="bondCouponFrequency">
+                      <option value="">Select frequency</option>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Quarterly">Quarterly</option>
+                      <option value="Semiannual">Semiannual</option>
+                      <option value="Annual">Annual</option>
+                      <option value="At maturity">At maturity</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Maturity
+                    <input id="bondMaturityDateField" name="bondMaturityDate" type="date" />
+                  </label>
+
+                  <label>
+                    First call date
+                    <input id="bondCallDateField" name="bondCallDate" type="date" />
+                  </label>
+
+                  <label>
+                    Call price
+                    <input id="bondCallPriceField" name="bondCallPrice" type="text" inputmode="decimal" placeholder="100" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Current price per $100
+                    <input id="bondCurrentPriceField" name="bondCurrentPrice" type="text" inputmode="decimal" placeholder="101.25" />
+                  </label>
+
+                  <label>
+                    Market price date
+                    <input id="bondMarketPriceDateField" name="bondMarketPriceDate" type="date" />
+                  </label>
+
+                  <label>
+                    Current market value
+                    <input id="bondMarketValueField" name="bondMarketValue" type="text" inputmode="decimal" placeholder="253,125" readonly />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Yield to maturity %
+                    <input id="bondYieldToMaturityField" name="bondYieldToMaturity" type="number" step="0.001" placeholder="3.95" />
+                  </label>
+
+                  <label>
+                    Yield to call %
+                    <input id="bondYieldToCallField" name="bondYieldToCall" type="number" step="0.001" placeholder="3.75" />
+                  </label>
+
+                  <label>
+                    Current yield %
+                    <input id="bondCurrentYieldField" name="bondCurrentYield" type="number" step="0.001" placeholder="4.07" readonly />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Credit rating
+                    <input id="bondCreditRatingField" name="bondCreditRating" type="text" placeholder="AA" />
+                  </label>
+
+                  <label>
+                    Insurer / guarantor
+                    <input id="bondInsurerField" name="bondInsurer" type="text" placeholder="Build America Mutual" />
+                  </label>
+
+                  <label>
+                    Tax status
+                    <select id="bondTaxStatusField" name="bondTaxStatus">
+                      <option value="">Select tax status</option>
+                      <option value="Tax-exempt">Tax-exempt</option>
+                      <option value="Taxable">Taxable</option>
+                      <option value="AMT">AMT</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="two-up">
+                  <label>
+                    Accrued interest
+                    <input id="bondAccruedInterestField" name="bondAccruedInterest" type="text" inputmode="decimal" placeholder="1,250" />
+                  </label>
+
+                  <div id="bondValuePreview" class="stock-value-preview">
+                    Market value and current yield will calculate from par value, price, and coupon.
+                  </div>
+                </div>
+                <div class="section-copy subsection-helper">
+                  Fixed Income values sync to official and internal value, but coupon and price fields do not create IRR cash flows.
+                </div>
               </div>
 
               <div id="cashDetailsPanel" class="cash-details-panel hidden">

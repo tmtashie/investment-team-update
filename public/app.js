@@ -77,8 +77,41 @@ const cashSummary = document.getElementById("cashSummary");
 const cashList = document.getElementById("cashList");
 const cashEntityFilter = document.getElementById("cashEntityFilter");
 const cashInstitutionFilter = document.getElementById("cashInstitutionFilter");
+const fixedIncomeSummary = document.getElementById("fixedIncomeSummary");
+const fixedIncomeLadder = document.getElementById("fixedIncomeLadder");
+const fixedIncomeList = document.getElementById("fixedIncomeList");
+const fixedIncomeEntityFilter = document.getElementById("fixedIncomeEntityFilter");
+const fixedIncomeTypeFilter = document.getElementById("fixedIncomeTypeFilter");
+const fixedIncomeSearchFilter = document.getElementById("fixedIncomeSearchFilter");
+const fixedIncomeMaturityFilter = document.getElementById("fixedIncomeMaturityFilter");
 const addPublicSquareStockButton = document.getElementById("addPublicSquareStockButton");
 const addSpaceXStockButton = document.getElementById("addSpaceXStockButton");
+const bondDetailsPanel = document.getElementById("bondDetailsPanel");
+const bondIssuerField = document.getElementById("bondIssuerField");
+const bondDescriptionField = document.getElementById("bondDescriptionField");
+const bondTypeField = document.getElementById("bondTypeField");
+const bondCusipField = document.getElementById("bondCusipField");
+const bondEntityOwnerField = document.getElementById("bondEntityOwnerField");
+const bondParValueField = document.getElementById("bondParValueField");
+const bondPurchasePriceField = document.getElementById("bondPurchasePriceField");
+const bondPurchaseDateField = document.getElementById("bondPurchaseDateField");
+const bondCostBasisField = document.getElementById("bondCostBasisField");
+const bondCouponRateField = document.getElementById("bondCouponRateField");
+const bondCouponFrequencyField = document.getElementById("bondCouponFrequencyField");
+const bondMaturityDateField = document.getElementById("bondMaturityDateField");
+const bondCallDateField = document.getElementById("bondCallDateField");
+const bondCallPriceField = document.getElementById("bondCallPriceField");
+const bondCurrentPriceField = document.getElementById("bondCurrentPriceField");
+const bondMarketPriceDateField = document.getElementById("bondMarketPriceDateField");
+const bondMarketValueField = document.getElementById("bondMarketValueField");
+const bondYieldToMaturityField = document.getElementById("bondYieldToMaturityField");
+const bondYieldToCallField = document.getElementById("bondYieldToCallField");
+const bondCurrentYieldField = document.getElementById("bondCurrentYieldField");
+const bondCreditRatingField = document.getElementById("bondCreditRatingField");
+const bondInsurerField = document.getElementById("bondInsurerField");
+const bondTaxStatusField = document.getElementById("bondTaxStatusField");
+const bondAccruedInterestField = document.getElementById("bondAccruedInterestField");
+const bondValuePreview = document.getElementById("bondValuePreview");
 const cashDetailsPanel = document.getElementById("cashDetailsPanel");
 const cashAccountNameField = document.getElementById("cashAccountNameField");
 const cashInstitutionField = document.getElementById("cashInstitutionField");
@@ -250,6 +283,12 @@ let cashFilters = {
   entity: "",
   institution: ""
 };
+let fixedIncomeFilters = {
+  entity: "",
+  type: "",
+  search: "",
+  maturityYear: ""
+};
 let publicStockQuoteRequestKeys = new Set();
 let automaticPublicStockRefreshInFlight = false;
 
@@ -405,12 +444,22 @@ const moneyFieldNames = [
   "exitValue",
   "followOnCapitalAmount",
   "costBasisPerShare",
-  "marketPrice"
+  "marketPrice",
+  "bondParValue",
+  "bondPurchasePrice",
+  "bondCostBasis",
+  "bondCallPrice",
+  "bondCurrentPrice",
+  "bondMarketValue",
+  "bondAccruedInterest"
 ];
 const moneyFieldDecimalPlaces = {
   shareCount: 6,
   costBasisPerShare: 6,
-  marketPrice: 6
+  marketPrice: 6,
+  bondPurchasePrice: 6,
+  bondCallPrice: 6,
+  bondCurrentPrice: 6
 };
 
 const CANONICAL_STATUSES = [
@@ -1931,6 +1980,10 @@ function isCashInvestment(investment) {
   return String((investment && investment.assetType) || "").trim() === "Cash";
 }
 
+function isBondInvestment(investment) {
+  return String((investment && investment.assetType) || "").trim() === "Bond / Fixed Income";
+}
+
 function isStockAssetType(value) {
   return String(value || "").toLowerCase().includes("stock");
 }
@@ -1941,6 +1994,10 @@ function isPublicStockAssetType(value) {
 
 function isCashAssetType(value) {
   return String(value || "").trim() === "Cash";
+}
+
+function isBondAssetType(value) {
+  return String(value || "").trim() === "Bond / Fixed Income";
 }
 
 function stockKey(investment) {
@@ -2091,8 +2148,170 @@ function applyCashValuationSync(payload) {
   };
 }
 
+function getBondMetrics(investment) {
+  const parValue = toNumber(investment && investment.bondParValue);
+  const purchasePrice = toNumber(investment && investment.bondPurchasePrice);
+  const enteredCostBasis = toNumber(investment && investment.bondCostBasis);
+  const currentPrice = toNumber(investment && investment.bondCurrentPrice);
+  const couponRate = toNumber(investment && investment.bondCouponRate) / 100;
+  const ytm = toNumber(investment && investment.bondYieldToMaturity) / 100;
+  const ytc = toNumber(investment && investment.bondYieldToCall) / 100;
+  const marketValue = parValue > 0 && currentPrice > 0 ? (parValue * currentPrice) / 100 : 0;
+  const annualCouponIncome = parValue > 0 && couponRate > 0 ? parValue * couponRate : 0;
+  const calculatedCostBasis = parValue > 0 && purchasePrice > 0 ? (parValue * purchasePrice) / 100 : 0;
+  const costBasis = enteredCostBasis > 0 ? enteredCostBasis : calculatedCostBasis;
+  const currentYield = marketValue > 0 && annualCouponIncome > 0 ? annualCouponIncome / marketValue : null;
+
+  return {
+    parValue,
+    purchasePrice,
+    currentPrice,
+    marketValue,
+    annualCouponIncome,
+    couponRate: Number.isFinite(couponRate) && couponRate > 0 ? couponRate : null,
+    costBasis,
+    currentYield,
+    ytm: Number.isFinite(ytm) && ytm !== 0 ? ytm : null,
+    ytc: Number.isFinite(ytc) && ytc !== 0 ? ytc : null
+  };
+}
+
+function applyBondValuationSync(payload) {
+  if (!isBondInvestment(payload)) {
+    return payload;
+  }
+
+  const metrics = getBondMetrics(payload);
+  const normalizedMarketValue = metrics.marketValue > 0 ? normalizeMoneyString(String(metrics.marketValue), 6) : "";
+  const normalizedCostBasis = metrics.costBasis > 0 ? normalizeMoneyString(String(metrics.costBasis), 6) : "";
+  const currentYieldPercent =
+    metrics.currentYield !== null ? String(Number((metrics.currentYield * 100).toFixed(6))) : "";
+
+  return {
+    ...payload,
+    ticker: "",
+    exchange: "",
+    shareCount: "",
+    costBasisPerShare: "",
+    marketPrice: "",
+    marketPriceDate: "",
+    marketValue: normalizedMarketValue,
+    amount: normalizedCostBasis || payload.amount || "",
+    status: payload.status || "Active",
+    capitalCallDate: "",
+    capitalCallAmount: "",
+    distributionDate: "",
+    distributionAmount: "",
+    valuationDate:
+      payload.bondCurrentPrice && payload.bondMarketPriceDate
+        ? payload.bondMarketPriceDate
+        : payload.valuationDate || "",
+    officialValue: normalizedMarketValue || payload.officialValue || "",
+    internalValue: normalizedMarketValue || payload.internalValue || "",
+    ownershipPercent: "",
+    entityOwnershipPercent: "",
+    ownershipNotes: "",
+    followOnCapitalAmount: "",
+    followOnCapitalStatus: "",
+    followOnCapitalNotes: "",
+    bondMarketValue: normalizedMarketValue,
+    bondCostBasis: normalizedCostBasis || payload.bondCostBasis || "",
+    bondCurrentYield: currentYieldPercent
+  };
+}
+
 function applyAssetValuationSync(payload) {
-  return applyCashValuationSync(applyPublicStockValuationSync(payload));
+  return applyBondValuationSync(applyCashValuationSync(applyPublicStockValuationSync(payload)));
+}
+
+function getBondRows(investments) {
+  return sortInvestmentsAlphabetically(investments.filter(isBondInvestment));
+}
+
+function getBondIssuer(investment) {
+  return String((investment && (investment.bondIssuer || investment.company)) || "").trim();
+}
+
+function getBondDescription(investment) {
+  return String((investment && (investment.bondDescription || investment.notes)) || "").trim();
+}
+
+function getBondType(investment) {
+  return String((investment && (investment.bondType || investment.stage)) || "Other").trim() || "Other";
+}
+
+function getBondMaturityYear(investment) {
+  const maturity = String((investment && investment.bondMaturityDate) || "").trim();
+  return /^\d{4}/.test(maturity) ? maturity.slice(0, 4) : "";
+}
+
+function buildFixedIncomeSummary(rows) {
+  const positions = getBondRows(rows);
+  const totals = positions.reduce(
+    (summary, investment) => {
+      const metrics = getBondMetrics(investment);
+      summary.marketValue += metrics.marketValue;
+      summary.parValue += metrics.parValue;
+      summary.annualCouponIncome += metrics.annualCouponIncome;
+      if (metrics.couponRate !== null && metrics.parValue > 0) {
+        summary.weightedCouponNumerator += metrics.couponRate * metrics.parValue;
+        summary.weightedCouponDenominator += metrics.parValue;
+      }
+      if (metrics.ytm !== null && metrics.marketValue > 0) {
+        summary.weightedYtmNumerator += metrics.ytm * metrics.marketValue;
+        summary.weightedYtmDenominator += metrics.marketValue;
+      }
+      return summary;
+    },
+    {
+      positions,
+      marketValue: 0,
+      parValue: 0,
+      annualCouponIncome: 0,
+      weightedCouponNumerator: 0,
+      weightedCouponDenominator: 0,
+      weightedYtmNumerator: 0,
+      weightedYtmDenominator: 0
+    }
+  );
+
+  const nextMaturity = positions
+    .map((investment) => investment.bondMaturityDate)
+    .filter(Boolean)
+    .sort((left, right) => parseDateValue(left, new Date(8640000000000000)) - parseDateValue(right, new Date(8640000000000000)))[0] || "";
+
+  return {
+    ...totals,
+    weightedCoupon:
+      totals.weightedCouponDenominator > 0
+        ? totals.weightedCouponNumerator / totals.weightedCouponDenominator
+        : null,
+    weightedYtm:
+      totals.weightedYtmDenominator > 0
+        ? totals.weightedYtmNumerator / totals.weightedYtmDenominator
+        : null,
+    nextMaturity
+  };
+}
+
+function buildFixedIncomeHoldingsSummary(entity = "") {
+  return buildFixedIncomeSummary(
+    getBondRows(allInvestments).filter(
+      (investment) => !entity || normalizeEntityName(investment.entity) === normalizeEntityName(entity)
+    )
+  );
+}
+
+function buildMaturityLadder(rows) {
+  const ladder = new Map();
+  getBondRows(rows).forEach((investment) => {
+    const year = getBondMaturityYear(investment);
+    if (!year) {
+      return;
+    }
+    ladder.set(year, (ladder.get(year) || 0) + getBondMetrics(investment).parValue);
+  });
+  return Array.from(ladder.entries()).sort(([left], [right]) => left.localeCompare(right));
 }
 
 function getCashRows(investments) {
@@ -2337,6 +2556,39 @@ function clearStockFields() {
   );
 }
 
+function clearBondFields() {
+  [
+    "bondIssuer",
+    "bondDescription",
+    "bondType",
+    "bondCusip",
+    "bondEntityOwner",
+    "bondParValue",
+    "bondPurchasePrice",
+    "bondPurchaseDate",
+    "bondCostBasis",
+    "bondCouponRate",
+    "bondCouponFrequency",
+    "bondMaturityDate",
+    "bondCallDate",
+    "bondCallPrice",
+    "bondCurrentPrice",
+    "bondMarketPriceDate",
+    "bondMarketValue",
+    "bondYieldToMaturity",
+    "bondYieldToCall",
+    "bondCurrentYield",
+    "bondCreditRating",
+    "bondInsurer",
+    "bondTaxStatus",
+    "bondAccruedInterest"
+  ].forEach((fieldName) => {
+    if (form && form.elements && form.elements[fieldName]) {
+      form.elements[fieldName].value = "";
+    }
+  });
+}
+
 function updateStockDetailsVisibility(options = {}) {
   if (!stockDetailsPanel || !form || !form.elements || !form.elements.assetType) {
     return;
@@ -2345,20 +2597,31 @@ function updateStockDetailsVisibility(options = {}) {
   const showStockDetails = isStockAssetType(form.elements.assetType.value);
   const publicStockDetails = isPublicStockAssetType(form.elements.assetType.value);
   const cashDetails = isCashAssetType(form.elements.assetType.value);
+  const bondDetails = isBondAssetType(form.elements.assetType.value);
   stockDetailsPanel.classList.toggle("hidden", !showStockDetails);
   if (cashDetailsPanel) {
     cashDetailsPanel.classList.toggle("hidden", !cashDetails);
   }
+  if (bondDetailsPanel) {
+    bondDetailsPanel.classList.toggle("hidden", !bondDetails);
+  }
   if (!showStockDetails && options.clearHiddenFields) {
     clearStockFields();
+  }
+  if (!bondDetails && options.clearHiddenFields) {
+    clearBondFields();
   }
   if (cashDetails) {
     syncCashPanelFromForm();
     syncCashFormFields();
   }
+  if (bondDetails) {
+    syncBondPanelFromForm();
+    syncBondFormFields();
+  }
   ["valuationDate", "officialValue", "internalValue"].forEach((fieldName) => {
     if (form.elements[fieldName]) {
-      form.elements[fieldName].readOnly = publicStockDetails || cashDetails;
+      form.elements[fieldName].readOnly = publicStockDetails || cashDetails || bondDetails;
     }
   });
   if (form.elements.exitValue) {
@@ -2367,12 +2630,105 @@ function updateStockDetailsVisibility(options = {}) {
   if (valuationHelperText) {
     valuationHelperText.textContent = cashDetails
       ? "For Cash, balance date drives valuation date and current balance drives official and internal value. Cash does not create IRR cash flows."
-      : publicStockDetails
-        ? "For Public Stocks, valuation date, official value, and internal value are driven by share count and current market price. Exit value stays manual."
-        : "Use the latest valuation date when you update official, internal, or exit marks.";
+      : bondDetails
+        ? "For Fixed Income, market price date drives valuation date and market value drives official and internal value. Exit value stays manual."
+        : publicStockDetails
+          ? "For Public Stocks, valuation date, official value, and internal value are driven by share count and current market price. Exit value stays manual."
+          : "Use the latest valuation date when you update official, internal, or exit marks.";
   }
   syncPublicStockFormValuation();
+  updateBondValuePreview();
   updateStockValuePreview();
+}
+
+function syncBondPanelFromForm() {
+  if (!form || !form.elements || !isBondAssetType(form.elements.assetType.value)) {
+    return;
+  }
+  if (bondIssuerField && !bondIssuerField.value) {
+    bondIssuerField.value = form.elements.company ? form.elements.company.value : "";
+  }
+  if (bondTypeField && !bondTypeField.value) {
+    bondTypeField.value = form.elements.stage ? form.elements.stage.value : "";
+  }
+  if (bondEntityOwnerField && !bondEntityOwnerField.value) {
+    bondEntityOwnerField.value = form.elements.owner ? form.elements.owner.value : "";
+  }
+}
+
+function syncBondFormFields() {
+  if (!form || !form.elements || !isBondAssetType(form.elements.assetType.value)) {
+    return;
+  }
+  if (form.elements.company && bondIssuerField) {
+    form.elements.company.value = bondIssuerField.value;
+  }
+  if (form.elements.stage && bondTypeField) {
+    form.elements.stage.value = bondTypeField.value;
+  }
+  if (form.elements.owner && bondEntityOwnerField) {
+    form.elements.owner.value = bondEntityOwnerField.value;
+  }
+  if (form.elements.amount && bondCostBasisField) {
+    form.elements.amount.value = bondCostBasisField.value;
+  }
+  if (form.elements.status && !form.elements.status.value) {
+    form.elements.status.value = "Active";
+  }
+
+  const synced = applyBondValuationSync({
+    assetType: "Bond / Fixed Income",
+    amount: form.elements.amount ? form.elements.amount.value : "",
+    status: form.elements.status ? form.elements.status.value : "",
+    valuationDate: form.elements.valuationDate ? form.elements.valuationDate.value : "",
+    officialValue: form.elements.officialValue ? form.elements.officialValue.value : "",
+    internalValue: form.elements.internalValue ? form.elements.internalValue.value : "",
+    bondParValue: bondParValueField ? bondParValueField.value : "",
+    bondPurchasePrice: bondPurchasePriceField ? bondPurchasePriceField.value : "",
+    bondCostBasis: bondCostBasisField ? bondCostBasisField.value : "",
+    bondCouponRate: bondCouponRateField ? bondCouponRateField.value : "",
+    bondCurrentPrice: bondCurrentPriceField ? bondCurrentPriceField.value : "",
+    bondMarketPriceDate: bondMarketPriceDateField ? bondMarketPriceDateField.value : ""
+  });
+
+  if (bondCostBasisField && synced.bondCostBasis && !bondCostBasisField.value) {
+    bondCostBasisField.value = synced.bondCostBasis;
+  }
+  if (bondMarketValueField) {
+    bondMarketValueField.value = synced.bondMarketValue || "";
+  }
+  if (bondCurrentYieldField) {
+    bondCurrentYieldField.value = synced.bondCurrentYield || "";
+  }
+  if (form.elements.amount) {
+    form.elements.amount.value = synced.amount || "";
+  }
+  if (form.elements.valuationDate) {
+    form.elements.valuationDate.value = synced.valuationDate || "";
+  }
+  if (form.elements.officialValue) {
+    form.elements.officialValue.value = synced.officialValue || "";
+  }
+  if (form.elements.internalValue) {
+    form.elements.internalValue.value = synced.internalValue || "";
+  }
+}
+
+function updateBondValuePreview() {
+  if (!bondValuePreview || !form || !form.elements || !isBondAssetType(form.elements.assetType.value)) {
+    return;
+  }
+  const metrics = getBondMetrics({
+    bondParValue: bondParValueField ? bondParValueField.value : "",
+    bondPurchasePrice: bondPurchasePriceField ? bondPurchasePriceField.value : "",
+    bondCostBasis: bondCostBasisField ? bondCostBasisField.value : "",
+    bondCouponRate: bondCouponRateField ? bondCouponRateField.value : "",
+    bondCurrentPrice: bondCurrentPriceField ? bondCurrentPriceField.value : ""
+  });
+  bondValuePreview.textContent =
+    metrics.marketValue > 0
+      ? `Market value ${formatMoney(metrics.marketValue)} • annual coupon ${formatMoney(metrics.annualCouponIncome)} • current yield ${formatPercent(metrics.currentYield)}`
+      : "Market value and current yield will calculate from par value, price, and coupon.";
 }
 
 function syncCashPanelFromForm() {
@@ -2738,7 +3094,7 @@ function buildPerformanceInputs(updates) {
   const updateActivities = updates.map((update) => {
     const pipelineUpdate =
       isPipelineStatus(update.status) || isPipelineStatus(update.stage);
-    const activityRows = isCashInvestment(update)
+    const activityRows = isCashInvestment(update) || isBondInvestment(update)
       ? []
       : normalizeCapitalActivityRows(
           update.capitalActivity && update.capitalActivity.length
@@ -2847,6 +3203,7 @@ function buildPerformanceInputs(updates) {
 
   return {
     isCashPosition: updates.some(isCashInvestment),
+    isBondPosition: updates.some(isBondInvestment),
     committedCapital,
     investedCapital,
     distributions,
@@ -3023,7 +3380,7 @@ function buildAggregatePerformance(companyCollections) {
     let terminalTotal = 0;
 
     companyInputs.forEach(({ inputs }) => {
-      if (inputs.isCashPosition) {
+      if (inputs.isCashPosition || inputs.isBondPosition) {
         return;
       }
       cashFlows.push(...inputs.baseCashFlows);
@@ -3160,7 +3517,7 @@ function buildEntityCashFlowAuditRows(rows, markName = "internalMark") {
         amount: cashFlow.amount,
         includedInXirr: true
       }));
-      if (inputs.isCashPosition) {
+      if (inputs.isCashPosition || inputs.isBondPosition) {
         return cashFlowRows;
       }
       const terminalMark = inputs[markName];
@@ -3379,6 +3736,8 @@ function buildDashboardCards(investments) {
   const stockMarketValue = savedPublicStockRows.reduce((sum, investment) => sum + getStockMarketValue(investment), 0);
   const cashRows = getCashRows(investments);
   const totalCash = cashRows.reduce((sum, investment) => sum + getCashBalance(investment), 0);
+  const fixedIncomeRows = getBondRows(investments);
+  const fixedIncomeSummary = buildFixedIncomeSummary(fixedIncomeRows);
   const totalUnfundedCommitments = Math.max(totalCommittedCapital - totalInvestedCapital, 0);
   const liquidityCoverage =
     totalUnfundedCommitments > 0 ? totalCash / totalUnfundedCommitments : null;
@@ -3411,6 +3770,8 @@ function buildDashboardCards(investments) {
     },
     { label: "Public stocks", value: String(savedPublicStockRows.length), action: "public-stocks" },
     { label: "Stock market value", value: formatMoney(stockMarketValue), action: "public-stocks" },
+    { label: "Fixed income positions", value: String(fixedIncomeRows.length), action: "fixed-income" },
+    { label: "Fixed income market value", value: formatMoney(fixedIncomeSummary.marketValue), action: "fixed-income" },
     { label: "Total cash", value: formatMoney(totalCash), action: "cash" },
     { label: "Total unfunded commitments", value: formatMoney(totalUnfundedCommitments), action: "portfolio" },
     { label: "Liquidity coverage", value: formatTurns(liquidityCoverage), action: "cash" },
@@ -3640,6 +4001,7 @@ function renderDashboard(investments) {
         const totals = buildEntityRowTotals(rows);
         const publicHoldings = buildPublicHoldingsSummary(entity);
         const cashHoldings = buildCashHoldingsSummary(entity);
+        const fixedIncomeHoldings = buildFixedIncomeHoldingsSummary(entity);
         const cashNavPercent =
           totals.internalValue > 0 ? cashHoldings.totalBalance / totals.internalValue : null;
         const metrics = [
@@ -3702,6 +4064,41 @@ function renderDashboard(investments) {
                         <div class="entity-metric-box">
                           <p class="dashboard-label">${escapeHtml(metric.label)}</p>
                           <p class="dashboard-value ${metric.performance === undefined ? "" : escapeHtml(getStockPerformanceClass(metric.performance))}">${escapeHtml(metric.value)}</p>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+            : ""
+        }
+        ${
+          fixedIncomeHoldings.positions.length
+            ? `
+              <article class="dashboard-card entity-performance-card fixed-income-holdings-card" data-entity="${escapeHtml(entity)}">
+                <div class="entity-performance-header">
+                  <div>
+                    <p class="dashboard-label">Fixed Income Holdings</p>
+                    <h3>${escapeHtml(entity)}</h3>
+                  </div>
+                  <span class="status-chip">${escapeHtml(String(fixedIncomeHoldings.positions.length))} position${fixedIncomeHoldings.positions.length === 1 ? "" : "s"}</span>
+                </div>
+                <div class="entity-metric-grid">
+                  ${[
+                    { label: "Current fixed income market value", value: formatMoney(fixedIncomeHoldings.marketValue) },
+                    { label: "Total par value", value: formatMoney(fixedIncomeHoldings.parValue) },
+                    { label: "Annual coupon income", value: formatMoney(fixedIncomeHoldings.annualCouponIncome) },
+                    { label: "Weighted average coupon", value: formatPercent(fixedIncomeHoldings.weightedCoupon) },
+                    { label: "Weighted average YTM", value: formatPercent(fixedIncomeHoldings.weightedYtm) },
+                    { label: "Bond positions", value: String(fixedIncomeHoldings.positions.length) },
+                    { label: "Next maturity", value: fixedIncomeHoldings.nextMaturity || "N/A" }
+                  ]
+                    .map(
+                      (metric) => `
+                        <div class="entity-metric-box">
+                          <p class="dashboard-label">${escapeHtml(metric.label)}</p>
+                          <p class="dashboard-value">${escapeHtml(metric.value)}</p>
                         </div>
                       `
                     )
@@ -4384,6 +4781,36 @@ function beginEditInvestment(investmentId) {
   form.elements.costBasisPerShare.value = investment.costBasisPerShare || "";
   form.elements.marketPrice.value = investment.marketPrice || "";
   form.elements.marketPriceDate.value = investment.marketPriceDate || "";
+  [
+    "bondIssuer",
+    "bondDescription",
+    "bondType",
+    "bondCusip",
+    "bondEntityOwner",
+    "bondParValue",
+    "bondPurchasePrice",
+    "bondPurchaseDate",
+    "bondCostBasis",
+    "bondCouponRate",
+    "bondCouponFrequency",
+    "bondMaturityDate",
+    "bondCallDate",
+    "bondCallPrice",
+    "bondCurrentPrice",
+    "bondMarketPriceDate",
+    "bondMarketValue",
+    "bondYieldToMaturity",
+    "bondYieldToCall",
+    "bondCurrentYield",
+    "bondCreditRating",
+    "bondInsurer",
+    "bondTaxStatus",
+    "bondAccruedInterest"
+  ].forEach((fieldName) => {
+    if (form.elements[fieldName]) {
+      form.elements[fieldName].value = investment[fieldName] || "";
+    }
+  });
   form.elements.amount.value = investment.amount || "";
   form.elements.currency.value = investment.currency || "USD";
   form.elements.stage.value = investment.stage || "";
@@ -6184,6 +6611,207 @@ function renderCash() {
     : '<p class="update-meta">No cash accounts match those filters.</p>';
 }
 
+function renderFixedIncomeFilterOptions(bondRows) {
+  const assignOptions = (element, placeholder, values, selectedValue) => {
+    if (!element) {
+      return "";
+    }
+    element.innerHTML = [`<option value="">${placeholder}</option>`]
+      .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+      .join("");
+    element.value = values.includes(selectedValue) ? selectedValue : "";
+    return element.value;
+  };
+
+  const entities = Array.from(
+    new Set(bondRows.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right));
+  const types = Array.from(new Set(bondRows.map(getBondType).filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right)
+  );
+  const maturityYears = Array.from(new Set(bondRows.map(getBondMaturityYear).filter(Boolean))).sort();
+
+  fixedIncomeFilters.entity = assignOptions(
+    fixedIncomeEntityFilter,
+    "All entities",
+    entities,
+    fixedIncomeFilters.entity
+  );
+  fixedIncomeFilters.type = assignOptions(
+    fixedIncomeTypeFilter,
+    "All bond types",
+    types,
+    fixedIncomeFilters.type
+  );
+  fixedIncomeFilters.maturityYear = assignOptions(
+    fixedIncomeMaturityFilter,
+    "All maturities",
+    maturityYears,
+    fixedIncomeFilters.maturityYear
+  );
+}
+
+function getFilteredFixedIncomeRows(bondRows) {
+  const search = String(fixedIncomeFilters.search || "").trim().toLowerCase();
+  return bondRows.filter((investment) => {
+    const matchesEntity =
+      !fixedIncomeFilters.entity ||
+      normalizeEntityName(investment.entity) === normalizeEntityName(fixedIncomeFilters.entity);
+    const matchesType = !fixedIncomeFilters.type || getBondType(investment) === fixedIncomeFilters.type;
+    const matchesMaturity =
+      !fixedIncomeFilters.maturityYear ||
+      getBondMaturityYear(investment) === fixedIncomeFilters.maturityYear;
+    const matchesSearch =
+      !search ||
+      getBondIssuer(investment).toLowerCase().includes(search) ||
+      String(investment.bondCusip || "").toLowerCase().includes(search) ||
+      getBondDescription(investment).toLowerCase().includes(search);
+    return matchesEntity && matchesType && matchesMaturity && matchesSearch;
+  });
+}
+
+function renderFixedIncome() {
+  if (!fixedIncomeSummary || !fixedIncomeList || !fixedIncomeLadder) {
+    return;
+  }
+
+  const bondRows = getBondRows(allInvestments);
+  renderFixedIncomeFilterOptions(bondRows);
+  if (fixedIncomeSearchFilter && fixedIncomeSearchFilter.value !== fixedIncomeFilters.search) {
+    fixedIncomeSearchFilter.value = fixedIncomeFilters.search;
+  }
+
+  const filteredRows = getFilteredFixedIncomeRows(bondRows);
+  const summary = buildFixedIncomeSummary(filteredRows);
+  const ladderRows = buildMaturityLadder(filteredRows);
+
+  fixedIncomeSummary.innerHTML = [
+    { label: "Fixed income market value", value: formatMoney(summary.marketValue) },
+    { label: "Total par value", value: formatMoney(summary.parValue) },
+    { label: "Annual coupon income", value: formatMoney(summary.annualCouponIncome) },
+    { label: "Weighted average coupon", value: formatPercent(summary.weightedCoupon) },
+    { label: "Weighted average YTM", value: formatPercent(summary.weightedYtm) },
+    { label: "Bond positions", value: String(summary.positions.length) },
+    { label: "Next maturity date", value: summary.nextMaturity || "N/A" }
+  ]
+    .map(
+      (item) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="dashboard-value">${escapeHtml(item.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  fixedIncomeLadder.innerHTML = ladderRows.length
+    ? `
+      <section class="fixed-income-ladder-card">
+        <div class="update-head">
+          <h3>Maturity ladder</h3>
+          <span class="status-chip">Par value</span>
+        </div>
+        <div class="maturity-ladder-list">
+          ${ladderRows
+            .map(
+              ([year, parValue]) => `
+                <div class="maturity-ladder-row">
+                  <span>${escapeHtml(year)}</span>
+                  <strong>${escapeHtml(formatMoney(parValue))}</strong>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      </section>
+    `
+    : '<p class="update-meta">No maturity dates are available for the selected bonds.</p>';
+
+  fixedIncomeList.innerHTML = filteredRows.length
+    ? filteredRows
+        .map((investment) => {
+          const metrics = getBondMetrics(investment);
+          return `
+            <article class="update-card fixed-income-card">
+              <div class="update-head">
+                <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
+                  ${escapeHtml(getBondIssuer(investment) || "Unnamed issuer")}
+                </button>
+                <span class="status-chip">${escapeHtml(getBondType(investment))}</span>
+              </div>
+              <p class="update-meta">
+                ${escapeHtml(getBondDescription(investment) || "Description not set")} • ${escapeHtml(investment.bondCusip || "CUSIP not set")} • ${escapeHtml(normalizeEntityName(investment.entity) || "Entity not specified")}
+              </p>
+              <div class="stock-metric-grid">
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Par value</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.parValue))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Market value</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.marketValue))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Coupon</p>
+                  <p class="highlight-value">${escapeHtml(formatPercent(metrics.couponRate))}</p>
+                  <p class="update-meta">${escapeHtml(investment.bondCouponFrequency || "Frequency not set")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Annual coupon income</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.annualCouponIncome))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Maturity</p>
+                  <p class="highlight-value">${escapeHtml(investment.bondMaturityDate || "Not set")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Call date</p>
+                  <p class="highlight-value">${escapeHtml(investment.bondCallDate || "N/A")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Current price</p>
+                  <p class="highlight-value">${metrics.currentPrice ? escapeHtml(metrics.currentPrice.toLocaleString()) : "Not set"}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Yield to maturity</p>
+                  <p class="highlight-value">${escapeHtml(formatPercent(metrics.ytm))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Yield to call</p>
+                  <p class="highlight-value">${escapeHtml(formatPercent(metrics.ytc))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Credit rating</p>
+                  <p class="highlight-value">${escapeHtml(investment.bondCreditRating || "Not set")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Insurer</p>
+                  <p class="highlight-value">${escapeHtml(investment.bondInsurer || "N/A")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Tax status</p>
+                  <p class="highlight-value">${escapeHtml(investment.bondTaxStatus || "Not set")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Price as of</p>
+                  <p class="highlight-value">${escapeHtml(investment.bondMarketPriceDate || "Not set")}</p>
+                </div>
+              </div>
+              <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+              ${
+                canEditWorkspace()
+                  ? `<div class="card-actions">
+                      <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${escapeHtml(investment.id)}">Edit</button>
+                    </div>`
+                  : ""
+              }
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="update-meta">No fixed income positions match those filters.</p>';
+}
+
 async function refreshPublicStockPrices(options = {}) {
   if (!refreshPublicStockPricesButton) {
     return;
@@ -6303,6 +6931,7 @@ function renderAll() {
   renderDashboard(allInvestments);
   renderDataQuality();
   renderPublicStocks();
+  renderFixedIncome();
   renderCash();
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
@@ -7192,13 +7821,14 @@ addListener(form, "submit", async (event) => {
   formMessage.textContent = "Saving your update...";
   submitButton.disabled = true;
 
+  syncCashFormFields();
+  syncBondFormFields();
   const formData = new FormData(form);
   const recipients = String(formData.get("recipients") || "")
     .split(",")
     .map((email) => email.trim())
     .filter(Boolean);
 
-  syncCashFormFields();
   const payload = applyAssetValuationSync({
     company: formData.get("company"),
     entity: formData.get("entity"),
@@ -7209,6 +7839,30 @@ addListener(form, "submit", async (event) => {
     costBasisPerShare: formData.get("costBasisPerShare"),
     marketPrice: formData.get("marketPrice"),
     marketPriceDate: formData.get("marketPriceDate"),
+    bondIssuer: formData.get("bondIssuer"),
+    bondDescription: formData.get("bondDescription"),
+    bondType: formData.get("bondType"),
+    bondCusip: formData.get("bondCusip"),
+    bondEntityOwner: formData.get("bondEntityOwner"),
+    bondParValue: formData.get("bondParValue"),
+    bondPurchasePrice: formData.get("bondPurchasePrice"),
+    bondPurchaseDate: formData.get("bondPurchaseDate"),
+    bondCostBasis: formData.get("bondCostBasis"),
+    bondCouponRate: formData.get("bondCouponRate"),
+    bondCouponFrequency: formData.get("bondCouponFrequency"),
+    bondMaturityDate: formData.get("bondMaturityDate"),
+    bondCallDate: formData.get("bondCallDate"),
+    bondCallPrice: formData.get("bondCallPrice"),
+    bondCurrentPrice: formData.get("bondCurrentPrice"),
+    bondMarketPriceDate: formData.get("bondMarketPriceDate"),
+    bondMarketValue: formData.get("bondMarketValue"),
+    bondYieldToMaturity: formData.get("bondYieldToMaturity"),
+    bondYieldToCall: formData.get("bondYieldToCall"),
+    bondCurrentYield: formData.get("bondCurrentYield"),
+    bondCreditRating: formData.get("bondCreditRating"),
+    bondInsurer: formData.get("bondInsurer"),
+    bondTaxStatus: formData.get("bondTaxStatus"),
+    bondAccruedInterest: formData.get("bondAccruedInterest"),
     amount: formData.get("amount"),
     currency: formData.get("currency"),
     stage: formData.get("stage"),
@@ -7627,6 +8281,58 @@ if (cashBalanceField) {
   });
 }
 
+[
+  bondIssuerField,
+  bondDescriptionField,
+  bondTypeField,
+  bondEntityOwnerField,
+  bondParValueField,
+  bondPurchasePriceField,
+  bondPurchaseDateField,
+  bondCostBasisField,
+  bondCouponRateField,
+  bondCouponFrequencyField,
+  bondMaturityDateField,
+  bondCallDateField,
+  bondCallPriceField,
+  bondCurrentPriceField,
+  bondMarketPriceDateField,
+  bondYieldToMaturityField,
+  bondYieldToCallField,
+  bondCreditRatingField,
+  bondInsurerField,
+  bondTaxStatusField,
+  bondAccruedInterestField
+].forEach((field) => {
+  if (field) {
+    field.addEventListener("input", () => {
+      syncBondFormFields();
+      updateBondValuePreview();
+    });
+    field.addEventListener("change", () => {
+      syncBondFormFields();
+      updateBondValuePreview();
+    });
+  }
+});
+
+[
+  bondParValueField,
+  bondPurchasePriceField,
+  bondCostBasisField,
+  bondCallPriceField,
+  bondCurrentPriceField,
+  bondAccruedInterestField
+].forEach((field) => {
+  if (field) {
+    field.addEventListener("blur", () => {
+      field.value = normalizeMoneyString(field.value, moneyFieldDecimalPlaces[field.name] || 2);
+      syncBondFormFields();
+      updateBondValuePreview();
+    });
+  }
+});
+
 if (form && form.elements && form.elements.assetType) {
   form.elements.assetType.addEventListener("change", () => {
     updateStockDetailsVisibility({ clearHiddenFields: true });
@@ -8031,6 +8737,18 @@ addListener(dashboardCards, "click", (event) => {
     return;
   }
 
+  if (action === "fixed-income") {
+    showWorkspaceView("fixed-income");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  if (action === "cash") {
+    showWorkspaceView("cash");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
   if (action === "pipeline") {
     activePortfolioPreset = "pipeline";
     if (statusFilter) {
@@ -8230,7 +8948,52 @@ addListener(cashInstitutionFilter, "change", () => {
   renderCash();
 });
 
+addListener(fixedIncomeEntityFilter, "change", () => {
+  fixedIncomeFilters.entity = fixedIncomeEntityFilter.value;
+  renderFixedIncome();
+});
+
+addListener(fixedIncomeTypeFilter, "change", () => {
+  fixedIncomeFilters.type = fixedIncomeTypeFilter.value;
+  renderFixedIncome();
+});
+
+addListener(fixedIncomeSearchFilter, "input", () => {
+  fixedIncomeFilters.search = fixedIncomeSearchFilter.value;
+  renderFixedIncome();
+});
+
+addListener(fixedIncomeMaturityFilter, "change", () => {
+  fixedIncomeFilters.maturityYear = fixedIncomeMaturityFilter.value;
+  renderFixedIncome();
+});
+
 addListener(cashList, "click", (event) => {
+  const target = event.target.closest("[data-action], [data-company]");
+  if (!target) {
+    return;
+  }
+
+  const action = target.dataset.action || "";
+  const investmentId = target.dataset.id || "";
+  const company = target.dataset.company || "";
+  const entity = target.dataset.entity || "";
+
+  if (action === "edit" && investmentId) {
+    beginEditInvestment(investmentId);
+    return;
+  }
+
+  if (company && canOpenCompanyDetails()) {
+    selectedCompany = company;
+    selectedCompanyEntity = entity;
+    renderCompanyPanel();
+    showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+});
+
+addListener(fixedIncomeList, "click", (event) => {
   const target = event.target.closest("[data-action], [data-company]");
   if (!target) {
     return;

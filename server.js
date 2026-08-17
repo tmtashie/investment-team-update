@@ -525,8 +525,28 @@ function normalizeInvestment(entry) {
   const updatedAt = String(entry.updatedAt || entry.createdAt || new Date().toISOString());
   const assetType = String(entry.assetType || "Private Investment").trim() || "Private Investment";
   const isCashAsset = assetType === "Cash";
+  const isBondAsset = assetType === "Bond / Fixed Income";
   const amount = String(entry.amount || "").trim();
   const cashBalanceValue = formatNumericString(parseNumericString(amount));
+  const bondParValue = String(entry.bondParValue || "").trim();
+  const bondPurchasePrice = String(entry.bondPurchasePrice || "").trim();
+  const bondCostBasisInput = String(entry.bondCostBasis || "").trim();
+  const bondCouponRate = String(entry.bondCouponRate || "").trim();
+  const bondCurrentPrice = String(entry.bondCurrentPrice || "").trim();
+  const bondMarketPriceDate = String(entry.bondMarketPriceDate || "").trim();
+  const calculatedBondMarketValue =
+    parseNumericString(bondParValue) * parseNumericString(bondCurrentPrice) / 100;
+  const calculatedBondCostBasis =
+    parseNumericString(bondParValue) * parseNumericString(bondPurchasePrice) / 100;
+  const bondMarketValue = formatNumericString(calculatedBondMarketValue);
+  const bondCostBasis =
+    bondCostBasisInput || formatNumericString(calculatedBondCostBasis);
+  const bondAnnualCouponIncome =
+    parseNumericString(bondParValue) * (parseNumericString(bondCouponRate) / 100);
+  const bondCurrentYield =
+    calculatedBondMarketValue > 0 && bondAnnualCouponIncome > 0
+      ? String(Number(((bondAnnualCouponIncome / calculatedBondMarketValue) * 100).toFixed(6)))
+      : "";
   const ticker = String(entry.ticker || "").trim().toUpperCase();
   const exchange = String(entry.exchange || "").trim().toUpperCase();
   const shareCount = String(entry.shareCount || "").trim();
@@ -537,14 +557,26 @@ function normalizeInvestment(entry) {
   const marketValue =
     isCashAsset
       ? cashBalanceValue
+      : isBondAsset
+        ? bondMarketValue
       : String(entry.marketValue || "").trim() || formatNumericString(calculatedMarketValue);
   const capitalCallDate = String(entry.capitalCallDate || "").trim();
   const capitalCallAmount = String(entry.capitalCallAmount || "").trim();
   const distributionDate = String(entry.distributionDate || "").trim();
   const distributionAmount = String(entry.distributionAmount || "").trim();
-  const valuationDate = String(entry.valuationDate || "").trim();
-  const officialValue = isCashAsset ? cashBalanceValue : String(entry.officialValue || "").trim();
-  const internalValue = isCashAsset ? cashBalanceValue : String(entry.internalValue || "").trim();
+  const valuationDate = isBondAsset && bondCurrentPrice && bondMarketPriceDate
+    ? bondMarketPriceDate
+    : String(entry.valuationDate || "").trim();
+  const officialValue = isCashAsset
+    ? cashBalanceValue
+    : isBondAsset
+      ? bondMarketValue || String(entry.officialValue || "").trim()
+      : String(entry.officialValue || "").trim();
+  const internalValue = isCashAsset
+    ? cashBalanceValue
+    : isBondAsset
+      ? bondMarketValue || String(entry.internalValue || "").trim()
+      : String(entry.internalValue || "").trim();
   const exitValue = isCashAsset ? "" : String(entry.exitValue || "").trim();
   const ownershipPercent = String(entry.ownershipPercent || "").trim();
   const entityOwnershipPercent = String(entry.entityOwnershipPercent || "").trim();
@@ -670,36 +702,60 @@ function normalizeInvestment(entry) {
     companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
     entity,
     assetType,
-    ticker: isCashAsset ? "" : ticker,
-    exchange: isCashAsset ? "" : exchange,
-    shareCount: isCashAsset ? "" : shareCount,
-    costBasisPerShare: isCashAsset ? "" : costBasisPerShare,
-    marketPrice: isCashAsset ? "" : marketPrice,
-    marketPriceDate: isCashAsset ? "" : marketPriceDate,
+    ticker: isCashAsset || isBondAsset ? "" : ticker,
+    exchange: isCashAsset || isBondAsset ? "" : exchange,
+    shareCount: isCashAsset || isBondAsset ? "" : shareCount,
+    costBasisPerShare: isCashAsset || isBondAsset ? "" : costBasisPerShare,
+    marketPrice: isCashAsset || isBondAsset ? "" : marketPrice,
+    marketPriceDate: isCashAsset || isBondAsset ? "" : marketPriceDate,
+    bondIssuer: isBondAsset ? String(entry.bondIssuer || entry.company || "").trim() : "",
+    bondDescription: isBondAsset ? String(entry.bondDescription || "").trim() : "",
+    bondType: isBondAsset ? String(entry.bondType || entry.stage || "").trim() : "",
+    bondCusip: isBondAsset ? String(entry.bondCusip || "").trim().toUpperCase() : "",
+    bondEntityOwner: isBondAsset ? String(entry.bondEntityOwner || entry.owner || "").trim() : "",
+    bondParValue: isBondAsset ? bondParValue : "",
+    bondPurchasePrice: isBondAsset ? bondPurchasePrice : "",
+    bondPurchaseDate: isBondAsset ? String(entry.bondPurchaseDate || "").trim() : "",
+    bondCostBasis: isBondAsset ? bondCostBasis : "",
+    bondCouponRate: isBondAsset ? bondCouponRate : "",
+    bondCouponFrequency: isBondAsset ? String(entry.bondCouponFrequency || "").trim() : "",
+    bondMaturityDate: isBondAsset ? String(entry.bondMaturityDate || "").trim() : "",
+    bondCallDate: isBondAsset ? String(entry.bondCallDate || "").trim() : "",
+    bondCallPrice: isBondAsset ? String(entry.bondCallPrice || "").trim() : "",
+    bondCurrentPrice: isBondAsset ? bondCurrentPrice : "",
+    bondMarketPriceDate: isBondAsset ? bondMarketPriceDate : "",
+    bondMarketValue: isBondAsset ? bondMarketValue : "",
+    bondYieldToMaturity: isBondAsset ? String(entry.bondYieldToMaturity || "").trim() : "",
+    bondYieldToCall: isBondAsset ? String(entry.bondYieldToCall || "").trim() : "",
+    bondCurrentYield: isBondAsset ? bondCurrentYield : "",
+    bondCreditRating: isBondAsset ? String(entry.bondCreditRating || "").trim() : "",
+    bondInsurer: isBondAsset ? String(entry.bondInsurer || "").trim() : "",
+    bondTaxStatus: isBondAsset ? String(entry.bondTaxStatus || "").trim() : "",
+    bondAccruedInterest: isBondAsset ? String(entry.bondAccruedInterest || "").trim() : "",
     marketValue,
-    amount,
+    amount: isBondAsset ? bondCostBasis || amount : amount,
     currency: String(entry.currency || "USD").trim() || "USD",
     stage: String(entry.stage || "").trim(),
-    status: isCashAsset ? "Active" : String(entry.status || "").trim(),
-    owner: String(entry.owner || "").trim(),
+    status: isCashAsset || isBondAsset ? String(entry.status || "Active").trim() : String(entry.status || "").trim(),
+    owner: isBondAsset ? String(entry.bondEntityOwner || entry.owner || "").trim() : String(entry.owner || "").trim(),
     nextStep: String(entry.nextStep || "").trim(),
     nextStepDueDate: String(entry.nextStepDueDate || "").trim(),
     notes,
     deckSummary,
-    capitalCallDate: isCashAsset ? "" : capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
-    capitalCallAmount: isCashAsset ? "" : capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
-    distributionDate: isCashAsset ? "" : distributionDate || (latestDistribution ? latestDistribution.date : ""),
-    distributionAmount: isCashAsset ? "" : distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
+    capitalCallDate: isCashAsset || isBondAsset ? "" : capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
+    capitalCallAmount: isCashAsset || isBondAsset ? "" : capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
+    distributionDate: isCashAsset || isBondAsset ? "" : distributionDate || (latestDistribution ? latestDistribution.date : ""),
+    distributionAmount: isCashAsset || isBondAsset ? "" : distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
     valuationDate,
     officialValue,
     internalValue,
     exitValue,
-    ownershipPercent: isCashAsset ? "" : ownershipPercent,
-    entityOwnershipPercent: isCashAsset ? "" : entityOwnershipPercent,
-    ownershipNotes: isCashAsset ? "" : ownershipNotes,
-    followOnCapitalAmount: isCashAsset ? "" : followOnCapitalAmount,
-    followOnCapitalStatus: isCashAsset ? "" : followOnCapitalStatus,
-    followOnCapitalNotes: isCashAsset ? "" : followOnCapitalNotes,
+    ownershipPercent: isCashAsset || isBondAsset ? "" : ownershipPercent,
+    entityOwnershipPercent: isCashAsset || isBondAsset ? "" : entityOwnershipPercent,
+    ownershipNotes: isCashAsset || isBondAsset ? "" : ownershipNotes,
+    followOnCapitalAmount: isCashAsset || isBondAsset ? "" : followOnCapitalAmount,
+    followOnCapitalStatus: isCashAsset || isBondAsset ? "" : followOnCapitalStatus,
+    followOnCapitalNotes: isCashAsset || isBondAsset ? "" : followOnCapitalNotes,
     contactName,
     contactPosition,
     contactEmail,
@@ -719,7 +775,7 @@ function normalizeInvestment(entry) {
     decisionSummary,
     researchEntries: normalizeStructuredRows(entry.researchEntries, fallbackResearchEntries),
     reportUpdates: normalizeStructuredRows(entry.reportUpdates),
-    capitalActivity: isCashAsset ? [] : normalizedCapitalActivity,
+    capitalActivity: isCashAsset || isBondAsset ? [] : normalizedCapitalActivity,
     valuationHistory: normalizeStructuredRows(entry.valuationHistory, fallbackValuationHistory),
     ownershipHistory: normalizeStructuredRows(entry.ownershipHistory, fallbackOwnershipHistory),
     followOnHistory: normalizeStructuredRows(entry.followOnHistory, fallbackFollowOnHistory),
@@ -3731,6 +3787,30 @@ function validateSubmission(payload, sessionUser) {
     marketPrice: payload.marketPrice,
     marketPriceDate: payload.marketPriceDate,
     marketValue: payload.marketValue,
+    bondIssuer: payload.bondIssuer,
+    bondDescription: payload.bondDescription,
+    bondType: payload.bondType,
+    bondCusip: payload.bondCusip,
+    bondEntityOwner: payload.bondEntityOwner,
+    bondParValue: payload.bondParValue,
+    bondPurchasePrice: payload.bondPurchasePrice,
+    bondPurchaseDate: payload.bondPurchaseDate,
+    bondCostBasis: payload.bondCostBasis,
+    bondCouponRate: payload.bondCouponRate,
+    bondCouponFrequency: payload.bondCouponFrequency,
+    bondMaturityDate: payload.bondMaturityDate,
+    bondCallDate: payload.bondCallDate,
+    bondCallPrice: payload.bondCallPrice,
+    bondCurrentPrice: payload.bondCurrentPrice,
+    bondMarketPriceDate: payload.bondMarketPriceDate,
+    bondMarketValue: payload.bondMarketValue,
+    bondYieldToMaturity: payload.bondYieldToMaturity,
+    bondYieldToCall: payload.bondYieldToCall,
+    bondCurrentYield: payload.bondCurrentYield,
+    bondCreditRating: payload.bondCreditRating,
+    bondInsurer: payload.bondInsurer,
+    bondTaxStatus: payload.bondTaxStatus,
+    bondAccruedInterest: payload.bondAccruedInterest,
     amount: payload.amount,
     currency: payload.currency,
     stage: payload.stage,
@@ -3802,6 +3882,30 @@ function validateInvestmentPatch(payload) {
     marketPrice: String(payload.marketPrice || "").trim(),
     marketPriceDate: String(payload.marketPriceDate || "").trim(),
     marketValue: String(payload.marketValue || "").trim(),
+    bondIssuer: String(payload.bondIssuer || "").trim(),
+    bondDescription: String(payload.bondDescription || "").trim(),
+    bondType: String(payload.bondType || "").trim(),
+    bondCusip: String(payload.bondCusip || "").trim().toUpperCase(),
+    bondEntityOwner: String(payload.bondEntityOwner || "").trim(),
+    bondParValue: String(payload.bondParValue || "").trim(),
+    bondPurchasePrice: String(payload.bondPurchasePrice || "").trim(),
+    bondPurchaseDate: String(payload.bondPurchaseDate || "").trim(),
+    bondCostBasis: String(payload.bondCostBasis || "").trim(),
+    bondCouponRate: String(payload.bondCouponRate || "").trim(),
+    bondCouponFrequency: String(payload.bondCouponFrequency || "").trim(),
+    bondMaturityDate: String(payload.bondMaturityDate || "").trim(),
+    bondCallDate: String(payload.bondCallDate || "").trim(),
+    bondCallPrice: String(payload.bondCallPrice || "").trim(),
+    bondCurrentPrice: String(payload.bondCurrentPrice || "").trim(),
+    bondMarketPriceDate: String(payload.bondMarketPriceDate || "").trim(),
+    bondMarketValue: String(payload.bondMarketValue || "").trim(),
+    bondYieldToMaturity: String(payload.bondYieldToMaturity || "").trim(),
+    bondYieldToCall: String(payload.bondYieldToCall || "").trim(),
+    bondCurrentYield: String(payload.bondCurrentYield || "").trim(),
+    bondCreditRating: String(payload.bondCreditRating || "").trim(),
+    bondInsurer: String(payload.bondInsurer || "").trim(),
+    bondTaxStatus: String(payload.bondTaxStatus || "").trim(),
+    bondAccruedInterest: String(payload.bondAccruedInterest || "").trim(),
     amount: String(payload.amount || "").trim(),
     currency: String(payload.currency || "USD").trim() || "USD",
     stage: String(payload.stage || "").trim(),
