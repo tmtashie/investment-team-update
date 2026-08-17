@@ -73,8 +73,18 @@ const publicStockEntityFilter = document.getElementById("publicStockEntityFilter
 const publicStockSearchFilter = document.getElementById("publicStockSearchFilter");
 const refreshPublicStockPricesButton = document.getElementById("refreshPublicStockPricesButton");
 const publicStockPriceMessage = document.getElementById("publicStockPriceMessage");
+const cashSummary = document.getElementById("cashSummary");
+const cashList = document.getElementById("cashList");
+const cashEntityFilter = document.getElementById("cashEntityFilter");
+const cashInstitutionFilter = document.getElementById("cashInstitutionFilter");
 const addPublicSquareStockButton = document.getElementById("addPublicSquareStockButton");
 const addSpaceXStockButton = document.getElementById("addSpaceXStockButton");
+const cashDetailsPanel = document.getElementById("cashDetailsPanel");
+const cashAccountNameField = document.getElementById("cashAccountNameField");
+const cashInstitutionField = document.getElementById("cashInstitutionField");
+const cashAccountTypeField = document.getElementById("cashAccountTypeField");
+const cashBalanceField = document.getElementById("cashBalanceField");
+const cashBalanceDateField = document.getElementById("cashBalanceDateField");
 const stockDetailsPanel = document.getElementById("stockDetailsPanel");
 const stockValuePreview = document.getElementById("stockValuePreview");
 const fetchStockQuoteButton = document.getElementById("fetchStockQuoteButton");
@@ -235,6 +245,10 @@ let reportUpdateFilters = {
 let publicStockFilters = {
   entity: "",
   search: ""
+};
+let cashFilters = {
+  entity: "",
+  institution: ""
 };
 let publicStockQuoteRequestKeys = new Set();
 let automaticPublicStockRefreshInFlight = false;
@@ -1913,12 +1927,20 @@ function isPublicStockInvestment(investment) {
   return String((investment && investment.assetType) || "").trim() === "Public Stock";
 }
 
+function isCashInvestment(investment) {
+  return String((investment && investment.assetType) || "").trim() === "Cash";
+}
+
 function isStockAssetType(value) {
   return String(value || "").toLowerCase().includes("stock");
 }
 
 function isPublicStockAssetType(value) {
   return String(value || "").trim() === "Public Stock";
+}
+
+function isCashAssetType(value) {
+  return String(value || "").trim() === "Cash";
 }
 
 function stockKey(investment) {
@@ -2026,6 +2048,103 @@ function applyPublicStockValuationSync(payload) {
     officialValue: syncedValuation.officialValue,
     internalValue: syncedValuation.internalValue
   };
+}
+
+function applyCashValuationSync(payload) {
+  if (!isCashInvestment(payload)) {
+    return payload;
+  }
+
+  const balance = toNumber(payload.amount);
+  const normalizedBalance = normalizeMoneyString(String(payload.amount || ""), 6);
+  return {
+    ...payload,
+    ticker: "",
+    exchange: "",
+    shareCount: "",
+    costBasisPerShare: "",
+    marketPrice: "",
+    marketPriceDate: "",
+    marketValue: balance ? normalizedBalance : "",
+    status: "Active",
+    nextStep: "",
+    nextStepDueDate: "",
+    capitalActivity: [],
+    capitalCallDate: "",
+    capitalCallAmount: "",
+    distributionDate: "",
+    distributionAmount: "",
+    valuationDate: payload.valuationDate || "",
+    officialValue: balance ? normalizedBalance : "",
+    internalValue: balance ? normalizedBalance : "",
+    exitValue: "",
+    ownershipPercent: "",
+    entityOwnershipPercent: "",
+    ownershipNotes: "",
+    followOnCapitalAmount: "",
+    followOnCapitalStatus: "",
+    followOnCapitalNotes: "",
+    deckSummary: "",
+    decisionDate: "",
+    decisionType: "",
+    decisionSummary: ""
+  };
+}
+
+function applyAssetValuationSync(payload) {
+  return applyCashValuationSync(applyPublicStockValuationSync(payload));
+}
+
+function getCashRows(investments) {
+  return sortInvestmentsAlphabetically(investments.filter(isCashInvestment));
+}
+
+function getCashBalance(investment) {
+  return toNumber(investment && (investment.amount || investment.internalValue || investment.officialValue));
+}
+
+function getCashAccountType(investment) {
+  return String((investment && investment.stage) || "Other").trim() || "Other";
+}
+
+function getCashInstitution(investment) {
+  return String((investment && investment.owner) || "").trim();
+}
+
+function buildCashHoldingsSummary(entity = "") {
+  const positions = getCashRows(allInvestments).filter(
+    (investment) => !entity || normalizeEntityName(investment.entity) === normalizeEntityName(entity)
+  );
+  const totalBalance = positions.reduce((sum, investment) => sum + getCashBalance(investment), 0);
+  const largestAccount = positions.reduce((largest, investment) => {
+    const balance = getCashBalance(investment);
+    return !largest || balance > largest.balance
+      ? {
+          investment,
+          balance
+        }
+      : largest;
+  }, null);
+  const latestBalanceDate = positions
+    .map((investment) => investment.valuationDate)
+    .filter(Boolean)
+    .sort((left, right) => parseDateValue(right, new Date(0)) - parseDateValue(left, new Date(0)))[0] || "";
+
+  return {
+    positions,
+    totalBalance,
+    largestAccount,
+    latestBalanceDate
+  };
+}
+
+function getCashByEntity(investments = allInvestments) {
+  const grouped = new Map();
+  getCashRows(investments).forEach((investment) => {
+    const entity = normalizeEntityName(investment.entity) || "No entity";
+    grouped.set(entity, (grouped.get(entity) || 0) + getCashBalance(investment));
+  });
+  return Array.from(grouped.entries()).sort(([left], [right]) => left.localeCompare(right));
 }
 
 function publicStockValuationNeedsPatch(investment, quote) {
@@ -2225,22 +2344,95 @@ function updateStockDetailsVisibility(options = {}) {
 
   const showStockDetails = isStockAssetType(form.elements.assetType.value);
   const publicStockDetails = isPublicStockAssetType(form.elements.assetType.value);
+  const cashDetails = isCashAssetType(form.elements.assetType.value);
   stockDetailsPanel.classList.toggle("hidden", !showStockDetails);
+  if (cashDetailsPanel) {
+    cashDetailsPanel.classList.toggle("hidden", !cashDetails);
+  }
   if (!showStockDetails && options.clearHiddenFields) {
     clearStockFields();
   }
+  if (cashDetails) {
+    syncCashPanelFromForm();
+    syncCashFormFields();
+  }
   ["valuationDate", "officialValue", "internalValue"].forEach((fieldName) => {
     if (form.elements[fieldName]) {
-      form.elements[fieldName].readOnly = publicStockDetails;
+      form.elements[fieldName].readOnly = publicStockDetails || cashDetails;
     }
   });
+  if (form.elements.exitValue) {
+    form.elements.exitValue.readOnly = cashDetails;
+  }
   if (valuationHelperText) {
-    valuationHelperText.textContent = publicStockDetails
-      ? "For Public Stocks, valuation date, official value, and internal value are driven by share count and current market price. Exit value stays manual."
-      : "Use the latest valuation date when you update official, internal, or exit marks.";
+    valuationHelperText.textContent = cashDetails
+      ? "For Cash, balance date drives valuation date and current balance drives official and internal value. Cash does not create IRR cash flows."
+      : publicStockDetails
+        ? "For Public Stocks, valuation date, official value, and internal value are driven by share count and current market price. Exit value stays manual."
+        : "Use the latest valuation date when you update official, internal, or exit marks.";
   }
   syncPublicStockFormValuation();
   updateStockValuePreview();
+}
+
+function syncCashPanelFromForm() {
+  if (!form || !form.elements || !isCashAssetType(form.elements.assetType.value)) {
+    return;
+  }
+  if (cashAccountNameField) {
+    cashAccountNameField.value = form.elements.company ? form.elements.company.value : "";
+  }
+  if (cashInstitutionField) {
+    cashInstitutionField.value = form.elements.owner ? form.elements.owner.value : "";
+  }
+  if (cashAccountTypeField) {
+    cashAccountTypeField.value = form.elements.stage ? form.elements.stage.value : "";
+  }
+  if (cashBalanceField) {
+    cashBalanceField.value = form.elements.amount ? form.elements.amount.value : "";
+  }
+  if (cashBalanceDateField) {
+    cashBalanceDateField.value = form.elements.valuationDate ? form.elements.valuationDate.value : "";
+  }
+}
+
+function syncCashFormFields() {
+  if (!form || !form.elements || !isCashAssetType(form.elements.assetType.value)) {
+    return;
+  }
+  if (form.elements.company && cashAccountNameField) {
+    form.elements.company.value = cashAccountNameField.value;
+  }
+  if (form.elements.owner && cashInstitutionField) {
+    form.elements.owner.value = cashInstitutionField.value;
+  }
+  if (form.elements.stage && cashAccountTypeField) {
+    form.elements.stage.value = cashAccountTypeField.value;
+  }
+  if (form.elements.amount && cashBalanceField) {
+    form.elements.amount.value = cashBalanceField.value;
+  }
+  if (form.elements.valuationDate && cashBalanceDateField) {
+    form.elements.valuationDate.value = cashBalanceDateField.value;
+  }
+  if (form.elements.status) {
+    form.elements.status.value = "Active";
+  }
+  const synced = applyCashValuationSync({
+    assetType: "Cash",
+    amount: form.elements.amount ? form.elements.amount.value : "",
+    valuationDate: form.elements.valuationDate ? form.elements.valuationDate.value : "",
+    status: "Active"
+  });
+  if (form.elements.officialValue) {
+    form.elements.officialValue.value = synced.officialValue || "";
+  }
+  if (form.elements.internalValue) {
+    form.elements.internalValue.value = synced.internalValue || "";
+  }
+  if (form.elements.exitValue) {
+    form.elements.exitValue.value = "";
+  }
 }
 
 function syncPublicStockFormValuation() {
@@ -2546,11 +2738,13 @@ function buildPerformanceInputs(updates) {
   const updateActivities = updates.map((update) => {
     const pipelineUpdate =
       isPipelineStatus(update.status) || isPipelineStatus(update.stage);
-    const activityRows = normalizeCapitalActivityRows(
-      update.capitalActivity && update.capitalActivity.length
-        ? update.capitalActivity
-        : buildLegacyCapitalActivityRows(update)
-    );
+    const activityRows = isCashInvestment(update)
+      ? []
+      : normalizeCapitalActivityRows(
+          update.capitalActivity && update.capitalActivity.length
+            ? update.capitalActivity
+            : buildLegacyCapitalActivityRows(update)
+        );
 
     return {
       update,
@@ -2652,6 +2846,7 @@ function buildPerformanceInputs(updates) {
   });
 
   return {
+    isCashPosition: updates.some(isCashInvestment),
     committedCapital,
     investedCapital,
     distributions,
@@ -2828,6 +3023,9 @@ function buildAggregatePerformance(companyCollections) {
     let terminalTotal = 0;
 
     companyInputs.forEach(({ inputs }) => {
+      if (inputs.isCashPosition) {
+        return;
+      }
       cashFlows.push(...inputs.baseCashFlows);
       const terminalMark = inputs[markName];
       if (
@@ -2962,6 +3160,9 @@ function buildEntityCashFlowAuditRows(rows, markName = "internalMark") {
         amount: cashFlow.amount,
         includedInXirr: true
       }));
+      if (inputs.isCashPosition) {
+        return cashFlowRows;
+      }
       const terminalMark = inputs[markName];
       const terminalIncluded =
         terminalMark &&
@@ -3176,6 +3377,16 @@ function buildDashboardCards(investments) {
   const publicStockRows = getPublicStockRows(investments).filter(isPublicStockRow);
   const savedPublicStockRows = publicStockRows.filter((investment) => !investment.isWatchlistOnly);
   const stockMarketValue = savedPublicStockRows.reduce((sum, investment) => sum + getStockMarketValue(investment), 0);
+  const cashRows = getCashRows(investments);
+  const totalCash = cashRows.reduce((sum, investment) => sum + getCashBalance(investment), 0);
+  const totalUnfundedCommitments = Math.max(totalCommittedCapital - totalInvestedCapital, 0);
+  const liquidityCoverage =
+    totalUnfundedCommitments > 0 ? totalCash / totalUnfundedCommitments : null;
+  const cashByEntityCards = getCashByEntity(investments).map(([entity, balance]) => ({
+    label: `Cash - ${entity}`,
+    value: formatMoney(balance),
+    action: "cash"
+  }));
 
   let cards = [
     { label: "Updates", value: String(investments.length), action: "portfolio" },
@@ -3200,6 +3411,9 @@ function buildDashboardCards(investments) {
     },
     { label: "Public stocks", value: String(savedPublicStockRows.length), action: "public-stocks" },
     { label: "Stock market value", value: formatMoney(stockMarketValue), action: "public-stocks" },
+    { label: "Total cash", value: formatMoney(totalCash), action: "cash" },
+    { label: "Total unfunded commitments", value: formatMoney(totalUnfundedCommitments), action: "portfolio" },
+    { label: "Liquidity coverage", value: formatTurns(liquidityCoverage), action: "cash" },
     { label: "Data alerts", value: String(qualityAlerts.length), action: "quality" },
     { label: "Total committed capital", value: formatMoney(totalCommittedCapital), action: "portfolio" },
     { label: "Called capital", value: formatMoney(totalInvestedCapital), action: "portfolio" },
@@ -3223,7 +3437,7 @@ function buildDashboardCards(investments) {
       entity
     }));
 
-  return cards.concat(entityTotals);
+  return cards.concat(cashByEntityCards, entityTotals);
 }
 
 function daysSinceDate(value) {
@@ -3425,6 +3639,9 @@ function renderDashboard(investments) {
       ({ entity, rows }) => {
         const totals = buildEntityRowTotals(rows);
         const publicHoldings = buildPublicHoldingsSummary(entity);
+        const cashHoldings = buildCashHoldingsSummary(entity);
+        const cashNavPercent =
+          totals.internalValue > 0 ? cashHoldings.totalBalance / totals.internalValue : null;
         const metrics = [
           { label: "Total committed capital", value: formatMoney(totals.reportedAmount) },
           { label: "Called capital", value: formatMoney(totals.investedCapital) },
@@ -3485,6 +3702,44 @@ function renderDashboard(investments) {
                         <div class="entity-metric-box">
                           <p class="dashboard-label">${escapeHtml(metric.label)}</p>
                           <p class="dashboard-value ${metric.performance === undefined ? "" : escapeHtml(getStockPerformanceClass(metric.performance))}">${escapeHtml(metric.value)}</p>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+            : ""
+        }
+        ${
+          cashHoldings.positions.length
+            ? `
+              <article class="dashboard-card entity-performance-card cash-holdings-card" data-entity="${escapeHtml(entity)}">
+                <div class="entity-performance-header">
+                  <div>
+                    <p class="dashboard-label">Cash Holdings</p>
+                    <h3>${escapeHtml(entity)}</h3>
+                  </div>
+                  <span class="status-chip">${escapeHtml(String(cashHoldings.positions.length))} account${cashHoldings.positions.length === 1 ? "" : "s"}</span>
+                </div>
+                <div class="entity-metric-grid">
+                  ${[
+                    { label: "Total cash balance", value: formatMoney(cashHoldings.totalBalance) },
+                    { label: "Cash accounts", value: String(cashHoldings.positions.length) },
+                    { label: "Cash as % of Internal NAV", value: formatStockPercent(cashNavPercent) },
+                    {
+                      label: "Largest cash account",
+                      value: cashHoldings.largestAccount
+                        ? `${cashHoldings.largestAccount.investment.company || "Unnamed account"} ${formatMoney(cashHoldings.largestAccount.balance)}`
+                        : "N/A"
+                    },
+                    { label: "Latest balance date", value: cashHoldings.latestBalanceDate || "N/A" }
+                  ]
+                    .map(
+                      (metric) => `
+                        <div class="entity-metric-box">
+                          <p class="dashboard-label">${escapeHtml(metric.label)}</p>
+                          <p class="dashboard-value">${escapeHtml(metric.value)}</p>
                         </div>
                       `
                     )
@@ -5815,6 +6070,120 @@ function renderPublicStocks() {
     : '<p class="update-meta">No public stock positions match those filters.</p>';
 }
 
+function renderCashFilterOptions(cashRows) {
+  const assignOptions = (element, placeholder, values, selectedValue) => {
+    if (!element) {
+      return "";
+    }
+    element.innerHTML = [`<option value="">${placeholder}</option>`]
+      .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+      .join("");
+    element.value = values.includes(selectedValue) ? selectedValue : "";
+    return element.value;
+  };
+
+  const entities = Array.from(
+    new Set(cashRows.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right));
+  const institutions = Array.from(
+    new Set(cashRows.map(getCashInstitution).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right));
+
+  cashFilters.entity = assignOptions(cashEntityFilter, "All entities", entities, cashFilters.entity);
+  cashFilters.institution = assignOptions(
+    cashInstitutionFilter,
+    "All institutions",
+    institutions,
+    cashFilters.institution
+  );
+}
+
+function getFilteredCashRows(cashRows) {
+  return cashRows.filter((investment) => {
+    const matchesEntity =
+      !cashFilters.entity ||
+      normalizeEntityName(investment.entity) === normalizeEntityName(cashFilters.entity);
+    const matchesInstitution =
+      !cashFilters.institution ||
+      getCashInstitution(investment) === cashFilters.institution;
+    return matchesEntity && matchesInstitution;
+  });
+}
+
+function renderCash() {
+  if (!cashSummary || !cashList) {
+    return;
+  }
+
+  const cashRows = getCashRows(allInvestments);
+  renderCashFilterOptions(cashRows);
+  const filteredCashRows = getFilteredCashRows(cashRows);
+  const totalBalance = filteredCashRows.reduce((sum, investment) => sum + getCashBalance(investment), 0);
+  const entityCount = new Set(filteredCashRows.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean)).size;
+  const latestBalanceDate = filteredCashRows
+    .map((investment) => investment.valuationDate)
+    .filter(Boolean)
+    .sort((left, right) => parseDateValue(right, new Date(0)) - parseDateValue(left, new Date(0)))[0] || "N/A";
+
+  cashSummary.innerHTML = [
+    { label: "Total cash balance", value: formatMoney(totalBalance) },
+    { label: "Cash accounts", value: String(filteredCashRows.length) },
+    { label: "Entities with cash", value: String(entityCount) },
+    { label: "Latest balance date", value: latestBalanceDate }
+  ]
+    .map(
+      (item) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="dashboard-value">${escapeHtml(item.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  cashList.innerHTML = filteredCashRows.length
+    ? filteredCashRows
+        .map(
+          (investment) => `
+            <article class="update-card cash-account-card">
+              <div class="update-head">
+                <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
+                  ${escapeHtml(investment.company || "Unnamed cash account")}
+                </button>
+                <span class="status-chip">${escapeHtml(getCashAccountType(investment))}</span>
+              </div>
+              <p class="update-meta">
+                ${escapeHtml(getCashInstitution(investment) || "Institution not set")} • ${escapeHtml(normalizeEntityName(investment.entity) || "Entity not specified")} • ${escapeHtml(investment.currency || "USD")}
+              </p>
+              <div class="stock-metric-grid">
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Current balance</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(getCashBalance(investment)))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Balance date</p>
+                  <p class="highlight-value">${escapeHtml(investment.valuationDate || "Not set")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Institution</p>
+                  <p class="highlight-value">${escapeHtml(getCashInstitution(investment) || "Not set")}</p>
+                </div>
+              </div>
+              <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+              ${
+                canEditWorkspace()
+                  ? `<div class="card-actions">
+                      <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${escapeHtml(investment.id)}">Edit</button>
+                    </div>`
+                  : ""
+              }
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No cash accounts match those filters.</p>';
+}
+
 async function refreshPublicStockPrices(options = {}) {
   if (!refreshPublicStockPricesButton) {
     return;
@@ -5934,6 +6303,7 @@ function renderAll() {
   renderDashboard(allInvestments);
   renderDataQuality();
   renderPublicStocks();
+  renderCash();
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
   renderTasks();
@@ -6828,7 +7198,8 @@ addListener(form, "submit", async (event) => {
     .map((email) => email.trim())
     .filter(Boolean);
 
-  const payload = applyPublicStockValuationSync({
+  syncCashFormFields();
+  const payload = applyAssetValuationSync({
     company: formData.get("company"),
     entity: formData.get("entity"),
     assetType: formData.get("assetType"),
@@ -7239,6 +7610,22 @@ updateStockDetailsVisibility();
     form.elements[fieldName].addEventListener("change", updateStockValuePreview);
   }
 });
+
+[cashAccountNameField, cashInstitutionField, cashAccountTypeField, cashBalanceField, cashBalanceDateField].forEach(
+  (field) => {
+    if (field) {
+      field.addEventListener("input", syncCashFormFields);
+      field.addEventListener("change", syncCashFormFields);
+    }
+  }
+);
+
+if (cashBalanceField) {
+  cashBalanceField.addEventListener("blur", () => {
+    cashBalanceField.value = normalizeMoneyString(cashBalanceField.value);
+    syncCashFormFields();
+  });
+}
 
 if (form && form.elements && form.elements.assetType) {
   form.elements.assetType.addEventListener("change", () => {
@@ -7831,6 +8218,41 @@ addListener(publicStockSearchFilter, "input", () => {
 
 addListener(refreshPublicStockPricesButton, "click", () => {
   refreshPublicStockPrices({ force: true });
+});
+
+addListener(cashEntityFilter, "change", () => {
+  cashFilters.entity = cashEntityFilter.value;
+  renderCash();
+});
+
+addListener(cashInstitutionFilter, "change", () => {
+  cashFilters.institution = cashInstitutionFilter.value;
+  renderCash();
+});
+
+addListener(cashList, "click", (event) => {
+  const target = event.target.closest("[data-action], [data-company]");
+  if (!target) {
+    return;
+  }
+
+  const action = target.dataset.action || "";
+  const investmentId = target.dataset.id || "";
+  const company = target.dataset.company || "";
+  const entity = target.dataset.entity || "";
+
+  if (action === "edit" && investmentId) {
+    beginEditInvestment(investmentId);
+    return;
+  }
+
+  if (company && canOpenCompanyDetails()) {
+    selectedCompany = company;
+    selectedCompanyEntity = entity;
+    renderCompanyPanel();
+    showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 });
 
 addListener(entityDetailInvestments, "click", (event) => {

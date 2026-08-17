@@ -561,6 +561,18 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
+.cash-toolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.cash-filters {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
 .updates-list {
   display: grid;
   gap: 12px;
@@ -645,6 +657,18 @@ button:disabled {
   border-color: rgba(35, 95, 67, 0.18);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(244, 250, 247, 0.92));
+}
+
+.cash-holdings-card,
+.cash-account-card {
+  border-color: rgba(23, 50, 77, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 248, 252, 0.94));
+}
+
+.cash-details-panel {
+  display: grid;
+  gap: 16px;
 }
 
 .stock-details-panel {

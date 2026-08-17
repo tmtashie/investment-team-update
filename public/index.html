@@ -33,6 +33,7 @@
           <button type="button" class="menu-link" data-view="capture">Add investment / AI research</button>
           <button type="button" class="menu-link" data-view="portfolio">Current investments</button>
           <button type="button" class="menu-link" data-view="public-stocks">Public stocks</button>
+          <button type="button" class="menu-link" data-view="cash">Cash</button>
           <button type="button" class="menu-link" data-view="research">Decks and notes</button>
           <button type="button" class="menu-link" data-view="tasks">Tasks and reminders</button>
           <button type="button" class="menu-link" data-view="quality">Data quality</button>
@@ -174,6 +175,35 @@
           <p id="publicStockPriceMessage" class="update-meta"></p>
           <div id="publicStockSummary" class="dashboard-grid"></div>
           <div id="publicStockList" class="updates-list"></div>
+        </section>
+
+        <section id="cashSection" class="panel workspace-view hidden" data-view="cash">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>Cash</h2>
+              <p class="section-copy">
+                Track bank, brokerage cash, money market, and treasury balances by entity.
+              </p>
+            </div>
+          </div>
+          <div class="cash-toolbar">
+            <div class="cash-filters">
+              <label>
+                Entity
+                <select id="cashEntityFilter">
+                  <option value="">All entities</option>
+                </select>
+              </label>
+              <label>
+                Institution
+                <select id="cashInstitutionFilter">
+                  <option value="">All institutions</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div id="cashSummary" class="dashboard-grid"></div>
+          <div id="cashList" class="updates-list"></div>
         </section>
 
         <section id="entityDetailSection" class="panel workspace-view hidden" data-view="entity">
@@ -387,9 +417,51 @@
                     <option value="Public Stock">Public stock</option>
                     <option value="Private Stock">Private stock / secondary</option>
                     <option value="Fund">Fund</option>
+                    <option value="Cash">Cash</option>
                     <option value="Other">Other</option>
                   </select>
                 </label>
+              </div>
+
+              <div id="cashDetailsPanel" class="cash-details-panel hidden">
+                <div class="two-up">
+                  <label>
+                    Account name
+                    <input id="cashAccountNameField" type="text" placeholder="Operating cash" />
+                  </label>
+
+                  <label>
+                    Institution / bank
+                    <input id="cashInstitutionField" type="text" placeholder="Bank or brokerage" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Account type
+                    <select id="cashAccountTypeField">
+                      <option value="">Select account type</option>
+                      <option value="Checking">Checking</option>
+                      <option value="Savings">Savings</option>
+                      <option value="Money Market">Money Market</option>
+                      <option value="Brokerage Cash">Brokerage Cash</option>
+                      <option value="Treasury / Money Market Fund">Treasury / Money Market Fund</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Current balance
+                    <input id="cashBalanceField" type="text" inputmode="decimal" placeholder="250,000" />
+                  </label>
+
+                  <label>
+                    Balance date
+                    <input id="cashBalanceDateField" type="date" />
+                  </label>
+                </div>
+                <div class="section-copy subsection-helper">
+                  Cash balances sync to official and internal value, but do not create IRR cash flows.
+                </div>
               </div>
 
               <div id="stockDetailsPanel" class="stock-details-panel hidden">

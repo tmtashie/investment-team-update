@@ -524,6 +524,9 @@ function normalizeInvestment(entry) {
   const deckSummary = String(entry.deckSummary || "").trim();
   const updatedAt = String(entry.updatedAt || entry.createdAt || new Date().toISOString());
   const assetType = String(entry.assetType || "Private Investment").trim() || "Private Investment";
+  const isCashAsset = assetType === "Cash";
+  const amount = String(entry.amount || "").trim();
+  const cashBalanceValue = formatNumericString(parseNumericString(amount));
   const ticker = String(entry.ticker || "").trim().toUpperCase();
   const exchange = String(entry.exchange || "").trim().toUpperCase();
   const shareCount = String(entry.shareCount || "").trim();
@@ -532,15 +535,17 @@ function normalizeInvestment(entry) {
   const marketPriceDate = String(entry.marketPriceDate || "").trim();
   const calculatedMarketValue = parseNumericString(shareCount) * parseNumericString(marketPrice);
   const marketValue =
-    String(entry.marketValue || "").trim() || formatNumericString(calculatedMarketValue);
+    isCashAsset
+      ? cashBalanceValue
+      : String(entry.marketValue || "").trim() || formatNumericString(calculatedMarketValue);
   const capitalCallDate = String(entry.capitalCallDate || "").trim();
   const capitalCallAmount = String(entry.capitalCallAmount || "").trim();
   const distributionDate = String(entry.distributionDate || "").trim();
   const distributionAmount = String(entry.distributionAmount || "").trim();
   const valuationDate = String(entry.valuationDate || "").trim();
-  const officialValue = String(entry.officialValue || "").trim();
-  const internalValue = String(entry.internalValue || "").trim();
-  const exitValue = String(entry.exitValue || "").trim();
+  const officialValue = isCashAsset ? cashBalanceValue : String(entry.officialValue || "").trim();
+  const internalValue = isCashAsset ? cashBalanceValue : String(entry.internalValue || "").trim();
+  const exitValue = isCashAsset ? "" : String(entry.exitValue || "").trim();
   const ownershipPercent = String(entry.ownershipPercent || "").trim();
   const entityOwnershipPercent = String(entry.entityOwnershipPercent || "").trim();
   const ownershipNotes = String(entry.ownershipNotes || "").trim();
@@ -665,36 +670,36 @@ function normalizeInvestment(entry) {
     companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
     entity,
     assetType,
-    ticker,
-    exchange,
-    shareCount,
-    costBasisPerShare,
-    marketPrice,
-    marketPriceDate,
+    ticker: isCashAsset ? "" : ticker,
+    exchange: isCashAsset ? "" : exchange,
+    shareCount: isCashAsset ? "" : shareCount,
+    costBasisPerShare: isCashAsset ? "" : costBasisPerShare,
+    marketPrice: isCashAsset ? "" : marketPrice,
+    marketPriceDate: isCashAsset ? "" : marketPriceDate,
     marketValue,
-    amount: String(entry.amount || "").trim(),
+    amount,
     currency: String(entry.currency || "USD").trim() || "USD",
     stage: String(entry.stage || "").trim(),
-    status: String(entry.status || "").trim(),
+    status: isCashAsset ? "Active" : String(entry.status || "").trim(),
     owner: String(entry.owner || "").trim(),
     nextStep: String(entry.nextStep || "").trim(),
     nextStepDueDate: String(entry.nextStepDueDate || "").trim(),
     notes,
     deckSummary,
-    capitalCallDate: capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
-    capitalCallAmount: capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
-    distributionDate: distributionDate || (latestDistribution ? latestDistribution.date : ""),
-    distributionAmount: distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
+    capitalCallDate: isCashAsset ? "" : capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
+    capitalCallAmount: isCashAsset ? "" : capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
+    distributionDate: isCashAsset ? "" : distributionDate || (latestDistribution ? latestDistribution.date : ""),
+    distributionAmount: isCashAsset ? "" : distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
     valuationDate,
     officialValue,
     internalValue,
     exitValue,
-    ownershipPercent,
-    entityOwnershipPercent,
-    ownershipNotes,
-    followOnCapitalAmount,
-    followOnCapitalStatus,
-    followOnCapitalNotes,
+    ownershipPercent: isCashAsset ? "" : ownershipPercent,
+    entityOwnershipPercent: isCashAsset ? "" : entityOwnershipPercent,
+    ownershipNotes: isCashAsset ? "" : ownershipNotes,
+    followOnCapitalAmount: isCashAsset ? "" : followOnCapitalAmount,
+    followOnCapitalStatus: isCashAsset ? "" : followOnCapitalStatus,
+    followOnCapitalNotes: isCashAsset ? "" : followOnCapitalNotes,
     contactName,
     contactPosition,
     contactEmail,
@@ -714,7 +719,7 @@ function normalizeInvestment(entry) {
     decisionSummary,
     researchEntries: normalizeStructuredRows(entry.researchEntries, fallbackResearchEntries),
     reportUpdates: normalizeStructuredRows(entry.reportUpdates),
-    capitalActivity: normalizedCapitalActivity,
+    capitalActivity: isCashAsset ? [] : normalizedCapitalActivity,
     valuationHistory: normalizeStructuredRows(entry.valuationHistory, fallbackValuationHistory),
     ownershipHistory: normalizeStructuredRows(entry.ownershipHistory, fallbackOwnershipHistory),
     followOnHistory: normalizeStructuredRows(entry.followOnHistory, fallbackFollowOnHistory),
