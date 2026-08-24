@@ -65,12 +65,16 @@ const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
+  "Lee Beaman Real Estate",
+  "Lee Beaman IRA",
   "Katherine Trust",
   "Natalie Trust"
 ];
 const ENTITY_ALIASES = {
   "Beaman Ventures": "Beaman Ventures",
   "Lee Beaman": "Lee Beaman",
+  "Lee Beaman Real Estate": "Lee Beaman Real Estate",
+  "Lee Beaman IRA": "Lee Beaman IRA",
   "Kat Trust": "Katherine Trust",
   "Nat Trust": "Natalie Trust",
   "Katherine Trust": "Katherine Trust",
@@ -526,6 +530,7 @@ function normalizeInvestment(entry) {
   const assetType = String(entry.assetType || "Private Investment").trim() || "Private Investment";
   const isCashAsset = assetType === "Cash";
   const isBondAsset = assetType === "Bond / Fixed Income";
+  const isRealEstateAsset = assetType === "Real Estate";
   const amount = String(entry.amount || "").trim();
   const cashBalanceValue = formatNumericString(parseNumericString(amount));
   const bondParValue = String(entry.bondParValue || "").trim();
@@ -547,6 +552,25 @@ function normalizeInvestment(entry) {
     calculatedBondMarketValue > 0 && bondAnnualCouponIncome > 0
       ? String(Number(((bondAnnualCouponIncome / calculatedBondMarketValue) * 100).toFixed(6)))
       : "";
+  const realEstateAppraisedValue = String(entry.realEstateAppraisedValue || "").trim();
+  const realEstateOwnershipPercent = String(entry.realEstateOwnershipPercent || entry.ownershipPercent || "").trim();
+  const realEstateDebt = String(entry.realEstateDebt || "").trim();
+  const realEstateNoi = String(entry.realEstateNoi || "").trim();
+  const realEstateOwnershipRate = parseNumericString(realEstateOwnershipPercent) > 0
+    ? Math.max(0, Math.min(parseNumericString(realEstateOwnershipPercent), 100)) / 100
+    : 1;
+  const calculatedRealEstateEntityValue =
+    parseNumericString(realEstateAppraisedValue) * realEstateOwnershipRate;
+  const calculatedRealEstateEntityDebt = parseNumericString(realEstateDebt) * realEstateOwnershipRate;
+  const calculatedRealEstateNetEquity = Math.max(
+    calculatedRealEstateEntityValue - calculatedRealEstateEntityDebt,
+    0
+  );
+  const realEstateNetEquity = formatNumericString(calculatedRealEstateNetEquity);
+  const realEstateCapRate =
+    parseNumericString(realEstateAppraisedValue) > 0 && parseNumericString(realEstateNoi) > 0
+      ? String(Number(((parseNumericString(realEstateNoi) / parseNumericString(realEstateAppraisedValue)) * 100).toFixed(6)))
+      : "";
   const ticker = String(entry.ticker || "").trim().toUpperCase();
   const exchange = String(entry.exchange || "").trim().toUpperCase();
   const shareCount = String(entry.shareCount || "").trim();
@@ -559,6 +583,8 @@ function normalizeInvestment(entry) {
       ? cashBalanceValue
       : isBondAsset
         ? bondMarketValue
+        : isRealEstateAsset
+          ? realEstateNetEquity
       : String(entry.marketValue || "").trim() || formatNumericString(calculatedMarketValue);
   const capitalCallDate = String(entry.capitalCallDate || "").trim();
   const capitalCallAmount = String(entry.capitalCallAmount || "").trim();
@@ -566,16 +592,22 @@ function normalizeInvestment(entry) {
   const distributionAmount = String(entry.distributionAmount || "").trim();
   const valuationDate = isBondAsset && bondCurrentPrice && bondMarketPriceDate
     ? bondMarketPriceDate
-    : String(entry.valuationDate || "").trim();
+    : isRealEstateAsset && entry.realEstateAppraisalDate
+      ? String(entry.realEstateAppraisalDate || "").trim()
+      : String(entry.valuationDate || "").trim();
   const officialValue = isCashAsset
     ? cashBalanceValue
     : isBondAsset
       ? bondMarketValue || String(entry.officialValue || "").trim()
+      : isRealEstateAsset
+        ? realEstateNetEquity || String(entry.officialValue || "").trim()
       : String(entry.officialValue || "").trim();
   const internalValue = isCashAsset
     ? cashBalanceValue
     : isBondAsset
       ? bondMarketValue || String(entry.internalValue || "").trim()
+      : isRealEstateAsset
+        ? realEstateNetEquity || String(entry.internalValue || "").trim()
       : String(entry.internalValue || "").trim();
   const exitValue = isCashAsset ? "" : String(entry.exitValue || "").trim();
   const ownershipPercent = String(entry.ownershipPercent || "").trim();
@@ -702,12 +734,12 @@ function normalizeInvestment(entry) {
     companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
     entity,
     assetType,
-    ticker: isCashAsset || isBondAsset ? "" : ticker,
-    exchange: isCashAsset || isBondAsset ? "" : exchange,
-    shareCount: isCashAsset || isBondAsset ? "" : shareCount,
-    costBasisPerShare: isCashAsset || isBondAsset ? "" : costBasisPerShare,
-    marketPrice: isCashAsset || isBondAsset ? "" : marketPrice,
-    marketPriceDate: isCashAsset || isBondAsset ? "" : marketPriceDate,
+    ticker: isCashAsset || isBondAsset || isRealEstateAsset ? "" : ticker,
+    exchange: isCashAsset || isBondAsset || isRealEstateAsset ? "" : exchange,
+    shareCount: isCashAsset || isBondAsset || isRealEstateAsset ? "" : shareCount,
+    costBasisPerShare: isCashAsset || isBondAsset || isRealEstateAsset ? "" : costBasisPerShare,
+    marketPrice: isCashAsset || isBondAsset || isRealEstateAsset ? "" : marketPrice,
+    marketPriceDate: isCashAsset || isBondAsset || isRealEstateAsset ? "" : marketPriceDate,
     bondIssuer: isBondAsset ? String(entry.bondIssuer || entry.company || "").trim() : "",
     bondDescription: isBondAsset ? String(entry.bondDescription || "").trim() : "",
     bondType: isBondAsset ? String(entry.bondType || entry.stage || "").trim() : "",
@@ -732,30 +764,53 @@ function normalizeInvestment(entry) {
     bondInsurer: isBondAsset ? String(entry.bondInsurer || "").trim() : "",
     bondTaxStatus: isBondAsset ? String(entry.bondTaxStatus || "").trim() : "",
     bondAccruedInterest: isBondAsset ? String(entry.bondAccruedInterest || "").trim() : "",
+    realEstatePropertyName: isRealEstateAsset ? String(entry.realEstatePropertyName || entry.company || "").trim() : "",
+    realEstateAddress: isRealEstateAsset ? String(entry.realEstateAddress || "").trim() : "",
+    realEstateEntityOwner: isRealEstateAsset ? String(entry.realEstateEntityOwner || entry.owner || "").trim() : "",
+    realEstatePropertyType: isRealEstateAsset ? String(entry.realEstatePropertyType || entry.stage || "").trim() : "",
+    realEstateOwnershipPercent: isRealEstateAsset ? realEstateOwnershipPercent : "",
+    realEstateAcquisitionDate: isRealEstateAsset ? String(entry.realEstateAcquisitionDate || "").trim() : "",
+    realEstatePurchasePrice: isRealEstateAsset ? String(entry.realEstatePurchasePrice || "").trim() : "",
+    realEstateCostBasis: isRealEstateAsset ? String(entry.realEstateCostBasis || "").trim() : "",
+    realEstateAppraisedValue: isRealEstateAsset ? realEstateAppraisedValue : "",
+    realEstateAppraisalDate: isRealEstateAsset ? String(entry.realEstateAppraisalDate || "").trim() : "",
+    realEstateAppraiser: isRealEstateAsset ? String(entry.realEstateAppraiser || "").trim() : "",
+    realEstateDebt: isRealEstateAsset ? realEstateDebt : "",
+    realEstateDebtInterestRate: isRealEstateAsset ? String(entry.realEstateDebtInterestRate || "").trim() : "",
+    realEstateDebtMaturityDate: isRealEstateAsset ? String(entry.realEstateDebtMaturityDate || "").trim() : "",
+    realEstateNoi: isRealEstateAsset ? realEstateNoi : "",
+    realEstateRevenue: isRealEstateAsset ? String(entry.realEstateRevenue || "").trim() : "",
+    realEstateCapRate: isRealEstateAsset ? realEstateCapRate : "",
+    realEstateOccupancy: isRealEstateAsset ? String(entry.realEstateOccupancy || "").trim() : "",
+    realEstateSize: isRealEstateAsset ? String(entry.realEstateSize || "").trim() : "",
     marketValue,
-    amount: isBondAsset ? bondCostBasis || amount : amount,
+    amount: isBondAsset ? bondCostBasis || amount : isRealEstateAsset ? String(entry.realEstateCostBasis || entry.realEstatePurchasePrice || amount || "").trim() : amount,
     currency: String(entry.currency || "USD").trim() || "USD",
-    stage: String(entry.stage || "").trim(),
-    status: isCashAsset || isBondAsset ? String(entry.status || "Active").trim() : String(entry.status || "").trim(),
-    owner: isBondAsset ? String(entry.bondEntityOwner || entry.owner || "").trim() : String(entry.owner || "").trim(),
+    stage: isRealEstateAsset ? String(entry.realEstatePropertyType || entry.stage || "").trim() : String(entry.stage || "").trim(),
+    status: isCashAsset || isBondAsset || isRealEstateAsset ? String(entry.status || "Active").trim() : String(entry.status || "").trim(),
+    owner: isBondAsset
+      ? String(entry.bondEntityOwner || entry.owner || "").trim()
+      : isRealEstateAsset
+        ? String(entry.realEstateEntityOwner || entry.owner || "").trim()
+        : String(entry.owner || "").trim(),
     nextStep: String(entry.nextStep || "").trim(),
     nextStepDueDate: String(entry.nextStepDueDate || "").trim(),
     notes,
     deckSummary,
-    capitalCallDate: isCashAsset || isBondAsset ? "" : capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
-    capitalCallAmount: isCashAsset || isBondAsset ? "" : capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
-    distributionDate: isCashAsset || isBondAsset ? "" : distributionDate || (latestDistribution ? latestDistribution.date : ""),
-    distributionAmount: isCashAsset || isBondAsset ? "" : distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
+    capitalCallDate: isCashAsset || isBondAsset || isRealEstateAsset ? "" : capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
+    capitalCallAmount: isCashAsset || isBondAsset || isRealEstateAsset ? "" : capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
+    distributionDate: isCashAsset || isBondAsset || isRealEstateAsset ? "" : distributionDate || (latestDistribution ? latestDistribution.date : ""),
+    distributionAmount: isCashAsset || isBondAsset || isRealEstateAsset ? "" : distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
     valuationDate,
     officialValue,
     internalValue,
     exitValue,
-    ownershipPercent: isCashAsset || isBondAsset ? "" : ownershipPercent,
-    entityOwnershipPercent: isCashAsset || isBondAsset ? "" : entityOwnershipPercent,
-    ownershipNotes: isCashAsset || isBondAsset ? "" : ownershipNotes,
-    followOnCapitalAmount: isCashAsset || isBondAsset ? "" : followOnCapitalAmount,
-    followOnCapitalStatus: isCashAsset || isBondAsset ? "" : followOnCapitalStatus,
-    followOnCapitalNotes: isCashAsset || isBondAsset ? "" : followOnCapitalNotes,
+    ownershipPercent: isCashAsset || isBondAsset ? "" : isRealEstateAsset ? realEstateOwnershipPercent : ownershipPercent,
+    entityOwnershipPercent: isCashAsset || isBondAsset || isRealEstateAsset ? "" : entityOwnershipPercent,
+    ownershipNotes: isCashAsset || isBondAsset || isRealEstateAsset ? "" : ownershipNotes,
+    followOnCapitalAmount: isCashAsset || isBondAsset || isRealEstateAsset ? "" : followOnCapitalAmount,
+    followOnCapitalStatus: isCashAsset || isBondAsset || isRealEstateAsset ? "" : followOnCapitalStatus,
+    followOnCapitalNotes: isCashAsset || isBondAsset || isRealEstateAsset ? "" : followOnCapitalNotes,
     contactName,
     contactPosition,
     contactEmail,
@@ -775,7 +830,7 @@ function normalizeInvestment(entry) {
     decisionSummary,
     researchEntries: normalizeStructuredRows(entry.researchEntries, fallbackResearchEntries),
     reportUpdates: normalizeStructuredRows(entry.reportUpdates),
-    capitalActivity: isCashAsset || isBondAsset ? [] : normalizedCapitalActivity,
+    capitalActivity: isCashAsset || isBondAsset || isRealEstateAsset ? [] : normalizedCapitalActivity,
     valuationHistory: normalizeStructuredRows(entry.valuationHistory, fallbackValuationHistory),
     ownershipHistory: normalizeStructuredRows(entry.ownershipHistory, fallbackOwnershipHistory),
     followOnHistory: normalizeStructuredRows(entry.followOnHistory, fallbackFollowOnHistory),
@@ -3811,6 +3866,25 @@ function validateSubmission(payload, sessionUser) {
     bondInsurer: payload.bondInsurer,
     bondTaxStatus: payload.bondTaxStatus,
     bondAccruedInterest: payload.bondAccruedInterest,
+    realEstatePropertyName: payload.realEstatePropertyName,
+    realEstateAddress: payload.realEstateAddress,
+    realEstateEntityOwner: payload.realEstateEntityOwner,
+    realEstatePropertyType: payload.realEstatePropertyType,
+    realEstateOwnershipPercent: payload.realEstateOwnershipPercent,
+    realEstateAcquisitionDate: payload.realEstateAcquisitionDate,
+    realEstatePurchasePrice: payload.realEstatePurchasePrice,
+    realEstateCostBasis: payload.realEstateCostBasis,
+    realEstateAppraisedValue: payload.realEstateAppraisedValue,
+    realEstateAppraisalDate: payload.realEstateAppraisalDate,
+    realEstateAppraiser: payload.realEstateAppraiser,
+    realEstateDebt: payload.realEstateDebt,
+    realEstateDebtInterestRate: payload.realEstateDebtInterestRate,
+    realEstateDebtMaturityDate: payload.realEstateDebtMaturityDate,
+    realEstateNoi: payload.realEstateNoi,
+    realEstateRevenue: payload.realEstateRevenue,
+    realEstateCapRate: payload.realEstateCapRate,
+    realEstateOccupancy: payload.realEstateOccupancy,
+    realEstateSize: payload.realEstateSize,
     amount: payload.amount,
     currency: payload.currency,
     stage: payload.stage,
@@ -3906,6 +3980,25 @@ function validateInvestmentPatch(payload) {
     bondInsurer: String(payload.bondInsurer || "").trim(),
     bondTaxStatus: String(payload.bondTaxStatus || "").trim(),
     bondAccruedInterest: String(payload.bondAccruedInterest || "").trim(),
+    realEstatePropertyName: String(payload.realEstatePropertyName || "").trim(),
+    realEstateAddress: String(payload.realEstateAddress || "").trim(),
+    realEstateEntityOwner: String(payload.realEstateEntityOwner || "").trim(),
+    realEstatePropertyType: String(payload.realEstatePropertyType || "").trim(),
+    realEstateOwnershipPercent: String(payload.realEstateOwnershipPercent || "").trim(),
+    realEstateAcquisitionDate: String(payload.realEstateAcquisitionDate || "").trim(),
+    realEstatePurchasePrice: String(payload.realEstatePurchasePrice || "").trim(),
+    realEstateCostBasis: String(payload.realEstateCostBasis || "").trim(),
+    realEstateAppraisedValue: String(payload.realEstateAppraisedValue || "").trim(),
+    realEstateAppraisalDate: String(payload.realEstateAppraisalDate || "").trim(),
+    realEstateAppraiser: String(payload.realEstateAppraiser || "").trim(),
+    realEstateDebt: String(payload.realEstateDebt || "").trim(),
+    realEstateDebtInterestRate: String(payload.realEstateDebtInterestRate || "").trim(),
+    realEstateDebtMaturityDate: String(payload.realEstateDebtMaturityDate || "").trim(),
+    realEstateNoi: String(payload.realEstateNoi || "").trim(),
+    realEstateRevenue: String(payload.realEstateRevenue || "").trim(),
+    realEstateCapRate: String(payload.realEstateCapRate || "").trim(),
+    realEstateOccupancy: String(payload.realEstateOccupancy || "").trim(),
+    realEstateSize: String(payload.realEstateSize || "").trim(),
     amount: String(payload.amount || "").trim(),
     currency: String(payload.currency || "USD").trim() || "USD",
     stage: String(payload.stage || "").trim(),

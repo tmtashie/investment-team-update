@@ -585,6 +585,18 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
+.real-estate-toolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.real-estate-filters {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
 .updates-list {
   display: grid;
   gap: 12px;
@@ -619,6 +631,10 @@ button:disabled {
   transform: translateY(-2px);
   border-color: rgba(186, 104, 55, 0.28);
   box-shadow: var(--shadow-soft);
+}
+
+.entity-holdings-card {
+  cursor: pointer;
 }
 
 .entity-performance-header {
@@ -686,12 +702,24 @@ button:disabled {
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 244, 0.94));
 }
 
+.real-estate-holdings-card,
+.real-estate-card {
+  border-color: rgba(132, 91, 54, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 247, 243, 0.94));
+}
+
 .cash-details-panel {
   display: grid;
   gap: 16px;
 }
 
 .bond-details-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.real-estate-details-panel {
   display: grid;
   gap: 16px;
 }

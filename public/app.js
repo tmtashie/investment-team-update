@@ -84,8 +84,34 @@ const fixedIncomeEntityFilter = document.getElementById("fixedIncomeEntityFilter
 const fixedIncomeTypeFilter = document.getElementById("fixedIncomeTypeFilter");
 const fixedIncomeSearchFilter = document.getElementById("fixedIncomeSearchFilter");
 const fixedIncomeMaturityFilter = document.getElementById("fixedIncomeMaturityFilter");
+const realEstateSummary = document.getElementById("realEstateSummary");
+const realEstateList = document.getElementById("realEstateList");
+const realEstateEntityFilter = document.getElementById("realEstateEntityFilter");
+const realEstateTypeFilter = document.getElementById("realEstateTypeFilter");
+const realEstateSearchFilter = document.getElementById("realEstateSearchFilter");
 const addPublicSquareStockButton = document.getElementById("addPublicSquareStockButton");
 const addSpaceXStockButton = document.getElementById("addSpaceXStockButton");
+const realEstateDetailsPanel = document.getElementById("realEstateDetailsPanel");
+const realEstatePropertyNameField = document.getElementById("realEstatePropertyNameField");
+const realEstateAddressField = document.getElementById("realEstateAddressField");
+const realEstateEntityOwnerField = document.getElementById("realEstateEntityOwnerField");
+const realEstatePropertyTypeField = document.getElementById("realEstatePropertyTypeField");
+const realEstateOwnershipPercentField = document.getElementById("realEstateOwnershipPercentField");
+const realEstateAcquisitionDateField = document.getElementById("realEstateAcquisitionDateField");
+const realEstatePurchasePriceField = document.getElementById("realEstatePurchasePriceField");
+const realEstateCostBasisField = document.getElementById("realEstateCostBasisField");
+const realEstateAppraisedValueField = document.getElementById("realEstateAppraisedValueField");
+const realEstateAppraisalDateField = document.getElementById("realEstateAppraisalDateField");
+const realEstateAppraiserField = document.getElementById("realEstateAppraiserField");
+const realEstateDebtField = document.getElementById("realEstateDebtField");
+const realEstateDebtInterestRateField = document.getElementById("realEstateDebtInterestRateField");
+const realEstateDebtMaturityDateField = document.getElementById("realEstateDebtMaturityDateField");
+const realEstateNoiField = document.getElementById("realEstateNoiField");
+const realEstateRevenueField = document.getElementById("realEstateRevenueField");
+const realEstateCapRateField = document.getElementById("realEstateCapRateField");
+const realEstateOccupancyField = document.getElementById("realEstateOccupancyField");
+const realEstateSizeField = document.getElementById("realEstateSizeField");
+const realEstateValuePreview = document.getElementById("realEstateValuePreview");
 const bondDetailsPanel = document.getElementById("bondDetailsPanel");
 const bondIssuerField = document.getElementById("bondIssuerField");
 const bondDescriptionField = document.getElementById("bondDescriptionField");
@@ -289,6 +315,17 @@ let fixedIncomeFilters = {
   search: "",
   maturityYear: ""
 };
+let realEstateFilters = {
+  entity: "",
+  type: "",
+  search: ""
+};
+let assetViewEntityFilterSource = {
+  "public-stocks": "",
+  "fixed-income": "",
+  cash: "",
+  "real-estate": ""
+};
 let publicStockQuoteRequestKeys = new Set();
 let automaticPublicStockRefreshInFlight = false;
 
@@ -451,7 +488,13 @@ const moneyFieldNames = [
   "bondCallPrice",
   "bondCurrentPrice",
   "bondMarketValue",
-  "bondAccruedInterest"
+  "bondAccruedInterest",
+  "realEstatePurchasePrice",
+  "realEstateCostBasis",
+  "realEstateAppraisedValue",
+  "realEstateDebt",
+  "realEstateNoi",
+  "realEstateRevenue"
 ];
 const moneyFieldDecimalPlaces = {
   shareCount: 6,
@@ -501,6 +544,8 @@ const STATUS_ALIASES = {
 const ENTITY_ALIASES = {
   "Beaman Ventures": "Beaman Ventures",
   "Lee Beaman": "Lee Beaman",
+  "Lee Beaman Real Estate": "Lee Beaman Real Estate",
+  "Lee Beaman IRA": "Lee Beaman IRA",
   "Kat Trust": "Katherine Trust",
   "Nat Trust": "Natalie Trust",
   "Katherine Trust": "Katherine Trust",
@@ -715,6 +760,46 @@ function showWorkspaceView(viewName) {
   });
 
   maybeAutoRefreshPublicStockPrices();
+}
+
+function setAssetViewEntityFilter(viewName, entity, source = "manual") {
+  const normalizedEntity = normalizeEntityName(entity);
+  if (viewName === "public-stocks") {
+    publicStockFilters.entity = normalizedEntity;
+    assetViewEntityFilterSource["public-stocks"] = normalizedEntity ? source : "";
+    renderPublicStocks();
+    return;
+  }
+  if (viewName === "fixed-income") {
+    fixedIncomeFilters.entity = normalizedEntity;
+    assetViewEntityFilterSource["fixed-income"] = normalizedEntity ? source : "";
+    renderFixedIncome();
+    return;
+  }
+  if (viewName === "cash") {
+    cashFilters.entity = normalizedEntity;
+    assetViewEntityFilterSource.cash = normalizedEntity ? source : "";
+    renderCash();
+    return;
+  }
+  if (viewName === "real-estate") {
+    realEstateFilters.entity = normalizedEntity;
+    assetViewEntityFilterSource["real-estate"] = normalizedEntity ? source : "";
+    renderRealEstate();
+  }
+}
+
+function openAssetViewForEntity(viewName, entity) {
+  setAssetViewEntityFilter(viewName, entity, "entity-card");
+  showWorkspaceView(viewName);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function resetEntityCardFilterForMenuView(viewName) {
+  if (!assetViewEntityFilterSource[viewName] || assetViewEntityFilterSource[viewName] !== "entity-card") {
+    return;
+  }
+  setAssetViewEntityFilter(viewName, "", "");
 }
 
 function maybeAutoRefreshPublicStockPrices() {
@@ -1984,6 +2069,10 @@ function isBondInvestment(investment) {
   return String((investment && investment.assetType) || "").trim() === "Bond / Fixed Income";
 }
 
+function isRealEstateInvestment(investment) {
+  return String((investment && investment.assetType) || "").trim() === "Real Estate";
+}
+
 function isStockAssetType(value) {
   return String(value || "").toLowerCase().includes("stock");
 }
@@ -1998,6 +2087,10 @@ function isCashAssetType(value) {
 
 function isBondAssetType(value) {
   return String(value || "").trim() === "Bond / Fixed Income";
+}
+
+function isRealEstateAssetType(value) {
+  return String(value || "").trim() === "Real Estate";
 }
 
 function stockKey(investment) {
@@ -2221,7 +2314,9 @@ function applyBondValuationSync(payload) {
 }
 
 function applyAssetValuationSync(payload) {
-  return applyBondValuationSync(applyCashValuationSync(applyPublicStockValuationSync(payload)));
+  return applyRealEstateValuationSync(
+    applyBondValuationSync(applyCashValuationSync(applyPublicStockValuationSync(payload)))
+  );
 }
 
 function getBondRows(investments) {
@@ -2312,6 +2407,141 @@ function buildMaturityLadder(rows) {
     ladder.set(year, (ladder.get(year) || 0) + getBondMetrics(investment).parValue);
   });
   return Array.from(ladder.entries()).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function getRealEstateRows(investments) {
+  return sortInvestmentsAlphabetically(investments.filter(isRealEstateInvestment));
+}
+
+function getRealEstatePropertyName(investment) {
+  return String((investment && (investment.realEstatePropertyName || investment.company)) || "").trim();
+}
+
+function getRealEstatePropertyType(investment) {
+  return String((investment && (investment.realEstatePropertyType || investment.stage)) || "Other").trim() || "Other";
+}
+
+function getRealEstateOwnershipRate(investment) {
+  const entered = toNumber(investment && investment.realEstateOwnershipPercent);
+  if (!entered) {
+    return 1;
+  }
+  return Math.max(0, Math.min(entered, 100)) / 100;
+}
+
+function getRealEstateMetrics(investment) {
+  const appraisedValue = toNumber(investment && investment.realEstateAppraisedValue);
+  const ownershipRate = getRealEstateOwnershipRate(investment);
+  const debt = toNumber(investment && investment.realEstateDebt);
+  const noi = toNumber(investment && investment.realEstateNoi);
+  const revenue = toNumber(investment && investment.realEstateRevenue);
+  const purchasePrice = toNumber(investment && investment.realEstatePurchasePrice);
+  const costBasis = toNumber(investment && investment.realEstateCostBasis);
+  const entityValue = appraisedValue * ownershipRate;
+  const entityDebt = debt * ownershipRate;
+  const netEquity = Math.max(entityValue - entityDebt, 0);
+  const capRate = appraisedValue > 0 && noi > 0 ? noi / appraisedValue : null;
+  const ltv = appraisedValue > 0 && debt > 0 ? debt / appraisedValue : null;
+
+  return {
+    appraisedValue,
+    ownershipRate,
+    ownershipPercent: ownershipRate * 100,
+    debt,
+    entityValue,
+    entityDebt,
+    netEquity,
+    noi,
+    revenue,
+    purchasePrice,
+    costBasis,
+    capRate,
+    ltv
+  };
+}
+
+function applyRealEstateValuationSync(payload) {
+  if (!isRealEstateInvestment(payload)) {
+    return payload;
+  }
+
+  const metrics = getRealEstateMetrics(payload);
+  const normalizedNetEquity = metrics.netEquity > 0 ? normalizeMoneyString(String(metrics.netEquity), 6) : "";
+  const capRatePercent =
+    metrics.capRate !== null ? String(Number((metrics.capRate * 100).toFixed(6))) : "";
+
+  return {
+    ...payload,
+    ticker: "",
+    exchange: "",
+    shareCount: "",
+    costBasisPerShare: "",
+    marketPrice: "",
+    marketPriceDate: "",
+    marketValue: normalizedNetEquity,
+    amount: payload.realEstateCostBasis || payload.realEstatePurchasePrice || payload.amount || "",
+    stage: payload.realEstatePropertyType || payload.stage || "",
+    owner: payload.realEstateEntityOwner || payload.owner || "",
+    status: payload.status || "Active",
+    capitalCallDate: "",
+    capitalCallAmount: "",
+    distributionDate: "",
+    distributionAmount: "",
+    capitalActivity: [],
+    valuationDate: payload.realEstateAppraisalDate || payload.valuationDate || "",
+    officialValue: normalizedNetEquity || payload.officialValue || "",
+    internalValue: normalizedNetEquity || payload.internalValue || "",
+    ownershipPercent: payload.realEstateOwnershipPercent || payload.ownershipPercent || "",
+    realEstateCapRate: capRatePercent
+  };
+}
+
+function buildRealEstateSummary(rows) {
+  const positions = getRealEstateRows(rows);
+  const totals = positions.reduce(
+    (summary, investment) => {
+      const metrics = getRealEstateMetrics(investment);
+      summary.appraisedValue += metrics.appraisedValue;
+      summary.netEquity += metrics.netEquity;
+      summary.debt += metrics.debt;
+      summary.noi += metrics.noi;
+      if (metrics.capRate !== null && metrics.appraisedValue > 0) {
+        summary.weightedCapRateNumerator += metrics.capRate * metrics.appraisedValue;
+        summary.weightedCapRateDenominator += metrics.appraisedValue;
+      }
+      return summary;
+    },
+    {
+      positions,
+      appraisedValue: 0,
+      netEquity: 0,
+      debt: 0,
+      noi: 0,
+      weightedCapRateNumerator: 0,
+      weightedCapRateDenominator: 0
+    }
+  );
+  const latestAppraisalDate = positions
+    .map((investment) => investment.realEstateAppraisalDate || investment.valuationDate)
+    .filter(Boolean)
+    .sort((left, right) => parseDateValue(right, new Date(0)) - parseDateValue(left, new Date(0)))[0] || "";
+
+  return {
+    ...totals,
+    weightedCapRate:
+      totals.weightedCapRateDenominator > 0
+        ? totals.weightedCapRateNumerator / totals.weightedCapRateDenominator
+        : null,
+    latestAppraisalDate
+  };
+}
+
+function buildRealEstateHoldingsSummary(entity = "") {
+  return buildRealEstateSummary(
+    getRealEstateRows(allInvestments).filter(
+      (investment) => !entity || normalizeEntityName(investment.entity) === normalizeEntityName(entity)
+    )
+  );
 }
 
 function getCashRows(investments) {
@@ -2472,7 +2702,11 @@ function renderPublicStockFilterOptions(stocks) {
 
   const selectedEntity = publicStockFilters.entity;
   const entities = Array.from(
-    new Set(stocks.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+    new Set(
+      configuredEntities
+        .concat(stocks.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+        .map(normalizeEntityName)
+    )
   ).sort((left, right) => left.localeCompare(right));
   publicStockEntityFilter.innerHTML = [
     '<option value="">All entities</option>',
@@ -2581,7 +2815,54 @@ function clearBondFields() {
     "bondCreditRating",
     "bondInsurer",
     "bondTaxStatus",
-    "bondAccruedInterest"
+    "bondAccruedInterest",
+    "realEstatePropertyName",
+    "realEstateAddress",
+    "realEstateEntityOwner",
+    "realEstatePropertyType",
+    "realEstateOwnershipPercent",
+    "realEstateAcquisitionDate",
+    "realEstatePurchasePrice",
+    "realEstateCostBasis",
+    "realEstateAppraisedValue",
+    "realEstateAppraisalDate",
+    "realEstateAppraiser",
+    "realEstateDebt",
+    "realEstateDebtInterestRate",
+    "realEstateDebtMaturityDate",
+    "realEstateNoi",
+    "realEstateRevenue",
+    "realEstateCapRate",
+    "realEstateOccupancy",
+    "realEstateSize"
+  ].forEach((fieldName) => {
+    if (form && form.elements && form.elements[fieldName]) {
+      form.elements[fieldName].value = "";
+    }
+  });
+}
+
+function clearRealEstateFields() {
+  [
+    "realEstatePropertyName",
+    "realEstateAddress",
+    "realEstateEntityOwner",
+    "realEstatePropertyType",
+    "realEstateOwnershipPercent",
+    "realEstateAcquisitionDate",
+    "realEstatePurchasePrice",
+    "realEstateCostBasis",
+    "realEstateAppraisedValue",
+    "realEstateAppraisalDate",
+    "realEstateAppraiser",
+    "realEstateDebt",
+    "realEstateDebtInterestRate",
+    "realEstateDebtMaturityDate",
+    "realEstateNoi",
+    "realEstateRevenue",
+    "realEstateCapRate",
+    "realEstateOccupancy",
+    "realEstateSize"
   ].forEach((fieldName) => {
     if (form && form.elements && form.elements[fieldName]) {
       form.elements[fieldName].value = "";
@@ -2598,6 +2879,7 @@ function updateStockDetailsVisibility(options = {}) {
   const publicStockDetails = isPublicStockAssetType(form.elements.assetType.value);
   const cashDetails = isCashAssetType(form.elements.assetType.value);
   const bondDetails = isBondAssetType(form.elements.assetType.value);
+  const realEstateDetails = isRealEstateAssetType(form.elements.assetType.value);
   stockDetailsPanel.classList.toggle("hidden", !showStockDetails);
   if (cashDetailsPanel) {
     cashDetailsPanel.classList.toggle("hidden", !cashDetails);
@@ -2605,11 +2887,17 @@ function updateStockDetailsVisibility(options = {}) {
   if (bondDetailsPanel) {
     bondDetailsPanel.classList.toggle("hidden", !bondDetails);
   }
+  if (realEstateDetailsPanel) {
+    realEstateDetailsPanel.classList.toggle("hidden", !realEstateDetails);
+  }
   if (!showStockDetails && options.clearHiddenFields) {
     clearStockFields();
   }
   if (!bondDetails && options.clearHiddenFields) {
     clearBondFields();
+  }
+  if (!realEstateDetails && options.clearHiddenFields) {
+    clearRealEstateFields();
   }
   if (cashDetails) {
     syncCashPanelFromForm();
@@ -2619,9 +2907,13 @@ function updateStockDetailsVisibility(options = {}) {
     syncBondPanelFromForm();
     syncBondFormFields();
   }
+  if (realEstateDetails) {
+    syncRealEstatePanelFromForm();
+    syncRealEstateFormFields();
+  }
   ["valuationDate", "officialValue", "internalValue"].forEach((fieldName) => {
     if (form.elements[fieldName]) {
-      form.elements[fieldName].readOnly = publicStockDetails || cashDetails || bondDetails;
+      form.elements[fieldName].readOnly = publicStockDetails || cashDetails || bondDetails || realEstateDetails;
     }
   });
   if (form.elements.exitValue) {
@@ -2632,13 +2924,104 @@ function updateStockDetailsVisibility(options = {}) {
       ? "For Cash, balance date drives valuation date and current balance drives official and internal value. Cash does not create IRR cash flows."
       : bondDetails
         ? "For Fixed Income, market price date drives valuation date and market value drives official and internal value. Exit value stays manual."
-        : publicStockDetails
-          ? "For Public Stocks, valuation date, official value, and internal value are driven by share count and current market price. Exit value stays manual."
-          : "Use the latest valuation date when you update official, internal, or exit marks.";
+        : realEstateDetails
+          ? "For Real Estate, appraisal date drives valuation date and net equity drives official and internal value. Exit value stays manual."
+          : publicStockDetails
+            ? "For Public Stocks, valuation date, official value, and internal value are driven by share count and current market price. Exit value stays manual."
+            : "Use the latest valuation date when you update official, internal, or exit marks.";
   }
   syncPublicStockFormValuation();
   updateBondValuePreview();
+  updateRealEstateValuePreview();
   updateStockValuePreview();
+}
+
+function syncRealEstatePanelFromForm() {
+  if (!form || !form.elements || !isRealEstateAssetType(form.elements.assetType.value)) {
+    return;
+  }
+  if (realEstatePropertyNameField && !realEstatePropertyNameField.value) {
+    realEstatePropertyNameField.value = form.elements.company ? form.elements.company.value : "";
+  }
+  if (realEstatePropertyTypeField && !realEstatePropertyTypeField.value) {
+    realEstatePropertyTypeField.value = form.elements.stage ? form.elements.stage.value : "";
+  }
+  if (realEstateEntityOwnerField && !realEstateEntityOwnerField.value) {
+    realEstateEntityOwnerField.value = form.elements.owner ? form.elements.owner.value : "";
+  }
+}
+
+function syncRealEstateFormFields() {
+  if (!form || !form.elements || !isRealEstateAssetType(form.elements.assetType.value)) {
+    return;
+  }
+  if (form.elements.company && realEstatePropertyNameField) {
+    form.elements.company.value = realEstatePropertyNameField.value;
+  }
+  if (form.elements.stage && realEstatePropertyTypeField) {
+    form.elements.stage.value = realEstatePropertyTypeField.value;
+  }
+  if (form.elements.owner && realEstateEntityOwnerField) {
+    form.elements.owner.value = realEstateEntityOwnerField.value;
+  }
+  if (form.elements.status && !form.elements.status.value) {
+    form.elements.status.value = "Active";
+  }
+
+  const synced = applyRealEstateValuationSync({
+    assetType: "Real Estate",
+    amount: form.elements.amount ? form.elements.amount.value : "",
+    status: form.elements.status ? form.elements.status.value : "",
+    valuationDate: form.elements.valuationDate ? form.elements.valuationDate.value : "",
+    officialValue: form.elements.officialValue ? form.elements.officialValue.value : "",
+    internalValue: form.elements.internalValue ? form.elements.internalValue.value : "",
+    ownershipPercent: form.elements.ownershipPercent ? form.elements.ownershipPercent.value : "",
+    realEstatePropertyType: realEstatePropertyTypeField ? realEstatePropertyTypeField.value : "",
+    realEstateEntityOwner: realEstateEntityOwnerField ? realEstateEntityOwnerField.value : "",
+    realEstateOwnershipPercent: realEstateOwnershipPercentField ? realEstateOwnershipPercentField.value : "",
+    realEstatePurchasePrice: realEstatePurchasePriceField ? realEstatePurchasePriceField.value : "",
+    realEstateCostBasis: realEstateCostBasisField ? realEstateCostBasisField.value : "",
+    realEstateAppraisedValue: realEstateAppraisedValueField ? realEstateAppraisedValueField.value : "",
+    realEstateAppraisalDate: realEstateAppraisalDateField ? realEstateAppraisalDateField.value : "",
+    realEstateDebt: realEstateDebtField ? realEstateDebtField.value : "",
+    realEstateNoi: realEstateNoiField ? realEstateNoiField.value : "",
+    realEstateRevenue: realEstateRevenueField ? realEstateRevenueField.value : ""
+  });
+
+  if (realEstateCapRateField) {
+    realEstateCapRateField.value = synced.realEstateCapRate || "";
+  }
+  if (form.elements.amount) {
+    form.elements.amount.value = synced.amount || "";
+  }
+  if (form.elements.valuationDate) {
+    form.elements.valuationDate.value = synced.valuationDate || "";
+  }
+  if (form.elements.officialValue) {
+    form.elements.officialValue.value = synced.officialValue || "";
+  }
+  if (form.elements.internalValue) {
+    form.elements.internalValue.value = synced.internalValue || "";
+  }
+  if (form.elements.ownershipPercent) {
+    form.elements.ownershipPercent.value = synced.ownershipPercent || "";
+  }
+}
+
+function updateRealEstateValuePreview() {
+  if (!realEstateValuePreview || !form || !form.elements || !isRealEstateAssetType(form.elements.assetType.value)) {
+    return;
+  }
+  const metrics = getRealEstateMetrics({
+    realEstateOwnershipPercent: realEstateOwnershipPercentField ? realEstateOwnershipPercentField.value : "",
+    realEstateAppraisedValue: realEstateAppraisedValueField ? realEstateAppraisedValueField.value : "",
+    realEstateDebt: realEstateDebtField ? realEstateDebtField.value : "",
+    realEstateNoi: realEstateNoiField ? realEstateNoiField.value : ""
+  });
+  realEstateValuePreview.textContent =
+    metrics.appraisedValue > 0
+      ? `Net equity ${formatMoney(metrics.netEquity)} • LTV ${formatPercent(metrics.ltv)} • cap rate ${formatPercent(metrics.capRate)}`
+      : "Net equity will calculate from appraised value, ownership, and debt.";
 }
 
 function syncBondPanelFromForm() {
@@ -3094,7 +3477,7 @@ function buildPerformanceInputs(updates) {
   const updateActivities = updates.map((update) => {
     const pipelineUpdate =
       isPipelineStatus(update.status) || isPipelineStatus(update.stage);
-    const activityRows = isCashInvestment(update) || isBondInvestment(update)
+    const activityRows = isCashInvestment(update) || isBondInvestment(update) || isRealEstateInvestment(update)
       ? []
       : normalizeCapitalActivityRows(
           update.capitalActivity && update.capitalActivity.length
@@ -3204,6 +3587,7 @@ function buildPerformanceInputs(updates) {
   return {
     isCashPosition: updates.some(isCashInvestment),
     isBondPosition: updates.some(isBondInvestment),
+    isRealEstatePosition: updates.some(isRealEstateInvestment),
     committedCapital,
     investedCapital,
     distributions,
@@ -3380,7 +3764,7 @@ function buildAggregatePerformance(companyCollections) {
     let terminalTotal = 0;
 
     companyInputs.forEach(({ inputs }) => {
-      if (inputs.isCashPosition || inputs.isBondPosition) {
+      if (inputs.isCashPosition || inputs.isBondPosition || inputs.isRealEstatePosition) {
         return;
       }
       cashFlows.push(...inputs.baseCashFlows);
@@ -3517,7 +3901,7 @@ function buildEntityCashFlowAuditRows(rows, markName = "internalMark") {
         amount: cashFlow.amount,
         includedInXirr: true
       }));
-      if (inputs.isCashPosition || inputs.isBondPosition) {
+      if (inputs.isCashPosition || inputs.isBondPosition || inputs.isRealEstatePosition) {
         return cashFlowRows;
       }
       const terminalMark = inputs[markName];
@@ -3738,6 +4122,8 @@ function buildDashboardCards(investments) {
   const totalCash = cashRows.reduce((sum, investment) => sum + getCashBalance(investment), 0);
   const fixedIncomeRows = getBondRows(investments);
   const fixedIncomeSummary = buildFixedIncomeSummary(fixedIncomeRows);
+  const realEstateRows = getRealEstateRows(investments);
+  const realEstateSummary = buildRealEstateSummary(realEstateRows);
   const totalUnfundedCommitments = Math.max(totalCommittedCapital - totalInvestedCapital, 0);
   const liquidityCoverage =
     totalUnfundedCommitments > 0 ? totalCash / totalUnfundedCommitments : null;
@@ -3772,6 +4158,8 @@ function buildDashboardCards(investments) {
     { label: "Stock market value", value: formatMoney(stockMarketValue), action: "public-stocks" },
     { label: "Fixed income positions", value: String(fixedIncomeRows.length), action: "fixed-income" },
     { label: "Fixed income market value", value: formatMoney(fixedIncomeSummary.marketValue), action: "fixed-income" },
+    { label: "Real estate properties", value: String(realEstateRows.length), action: "real-estate" },
+    { label: "Real estate net equity", value: formatMoney(realEstateSummary.netEquity), action: "real-estate" },
     { label: "Total cash", value: formatMoney(totalCash), action: "cash" },
     { label: "Total unfunded commitments", value: formatMoney(totalUnfundedCommitments), action: "portfolio" },
     { label: "Liquidity coverage", value: formatTurns(liquidityCoverage), action: "cash" },
@@ -3879,7 +4267,13 @@ function buildDataQualityAlerts() {
     }
 
     if (!normalizeEntityName(latest.entity)) {
-      addQualityAlert(alerts, row, "High", "Missing entity", "Assign this investment to Beaman Ventures, Lee Beaman, Katherine Trust, or Natalie Trust.");
+      addQualityAlert(
+        alerts,
+        row,
+        "High",
+        "Missing entity",
+        "Assign this investment to Beaman Ventures, Lee Beaman, Lee Beaman Real Estate, Lee Beaman IRA, Katherine Trust, or Natalie Trust."
+      );
     }
 
     if (!normalizedStatus) {
@@ -4002,6 +4396,7 @@ function renderDashboard(investments) {
         const publicHoldings = buildPublicHoldingsSummary(entity);
         const cashHoldings = buildCashHoldingsSummary(entity);
         const fixedIncomeHoldings = buildFixedIncomeHoldingsSummary(entity);
+        const realEstateHoldings = buildRealEstateHoldingsSummary(entity);
         const cashNavPercent =
           totals.internalValue > 0 ? cashHoldings.totalBalance / totals.internalValue : null;
         const metrics = [
@@ -4042,7 +4437,7 @@ function renderDashboard(investments) {
         ${
           publicHoldings.positions.length
             ? `
-              <article class="dashboard-card entity-performance-card public-holdings-card" data-entity="${escapeHtml(entity)}">
+              <article class="dashboard-card entity-performance-card entity-holdings-card public-holdings-card" data-dashboard-action="public-stocks" data-entity="${escapeHtml(entity)}">
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Public Holdings</p>
@@ -4076,7 +4471,7 @@ function renderDashboard(investments) {
         ${
           fixedIncomeHoldings.positions.length
             ? `
-              <article class="dashboard-card entity-performance-card fixed-income-holdings-card" data-entity="${escapeHtml(entity)}">
+              <article class="dashboard-card entity-performance-card entity-holdings-card fixed-income-holdings-card" data-dashboard-action="fixed-income" data-entity="${escapeHtml(entity)}">
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Fixed Income Holdings</p>
@@ -4109,9 +4504,44 @@ function renderDashboard(investments) {
             : ""
         }
         ${
+          realEstateHoldings.positions.length
+            ? `
+              <article class="dashboard-card entity-performance-card entity-holdings-card real-estate-holdings-card" data-dashboard-action="real-estate" data-entity="${escapeHtml(entity)}">
+                <div class="entity-performance-header">
+                  <div>
+                    <p class="dashboard-label">Real Estate Holdings</p>
+                    <h3>${escapeHtml(entity)}</h3>
+                  </div>
+                  <span class="status-chip">${escapeHtml(String(realEstateHoldings.positions.length))} propert${realEstateHoldings.positions.length === 1 ? "y" : "ies"}</span>
+                </div>
+                <div class="entity-metric-grid">
+                  ${[
+                    { label: "Appraised value", value: formatMoney(realEstateHoldings.appraisedValue) },
+                    { label: "Net equity value", value: formatMoney(realEstateHoldings.netEquity) },
+                    { label: "Total debt", value: formatMoney(realEstateHoldings.debt) },
+                    { label: "Annual NOI", value: formatMoney(realEstateHoldings.noi) },
+                    { label: "Weighted average cap rate", value: formatPercent(realEstateHoldings.weightedCapRate) },
+                    { label: "Properties", value: String(realEstateHoldings.positions.length) },
+                    { label: "Latest appraisal date", value: realEstateHoldings.latestAppraisalDate || "N/A" }
+                  ]
+                    .map(
+                      (metric) => `
+                        <div class="entity-metric-box">
+                          <p class="dashboard-label">${escapeHtml(metric.label)}</p>
+                          <p class="dashboard-value">${escapeHtml(metric.value)}</p>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+            : ""
+        }
+        ${
           cashHoldings.positions.length
             ? `
-              <article class="dashboard-card entity-performance-card cash-holdings-card" data-entity="${escapeHtml(entity)}">
+              <article class="dashboard-card entity-performance-card entity-holdings-card cash-holdings-card" data-dashboard-action="cash" data-entity="${escapeHtml(entity)}">
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Cash Holdings</p>
@@ -6510,7 +6940,11 @@ function renderCashFilterOptions(cashRows) {
   };
 
   const entities = Array.from(
-    new Set(cashRows.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+    new Set(
+      configuredEntities
+        .concat(cashRows.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+        .map(normalizeEntityName)
+    )
   ).sort((left, right) => left.localeCompare(right));
   const institutions = Array.from(
     new Set(cashRows.map(getCashInstitution).filter(Boolean))
@@ -6624,7 +7058,11 @@ function renderFixedIncomeFilterOptions(bondRows) {
   };
 
   const entities = Array.from(
-    new Set(bondRows.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+    new Set(
+      configuredEntities
+        .concat(bondRows.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+        .map(normalizeEntityName)
+    )
   ).sort((left, right) => left.localeCompare(right));
   const types = Array.from(new Set(bondRows.map(getBondType).filter(Boolean))).sort((left, right) =>
     left.localeCompare(right)
@@ -6812,6 +7250,164 @@ function renderFixedIncome() {
     : '<p class="update-meta">No fixed income positions match those filters.</p>';
 }
 
+function renderRealEstateFilterOptions(realEstateRows) {
+  const assignOptions = (element, placeholder, values, selectedValue) => {
+    if (!element) {
+      return "";
+    }
+    element.innerHTML = [`<option value="">${placeholder}</option>`]
+      .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+      .join("");
+    element.value = values.includes(selectedValue) ? selectedValue : "";
+    return element.value;
+  };
+
+  const entities = Array.from(
+    new Set(
+      configuredEntities
+        .concat(realEstateRows.map((investment) => normalizeEntityName(investment.entity)).filter(Boolean))
+        .map(normalizeEntityName)
+    )
+  ).sort((left, right) => left.localeCompare(right));
+  const types = Array.from(new Set(realEstateRows.map(getRealEstatePropertyType).filter(Boolean))).sort(
+    (left, right) => left.localeCompare(right)
+  );
+
+  realEstateFilters.entity = assignOptions(
+    realEstateEntityFilter,
+    "All entities",
+    entities,
+    realEstateFilters.entity
+  );
+  realEstateFilters.type = assignOptions(
+    realEstateTypeFilter,
+    "All property types",
+    types,
+    realEstateFilters.type
+  );
+}
+
+function getFilteredRealEstateRows(realEstateRows) {
+  const search = String(realEstateFilters.search || "").trim().toLowerCase();
+  return realEstateRows.filter((investment) => {
+    const matchesEntity =
+      !realEstateFilters.entity ||
+      normalizeEntityName(investment.entity) === normalizeEntityName(realEstateFilters.entity);
+    const matchesType =
+      !realEstateFilters.type || getRealEstatePropertyType(investment) === realEstateFilters.type;
+    const matchesSearch =
+      !search ||
+      getRealEstatePropertyName(investment).toLowerCase().includes(search) ||
+      String(investment.realEstateAddress || "").toLowerCase().includes(search);
+    return matchesEntity && matchesType && matchesSearch;
+  });
+}
+
+function renderRealEstate() {
+  if (!realEstateSummary || !realEstateList) {
+    return;
+  }
+
+  const realEstateRows = getRealEstateRows(allInvestments);
+  renderRealEstateFilterOptions(realEstateRows);
+  if (realEstateSearchFilter && realEstateSearchFilter.value !== realEstateFilters.search) {
+    realEstateSearchFilter.value = realEstateFilters.search;
+  }
+
+  const filteredRows = getFilteredRealEstateRows(realEstateRows);
+  const summary = buildRealEstateSummary(filteredRows);
+
+  realEstateSummary.innerHTML = [
+    { label: "Total appraised value", value: formatMoney(summary.appraisedValue) },
+    { label: "Total net equity", value: formatMoney(summary.netEquity) },
+    { label: "Total debt", value: formatMoney(summary.debt) },
+    { label: "Weighted average cap rate", value: formatPercent(summary.weightedCapRate) },
+    { label: "Annual NOI", value: formatMoney(summary.noi) },
+    { label: "Properties", value: String(summary.positions.length) },
+    { label: "Latest appraisal date", value: summary.latestAppraisalDate || "N/A" }
+  ]
+    .map(
+      (item) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(item.label)}</p>
+          <p class="dashboard-value">${escapeHtml(item.value)}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  realEstateList.innerHTML = filteredRows.length
+    ? filteredRows
+        .map((investment) => {
+          const metrics = getRealEstateMetrics(investment);
+          return `
+            <article class="update-card real-estate-card">
+              <div class="update-head">
+                <button class="link-button company-link" type="button" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">
+                  ${escapeHtml(getRealEstatePropertyName(investment) || "Unnamed property")}
+                </button>
+                <span class="status-chip">${escapeHtml(getRealEstatePropertyType(investment))}</span>
+              </div>
+              <p class="update-meta">
+                ${escapeHtml(investment.realEstateAddress || "Address not set")} • ${escapeHtml(normalizeEntityName(investment.entity) || "Entity not specified")}
+              </p>
+              <div class="stock-metric-grid">
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Appraised value</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.appraisedValue))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Appraisal date</p>
+                  <p class="highlight-value">${escapeHtml(investment.realEstateAppraisalDate || investment.valuationDate || "Not set")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Ownership %</p>
+                  <p class="highlight-value">${escapeHtml(formatPercent(metrics.ownershipRate))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Net equity</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.netEquity))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Debt</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.debt))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">LTV</p>
+                  <p class="highlight-value">${escapeHtml(formatPercent(metrics.ltv))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">NOI</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.noi))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Cap rate</p>
+                  <p class="highlight-value">${escapeHtml(formatPercent(metrics.capRate))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Occupancy</p>
+                  <p class="highlight-value">${escapeHtml(investment.realEstateOccupancy ? `${investment.realEstateOccupancy}%` : "N/A")}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Square footage / acreage</p>
+                  <p class="highlight-value">${escapeHtml(investment.realEstateSize || "Not set")}</p>
+                </div>
+              </div>
+              <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+              ${
+                canEditWorkspace()
+                  ? `<div class="card-actions">
+                      <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${escapeHtml(investment.id)}">Edit</button>
+                    </div>`
+                  : ""
+              }
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="update-meta">No real estate positions match those filters.</p>';
+}
+
 async function refreshPublicStockPrices(options = {}) {
   if (!refreshPublicStockPricesButton) {
     return;
@@ -6932,6 +7528,7 @@ function renderAll() {
   renderDataQuality();
   renderPublicStocks();
   renderFixedIncome();
+  renderRealEstate();
   renderCash();
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
@@ -7467,6 +8064,7 @@ addListener(workspaceMenu, "click", (event) => {
     return;
   }
 
+  resetEntityCardFilterForMenuView(target.dataset.view);
   showWorkspaceView(target.dataset.view);
   window.scrollTo({ top: 0, behavior: "smooth" });
   workspaceMenu.classList.add("hidden");
@@ -7823,6 +8421,7 @@ addListener(form, "submit", async (event) => {
 
   syncCashFormFields();
   syncBondFormFields();
+  syncRealEstateFormFields();
   const formData = new FormData(form);
   const recipients = String(formData.get("recipients") || "")
     .split(",")
@@ -7863,6 +8462,25 @@ addListener(form, "submit", async (event) => {
     bondInsurer: formData.get("bondInsurer"),
     bondTaxStatus: formData.get("bondTaxStatus"),
     bondAccruedInterest: formData.get("bondAccruedInterest"),
+    realEstatePropertyName: formData.get("realEstatePropertyName"),
+    realEstateAddress: formData.get("realEstateAddress"),
+    realEstateEntityOwner: formData.get("realEstateEntityOwner"),
+    realEstatePropertyType: formData.get("realEstatePropertyType"),
+    realEstateOwnershipPercent: formData.get("realEstateOwnershipPercent"),
+    realEstateAcquisitionDate: formData.get("realEstateAcquisitionDate"),
+    realEstatePurchasePrice: formData.get("realEstatePurchasePrice"),
+    realEstateCostBasis: formData.get("realEstateCostBasis"),
+    realEstateAppraisedValue: formData.get("realEstateAppraisedValue"),
+    realEstateAppraisalDate: formData.get("realEstateAppraisalDate"),
+    realEstateAppraiser: formData.get("realEstateAppraiser"),
+    realEstateDebt: formData.get("realEstateDebt"),
+    realEstateDebtInterestRate: formData.get("realEstateDebtInterestRate"),
+    realEstateDebtMaturityDate: formData.get("realEstateDebtMaturityDate"),
+    realEstateNoi: formData.get("realEstateNoi"),
+    realEstateRevenue: formData.get("realEstateRevenue"),
+    realEstateCapRate: formData.get("realEstateCapRate"),
+    realEstateOccupancy: formData.get("realEstateOccupancy"),
+    realEstateSize: formData.get("realEstateSize"),
     amount: formData.get("amount"),
     currency: formData.get("currency"),
     stage: formData.get("stage"),
@@ -8333,6 +8951,55 @@ if (cashBalanceField) {
   }
 });
 
+[
+  realEstatePropertyNameField,
+  realEstateAddressField,
+  realEstateEntityOwnerField,
+  realEstatePropertyTypeField,
+  realEstateOwnershipPercentField,
+  realEstateAcquisitionDateField,
+  realEstatePurchasePriceField,
+  realEstateCostBasisField,
+  realEstateAppraisedValueField,
+  realEstateAppraisalDateField,
+  realEstateAppraiserField,
+  realEstateDebtField,
+  realEstateDebtInterestRateField,
+  realEstateDebtMaturityDateField,
+  realEstateNoiField,
+  realEstateRevenueField,
+  realEstateOccupancyField,
+  realEstateSizeField
+].forEach((field) => {
+  if (field) {
+    field.addEventListener("input", () => {
+      syncRealEstateFormFields();
+      updateRealEstateValuePreview();
+    });
+    field.addEventListener("change", () => {
+      syncRealEstateFormFields();
+      updateRealEstateValuePreview();
+    });
+  }
+});
+
+[
+  realEstatePurchasePriceField,
+  realEstateCostBasisField,
+  realEstateAppraisedValueField,
+  realEstateDebtField,
+  realEstateNoiField,
+  realEstateRevenueField
+].forEach((field) => {
+  if (field) {
+    field.addEventListener("blur", () => {
+      field.value = normalizeMoneyString(field.value);
+      syncRealEstateFormFields();
+      updateRealEstateValuePreview();
+    });
+  }
+});
+
 if (form && form.elements && form.elements.assetType) {
   form.elements.assetType.addEventListener("change", () => {
     updateStockDetailsVisibility({ clearHiddenFields: true });
@@ -8687,8 +9354,14 @@ addListener(entityPerformanceCards, "click", (event) => {
     return;
   }
 
-  const card = event.target.closest("[data-entity]");
+  const card = event.target.closest("[data-dashboard-action], [data-entity]");
   if (!card) {
+    return;
+  }
+
+  const action = card.dataset.dashboardAction || "";
+  if (["public-stocks", "fixed-income", "cash", "real-estate"].includes(action)) {
+    openAssetViewForEntity(action, card.dataset.entity || "");
     return;
   }
 
@@ -8732,18 +9405,28 @@ addListener(dashboardCards, "click", (event) => {
   }
 
   if (action === "public-stocks") {
+    setAssetViewEntityFilter("public-stocks", "", "");
     showWorkspaceView("public-stocks");
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
 
   if (action === "fixed-income") {
+    setAssetViewEntityFilter("fixed-income", "", "");
     showWorkspaceView("fixed-income");
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
 
+  if (action === "real-estate") {
+    setAssetViewEntityFilter("real-estate", "", "");
+    showWorkspaceView("real-estate");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
   if (action === "cash") {
+    setAssetViewEntityFilter("cash", "", "");
     showWorkspaceView("cash");
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
@@ -8926,6 +9609,7 @@ addListener(publicStockList, "click", (event) => {
 
 addListener(publicStockEntityFilter, "change", () => {
   publicStockFilters.entity = publicStockEntityFilter.value;
+  assetViewEntityFilterSource["public-stocks"] = publicStockFilters.entity ? "manual" : "";
   renderPublicStocks();
 });
 
@@ -8940,6 +9624,7 @@ addListener(refreshPublicStockPricesButton, "click", () => {
 
 addListener(cashEntityFilter, "change", () => {
   cashFilters.entity = cashEntityFilter.value;
+  assetViewEntityFilterSource.cash = cashFilters.entity ? "manual" : "";
   renderCash();
 });
 
@@ -8950,6 +9635,7 @@ addListener(cashInstitutionFilter, "change", () => {
 
 addListener(fixedIncomeEntityFilter, "change", () => {
   fixedIncomeFilters.entity = fixedIncomeEntityFilter.value;
+  assetViewEntityFilterSource["fixed-income"] = fixedIncomeFilters.entity ? "manual" : "";
   renderFixedIncome();
 });
 
@@ -8968,7 +9654,48 @@ addListener(fixedIncomeMaturityFilter, "change", () => {
   renderFixedIncome();
 });
 
+addListener(realEstateEntityFilter, "change", () => {
+  realEstateFilters.entity = realEstateEntityFilter.value;
+  assetViewEntityFilterSource["real-estate"] = realEstateFilters.entity ? "manual" : "";
+  renderRealEstate();
+});
+
+addListener(realEstateTypeFilter, "change", () => {
+  realEstateFilters.type = realEstateTypeFilter.value;
+  renderRealEstate();
+});
+
+addListener(realEstateSearchFilter, "input", () => {
+  realEstateFilters.search = realEstateSearchFilter.value;
+  renderRealEstate();
+});
+
 addListener(cashList, "click", (event) => {
+  const target = event.target.closest("[data-action], [data-company]");
+  if (!target) {
+    return;
+  }
+
+  const action = target.dataset.action || "";
+  const investmentId = target.dataset.id || "";
+  const company = target.dataset.company || "";
+  const entity = target.dataset.entity || "";
+
+  if (action === "edit" && investmentId) {
+    beginEditInvestment(investmentId);
+    return;
+  }
+
+  if (company && canOpenCompanyDetails()) {
+    selectedCompany = company;
+    selectedCompanyEntity = entity;
+    renderCompanyPanel();
+    showWorkspaceView("portfolio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+});
+
+addListener(realEstateList, "click", (event) => {
   const target = event.target.closest("[data-action], [data-company]");
   if (!target) {
     return;

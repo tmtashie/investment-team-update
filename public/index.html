@@ -34,6 +34,7 @@
           <button type="button" class="menu-link" data-view="portfolio">Current investments</button>
           <button type="button" class="menu-link" data-view="public-stocks">Public stocks</button>
           <button type="button" class="menu-link" data-view="fixed-income">Fixed Income</button>
+          <button type="button" class="menu-link" data-view="real-estate">Real Estate</button>
           <button type="button" class="menu-link" data-view="cash">Cash</button>
           <button type="button" class="menu-link" data-view="research">Decks and notes</button>
           <button type="button" class="menu-link" data-view="tasks">Tasks and reminders</button>
@@ -247,6 +248,39 @@
           <div id="fixedIncomeList" class="updates-list"></div>
         </section>
 
+        <section id="realEstateSection" class="panel workspace-view hidden" data-view="real-estate">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>Real Estate</h2>
+              <p class="section-copy">
+                Track property values, debt, NOI, cap rates, ownership, and entity-level exposure.
+              </p>
+            </div>
+          </div>
+          <div class="real-estate-toolbar">
+            <div class="real-estate-filters">
+              <label>
+                Entity
+                <select id="realEstateEntityFilter">
+                  <option value="">All entities</option>
+                </select>
+              </label>
+              <label>
+                Property type
+                <select id="realEstateTypeFilter">
+                  <option value="">All property types</option>
+                </select>
+              </label>
+              <label>
+                Search
+                <input id="realEstateSearchFilter" type="search" placeholder="Search property or address" />
+              </label>
+            </div>
+          </div>
+          <div id="realEstateSummary" class="dashboard-grid"></div>
+          <div id="realEstateList" class="updates-list"></div>
+        </section>
+
         <section id="entityDetailSection" class="panel workspace-view hidden" data-view="entity">
           <div class="panel-header">
             <div>
@@ -288,6 +322,8 @@
                   <option value="">Select entity</option>
                   <option value="Beaman Ventures">Beaman Ventures</option>
                   <option value="Lee Beaman">Lee Beaman</option>
+                  <option value="Lee Beaman Real Estate">Lee Beaman Real Estate</option>
+                  <option value="Lee Beaman IRA">Lee Beaman IRA</option>
                   <option value="Katherine Trust">Katherine Trust</option>
                   <option value="Natalie Trust">Natalie Trust</option>
                 </select>
@@ -398,6 +434,8 @@
                   <option value="">Select entity</option>
                   <option value="Beaman Ventures">Beaman Ventures</option>
                   <option value="Lee Beaman">Lee Beaman</option>
+                  <option value="Lee Beaman Real Estate">Lee Beaman Real Estate</option>
+                  <option value="Lee Beaman IRA">Lee Beaman IRA</option>
                   <option value="Katherine Trust">Katherine Trust</option>
                   <option value="Natalie Trust">Natalie Trust</option>
                 </select>
@@ -460,9 +498,133 @@
                     <option value="Fund">Fund</option>
                     <option value="Cash">Cash</option>
                     <option value="Bond / Fixed Income">Bond / Fixed Income</option>
+                    <option value="Real Estate">Real Estate</option>
                     <option value="Other">Other</option>
                   </select>
                 </label>
+              </div>
+
+              <div id="realEstateDetailsPanel" class="real-estate-details-panel hidden">
+                <div class="two-up">
+                  <label>
+                    Property name
+                    <input id="realEstatePropertyNameField" name="realEstatePropertyName" type="text" placeholder="Downtown office property" />
+                  </label>
+
+                  <label>
+                    Property address
+                    <input id="realEstateAddressField" name="realEstateAddress" type="text" placeholder="123 Main Street, Nashville, TN" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Entity owner
+                    <input id="realEstateEntityOwnerField" name="realEstateEntityOwner" type="text" placeholder="Owning entity or LLC" />
+                  </label>
+
+                  <label>
+                    Property type
+                    <select id="realEstatePropertyTypeField" name="realEstatePropertyType">
+                      <option value="">Select property type</option>
+                      <option value="Office">Office</option>
+                      <option value="Retail">Retail</option>
+                      <option value="Industrial">Industrial</option>
+                      <option value="Multifamily">Multifamily</option>
+                      <option value="Land">Land</option>
+                      <option value="Hospitality">Hospitality</option>
+                      <option value="Residential">Residential</option>
+                      <option value="Mixed Use">Mixed Use</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Ownership %
+                    <input id="realEstateOwnershipPercentField" name="realEstateOwnershipPercent" type="number" min="0" max="100" step="0.01" placeholder="100" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Acquisition date
+                    <input id="realEstateAcquisitionDateField" name="realEstateAcquisitionDate" type="date" />
+                  </label>
+
+                  <label>
+                    Purchase price
+                    <input id="realEstatePurchasePriceField" name="realEstatePurchasePrice" type="text" inputmode="decimal" placeholder="1,500,000" />
+                  </label>
+
+                  <label>
+                    Cost basis
+                    <input id="realEstateCostBasisField" name="realEstateCostBasis" type="text" inputmode="decimal" placeholder="1,650,000" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Latest appraised value
+                    <input id="realEstateAppraisedValueField" name="realEstateAppraisedValue" type="text" inputmode="decimal" placeholder="2,250,000" />
+                  </label>
+
+                  <label>
+                    Appraisal date
+                    <input id="realEstateAppraisalDateField" name="realEstateAppraisalDate" type="date" />
+                  </label>
+
+                  <label>
+                    Appraiser / source
+                    <input id="realEstateAppraiserField" name="realEstateAppraiser" type="text" placeholder="Appraiser or internal mark" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Debt outstanding
+                    <input id="realEstateDebtField" name="realEstateDebt" type="text" inputmode="decimal" placeholder="900,000" />
+                  </label>
+
+                  <label>
+                    Debt interest rate %
+                    <input id="realEstateDebtInterestRateField" name="realEstateDebtInterestRate" type="number" min="0" step="0.001" placeholder="5.75" />
+                  </label>
+
+                  <label>
+                    Debt maturity date
+                    <input id="realEstateDebtMaturityDateField" name="realEstateDebtMaturityDate" type="date" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Annual NOI
+                    <input id="realEstateNoiField" name="realEstateNoi" type="text" inputmode="decimal" placeholder="150,000" />
+                  </label>
+
+                  <label>
+                    Annual gross revenue
+                    <input id="realEstateRevenueField" name="realEstateRevenue" type="text" inputmode="decimal" placeholder="300,000" />
+                  </label>
+
+                  <label>
+                    Cap rate %
+                    <input id="realEstateCapRateField" name="realEstateCapRate" type="number" min="0" step="0.001" placeholder="6.67" readonly />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Occupancy %
+                    <input id="realEstateOccupancyField" name="realEstateOccupancy" type="number" min="0" max="100" step="0.01" placeholder="95" />
+                  </label>
+
+                  <label>
+                    Square footage / acreage
+                    <input id="realEstateSizeField" name="realEstateSize" type="text" placeholder="24,000 sf or 12 acres" />
+                  </label>
+
+                  <div id="realEstateValuePreview" class="stock-value-preview">
+                    Net equity will calculate from appraised value, ownership, and debt.
+                  </div>
+                </div>
+                <div class="section-copy subsection-helper">
+                  Real Estate values sync to official and internal value using net equity. Appraisal changes do not create IRR cash flows.
+                </div>
               </div>
 
               <div id="bondDetailsPanel" class="bond-details-panel hidden">
@@ -1634,6 +1796,8 @@
                   <option value="">Any entity</option>
                   <option value="Beaman Ventures">Beaman Ventures</option>
                   <option value="Lee Beaman">Lee Beaman</option>
+                  <option value="Lee Beaman Real Estate">Lee Beaman Real Estate</option>
+                  <option value="Lee Beaman IRA">Lee Beaman IRA</option>
                   <option value="Katherine Trust">Katherine Trust</option>
                   <option value="Natalie Trust">Natalie Trust</option>
                 </select>
