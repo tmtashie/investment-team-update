@@ -556,20 +556,28 @@ function normalizeInvestment(entry) {
   const realEstateOwnershipPercent = String(entry.realEstateOwnershipPercent || entry.ownershipPercent || "").trim();
   const realEstateDebt = String(entry.realEstateDebt || "").trim();
   const realEstateNoi = String(entry.realEstateNoi || "").trim();
+  const realEstateRevenue = String(entry.realEstateRevenue || "").trim();
+  const realEstateInternalValueOverride = String(entry.realEstateInternalValueOverride || "").trim();
   const realEstateOwnershipRate = parseNumericString(realEstateOwnershipPercent) > 0
     ? Math.max(0, Math.min(parseNumericString(realEstateOwnershipPercent), 100)) / 100
     : 1;
   const calculatedRealEstateEntityValue =
     parseNumericString(realEstateAppraisedValue) * realEstateOwnershipRate;
   const calculatedRealEstateEntityDebt = parseNumericString(realEstateDebt) * realEstateOwnershipRate;
-  const calculatedRealEstateNetEquity = Math.max(
-    calculatedRealEstateEntityValue - calculatedRealEstateEntityDebt,
-    0
-  );
+  const calculatedRealEstateNetEquity = calculatedRealEstateEntityValue - calculatedRealEstateEntityDebt;
+  const hasRealEstateValuationInputs =
+    parseNumericString(realEstateAppraisedValue) > 0 || parseNumericString(realEstateDebt) > 0;
   const realEstateNetEquity = formatNumericString(calculatedRealEstateNetEquity);
+  const realEstateInternalValue = realEstateInternalValueOverride
+    ? formatNumericString(parseNumericString(realEstateInternalValueOverride))
+    : realEstateNetEquity;
   const realEstateCapRate =
     parseNumericString(realEstateAppraisedValue) > 0 && parseNumericString(realEstateNoi) > 0
       ? String(Number(((parseNumericString(realEstateNoi) / parseNumericString(realEstateAppraisedValue)) * 100).toFixed(6)))
+      : "";
+  const realEstateNoiMargin =
+    parseNumericString(realEstateRevenue) > 0 && parseNumericString(realEstateNoi) > 0
+      ? String(Number(((parseNumericString(realEstateNoi) / parseNumericString(realEstateRevenue)) * 100).toFixed(6)))
       : "";
   const ticker = String(entry.ticker || "").trim().toUpperCase();
   const exchange = String(entry.exchange || "").trim().toUpperCase();
@@ -584,7 +592,7 @@ function normalizeInvestment(entry) {
       : isBondAsset
         ? bondMarketValue
         : isRealEstateAsset
-          ? realEstateNetEquity
+          ? (hasRealEstateValuationInputs ? realEstateNetEquity : "")
       : String(entry.marketValue || "").trim() || formatNumericString(calculatedMarketValue);
   const capitalCallDate = String(entry.capitalCallDate || "").trim();
   const capitalCallAmount = String(entry.capitalCallAmount || "").trim();
@@ -600,14 +608,14 @@ function normalizeInvestment(entry) {
     : isBondAsset
       ? bondMarketValue || String(entry.officialValue || "").trim()
       : isRealEstateAsset
-        ? realEstateNetEquity || String(entry.officialValue || "").trim()
+        ? (hasRealEstateValuationInputs ? realEstateNetEquity : "") || String(entry.officialValue || "").trim()
       : String(entry.officialValue || "").trim();
   const internalValue = isCashAsset
     ? cashBalanceValue
     : isBondAsset
       ? bondMarketValue || String(entry.internalValue || "").trim()
       : isRealEstateAsset
-        ? realEstateNetEquity || String(entry.internalValue || "").trim()
+        ? (hasRealEstateValuationInputs ? realEstateInternalValue : "") || String(entry.internalValue || "").trim()
       : String(entry.internalValue || "").trim();
   const exitValue = isCashAsset ? "" : String(entry.exitValue || "").trim();
   const ownershipPercent = String(entry.ownershipPercent || "").trim();
@@ -766,23 +774,40 @@ function normalizeInvestment(entry) {
     bondAccruedInterest: isBondAsset ? String(entry.bondAccruedInterest || "").trim() : "",
     realEstatePropertyName: isRealEstateAsset ? String(entry.realEstatePropertyName || entry.company || "").trim() : "",
     realEstateAddress: isRealEstateAsset ? String(entry.realEstateAddress || "").trim() : "",
+    realEstateCity: isRealEstateAsset ? String(entry.realEstateCity || "").trim() : "",
+    realEstateState: isRealEstateAsset ? String(entry.realEstateState || "").trim() : "",
+    realEstateZip: isRealEstateAsset ? String(entry.realEstateZip || "").trim() : "",
     realEstateEntityOwner: isRealEstateAsset ? String(entry.realEstateEntityOwner || entry.owner || "").trim() : "",
     realEstatePropertyType: isRealEstateAsset ? String(entry.realEstatePropertyType || entry.stage || "").trim() : "",
     realEstateOwnershipPercent: isRealEstateAsset ? realEstateOwnershipPercent : "",
+    realEstateOwnershipNotes: isRealEstateAsset ? String(entry.realEstateOwnershipNotes || "").trim() : "",
     realEstateAcquisitionDate: isRealEstateAsset ? String(entry.realEstateAcquisitionDate || "").trim() : "",
     realEstatePurchasePrice: isRealEstateAsset ? String(entry.realEstatePurchasePrice || "").trim() : "",
     realEstateCostBasis: isRealEstateAsset ? String(entry.realEstateCostBasis || "").trim() : "",
     realEstateAppraisedValue: isRealEstateAsset ? realEstateAppraisedValue : "",
     realEstateAppraisalDate: isRealEstateAsset ? String(entry.realEstateAppraisalDate || "").trim() : "",
     realEstateAppraiser: isRealEstateAsset ? String(entry.realEstateAppraiser || "").trim() : "",
+    realEstateAppraisalDocument: isRealEstateAsset ? String(entry.realEstateAppraisalDocument || "").trim() : "",
+    realEstateInternalValueOverride: isRealEstateAsset ? realEstateInternalValueOverride : "",
+    realEstateInternalValueDate: isRealEstateAsset ? String(entry.realEstateInternalValueDate || "").trim() : "",
     realEstateDebt: isRealEstateAsset ? realEstateDebt : "",
+    realEstateLoanLender: isRealEstateAsset ? String(entry.realEstateLoanLender || "").trim() : "",
     realEstateDebtInterestRate: isRealEstateAsset ? String(entry.realEstateDebtInterestRate || "").trim() : "",
     realEstateDebtMaturityDate: isRealEstateAsset ? String(entry.realEstateDebtMaturityDate || "").trim() : "",
+    realEstateDebtService: isRealEstateAsset ? String(entry.realEstateDebtService || "").trim() : "",
+    realEstateLoanNotes: isRealEstateAsset ? String(entry.realEstateLoanNotes || "").trim() : "",
     realEstateNoi: isRealEstateAsset ? realEstateNoi : "",
-    realEstateRevenue: isRealEstateAsset ? String(entry.realEstateRevenue || "").trim() : "",
+    realEstateRevenue: isRealEstateAsset ? realEstateRevenue : "",
     realEstateCapRate: isRealEstateAsset ? realEstateCapRate : "",
+    realEstateNoiMargin: isRealEstateAsset ? realEstateNoiMargin : "",
     realEstateOccupancy: isRealEstateAsset ? String(entry.realEstateOccupancy || "").trim() : "",
-    realEstateSize: isRealEstateAsset ? String(entry.realEstateSize || "").trim() : "",
+    realEstateSquareFootage: isRealEstateAsset ? String(entry.realEstateSquareFootage || entry.realEstateSize || "").trim() : "",
+    realEstateAcreage: isRealEstateAsset ? String(entry.realEstateAcreage || "").trim() : "",
+    realEstateUnits: isRealEstateAsset ? String(entry.realEstateUnits || "").trim() : "",
+    realEstatePropertyTaxes: isRealEstateAsset ? String(entry.realEstatePropertyTaxes || "").trim() : "",
+    realEstateInsurance: isRealEstateAsset ? String(entry.realEstateInsurance || "").trim() : "",
+    realEstateOtherExpenses: isRealEstateAsset ? String(entry.realEstateOtherExpenses || "").trim() : "",
+    realEstateOperatingNotes: isRealEstateAsset ? String(entry.realEstateOperatingNotes || "").trim() : "",
     marketValue,
     amount: isBondAsset ? bondCostBasis || amount : isRealEstateAsset ? String(entry.realEstateCostBasis || entry.realEstatePurchasePrice || amount || "").trim() : amount,
     currency: String(entry.currency || "USD").trim() || "USD",
@@ -3868,23 +3893,40 @@ function validateSubmission(payload, sessionUser) {
     bondAccruedInterest: payload.bondAccruedInterest,
     realEstatePropertyName: payload.realEstatePropertyName,
     realEstateAddress: payload.realEstateAddress,
+    realEstateCity: payload.realEstateCity,
+    realEstateState: payload.realEstateState,
+    realEstateZip: payload.realEstateZip,
     realEstateEntityOwner: payload.realEstateEntityOwner,
     realEstatePropertyType: payload.realEstatePropertyType,
     realEstateOwnershipPercent: payload.realEstateOwnershipPercent,
+    realEstateOwnershipNotes: payload.realEstateOwnershipNotes,
     realEstateAcquisitionDate: payload.realEstateAcquisitionDate,
     realEstatePurchasePrice: payload.realEstatePurchasePrice,
     realEstateCostBasis: payload.realEstateCostBasis,
     realEstateAppraisedValue: payload.realEstateAppraisedValue,
     realEstateAppraisalDate: payload.realEstateAppraisalDate,
     realEstateAppraiser: payload.realEstateAppraiser,
+    realEstateAppraisalDocument: payload.realEstateAppraisalDocument,
+    realEstateInternalValueOverride: payload.realEstateInternalValueOverride,
+    realEstateInternalValueDate: payload.realEstateInternalValueDate,
     realEstateDebt: payload.realEstateDebt,
+    realEstateLoanLender: payload.realEstateLoanLender,
     realEstateDebtInterestRate: payload.realEstateDebtInterestRate,
     realEstateDebtMaturityDate: payload.realEstateDebtMaturityDate,
+    realEstateDebtService: payload.realEstateDebtService,
+    realEstateLoanNotes: payload.realEstateLoanNotes,
     realEstateNoi: payload.realEstateNoi,
     realEstateRevenue: payload.realEstateRevenue,
     realEstateCapRate: payload.realEstateCapRate,
+    realEstateNoiMargin: payload.realEstateNoiMargin,
     realEstateOccupancy: payload.realEstateOccupancy,
-    realEstateSize: payload.realEstateSize,
+    realEstateSquareFootage: payload.realEstateSquareFootage,
+    realEstateAcreage: payload.realEstateAcreage,
+    realEstateUnits: payload.realEstateUnits,
+    realEstatePropertyTaxes: payload.realEstatePropertyTaxes,
+    realEstateInsurance: payload.realEstateInsurance,
+    realEstateOtherExpenses: payload.realEstateOtherExpenses,
+    realEstateOperatingNotes: payload.realEstateOperatingNotes,
     amount: payload.amount,
     currency: payload.currency,
     stage: payload.stage,
@@ -3982,23 +4024,40 @@ function validateInvestmentPatch(payload) {
     bondAccruedInterest: String(payload.bondAccruedInterest || "").trim(),
     realEstatePropertyName: String(payload.realEstatePropertyName || "").trim(),
     realEstateAddress: String(payload.realEstateAddress || "").trim(),
+    realEstateCity: String(payload.realEstateCity || "").trim(),
+    realEstateState: String(payload.realEstateState || "").trim(),
+    realEstateZip: String(payload.realEstateZip || "").trim(),
     realEstateEntityOwner: String(payload.realEstateEntityOwner || "").trim(),
     realEstatePropertyType: String(payload.realEstatePropertyType || "").trim(),
     realEstateOwnershipPercent: String(payload.realEstateOwnershipPercent || "").trim(),
+    realEstateOwnershipNotes: String(payload.realEstateOwnershipNotes || "").trim(),
     realEstateAcquisitionDate: String(payload.realEstateAcquisitionDate || "").trim(),
     realEstatePurchasePrice: String(payload.realEstatePurchasePrice || "").trim(),
     realEstateCostBasis: String(payload.realEstateCostBasis || "").trim(),
     realEstateAppraisedValue: String(payload.realEstateAppraisedValue || "").trim(),
     realEstateAppraisalDate: String(payload.realEstateAppraisalDate || "").trim(),
     realEstateAppraiser: String(payload.realEstateAppraiser || "").trim(),
+    realEstateAppraisalDocument: String(payload.realEstateAppraisalDocument || "").trim(),
+    realEstateInternalValueOverride: String(payload.realEstateInternalValueOverride || "").trim(),
+    realEstateInternalValueDate: String(payload.realEstateInternalValueDate || "").trim(),
     realEstateDebt: String(payload.realEstateDebt || "").trim(),
+    realEstateLoanLender: String(payload.realEstateLoanLender || "").trim(),
     realEstateDebtInterestRate: String(payload.realEstateDebtInterestRate || "").trim(),
     realEstateDebtMaturityDate: String(payload.realEstateDebtMaturityDate || "").trim(),
+    realEstateDebtService: String(payload.realEstateDebtService || "").trim(),
+    realEstateLoanNotes: String(payload.realEstateLoanNotes || "").trim(),
     realEstateNoi: String(payload.realEstateNoi || "").trim(),
     realEstateRevenue: String(payload.realEstateRevenue || "").trim(),
     realEstateCapRate: String(payload.realEstateCapRate || "").trim(),
+    realEstateNoiMargin: String(payload.realEstateNoiMargin || "").trim(),
     realEstateOccupancy: String(payload.realEstateOccupancy || "").trim(),
-    realEstateSize: String(payload.realEstateSize || "").trim(),
+    realEstateSquareFootage: String(payload.realEstateSquareFootage || payload.realEstateSize || "").trim(),
+    realEstateAcreage: String(payload.realEstateAcreage || "").trim(),
+    realEstateUnits: String(payload.realEstateUnits || "").trim(),
+    realEstatePropertyTaxes: String(payload.realEstatePropertyTaxes || "").trim(),
+    realEstateInsurance: String(payload.realEstateInsurance || "").trim(),
+    realEstateOtherExpenses: String(payload.realEstateOtherExpenses || "").trim(),
+    realEstateOperatingNotes: String(payload.realEstateOperatingNotes || "").trim(),
     amount: String(payload.amount || "").trim(),
     currency: String(payload.currency || "USD").trim() || "USD",
     stage: String(payload.stage || "").trim(),

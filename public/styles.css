@@ -637,6 +637,11 @@ button:disabled {
   cursor: pointer;
 }
 
+.entity-holdings-card:focus-visible {
+  outline: 3px solid rgba(32, 92, 135, 0.28);
+  outline-offset: 3px;
+}
+
 .entity-performance-header {
   display: flex;
   align-items: start;

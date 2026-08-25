@@ -94,23 +94,39 @@ const addSpaceXStockButton = document.getElementById("addSpaceXStockButton");
 const realEstateDetailsPanel = document.getElementById("realEstateDetailsPanel");
 const realEstatePropertyNameField = document.getElementById("realEstatePropertyNameField");
 const realEstateAddressField = document.getElementById("realEstateAddressField");
+const realEstateCityField = document.getElementById("realEstateCityField");
+const realEstateStateField = document.getElementById("realEstateStateField");
+const realEstateZipField = document.getElementById("realEstateZipField");
 const realEstateEntityOwnerField = document.getElementById("realEstateEntityOwnerField");
 const realEstatePropertyTypeField = document.getElementById("realEstatePropertyTypeField");
 const realEstateOwnershipPercentField = document.getElementById("realEstateOwnershipPercentField");
+const realEstateOwnershipNotesField = document.getElementById("realEstateOwnershipNotesField");
 const realEstateAcquisitionDateField = document.getElementById("realEstateAcquisitionDateField");
 const realEstatePurchasePriceField = document.getElementById("realEstatePurchasePriceField");
 const realEstateCostBasisField = document.getElementById("realEstateCostBasisField");
 const realEstateAppraisedValueField = document.getElementById("realEstateAppraisedValueField");
 const realEstateAppraisalDateField = document.getElementById("realEstateAppraisalDateField");
 const realEstateAppraiserField = document.getElementById("realEstateAppraiserField");
+const realEstateAppraisalDocumentField = document.getElementById("realEstateAppraisalDocumentField");
+const realEstateInternalValueOverrideField = document.getElementById("realEstateInternalValueOverrideField");
+const realEstateInternalValueDateField = document.getElementById("realEstateInternalValueDateField");
 const realEstateDebtField = document.getElementById("realEstateDebtField");
+const realEstateLoanLenderField = document.getElementById("realEstateLoanLenderField");
 const realEstateDebtInterestRateField = document.getElementById("realEstateDebtInterestRateField");
 const realEstateDebtMaturityDateField = document.getElementById("realEstateDebtMaturityDateField");
+const realEstateDebtServiceField = document.getElementById("realEstateDebtServiceField");
+const realEstateLoanNotesField = document.getElementById("realEstateLoanNotesField");
 const realEstateNoiField = document.getElementById("realEstateNoiField");
 const realEstateRevenueField = document.getElementById("realEstateRevenueField");
 const realEstateCapRateField = document.getElementById("realEstateCapRateField");
 const realEstateOccupancyField = document.getElementById("realEstateOccupancyField");
-const realEstateSizeField = document.getElementById("realEstateSizeField");
+const realEstateSquareFootageField = document.getElementById("realEstateSquareFootageField");
+const realEstateAcreageField = document.getElementById("realEstateAcreageField");
+const realEstateUnitsField = document.getElementById("realEstateUnitsField");
+const realEstatePropertyTaxesField = document.getElementById("realEstatePropertyTaxesField");
+const realEstateInsuranceField = document.getElementById("realEstateInsuranceField");
+const realEstateOtherExpensesField = document.getElementById("realEstateOtherExpensesField");
+const realEstateOperatingNotesField = document.getElementById("realEstateOperatingNotesField");
 const realEstateValuePreview = document.getElementById("realEstateValuePreview");
 const bondDetailsPanel = document.getElementById("bondDetailsPanel");
 const bondIssuerField = document.getElementById("bondIssuerField");
@@ -492,9 +508,16 @@ const moneyFieldNames = [
   "realEstatePurchasePrice",
   "realEstateCostBasis",
   "realEstateAppraisedValue",
+  "realEstateInternalValueOverride",
   "realEstateDebt",
+  "realEstateDebtService",
   "realEstateNoi",
-  "realEstateRevenue"
+  "realEstateRevenue",
+  "realEstateSquareFootage",
+  "realEstateAcreage",
+  "realEstatePropertyTaxes",
+  "realEstateInsurance",
+  "realEstateOtherExpenses"
 ];
 const moneyFieldDecimalPlaces = {
   shareCount: 6,
@@ -2421,6 +2444,18 @@ function getRealEstatePropertyType(investment) {
   return String((investment && (investment.realEstatePropertyType || investment.stage)) || "Other").trim() || "Other";
 }
 
+function getRealEstateAddress(investment) {
+  const parts = [
+    investment && investment.realEstateAddress,
+    investment && investment.realEstateCity,
+    investment && investment.realEstateState,
+    investment && investment.realEstateZip
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+  return parts.length ? parts.join(", ") : "";
+}
+
 function getRealEstateOwnershipRate(investment) {
   const entered = toNumber(investment && investment.realEstateOwnershipPercent);
   if (!entered) {
@@ -2437,11 +2472,14 @@ function getRealEstateMetrics(investment) {
   const revenue = toNumber(investment && investment.realEstateRevenue);
   const purchasePrice = toNumber(investment && investment.realEstatePurchasePrice);
   const costBasis = toNumber(investment && investment.realEstateCostBasis);
+  const internalValueOverride = toNumber(investment && investment.realEstateInternalValueOverride);
   const entityValue = appraisedValue * ownershipRate;
   const entityDebt = debt * ownershipRate;
-  const netEquity = Math.max(entityValue - entityDebt, 0);
+  const netEquity = entityValue - entityDebt;
   const capRate = appraisedValue > 0 && noi > 0 ? noi / appraisedValue : null;
   const ltv = appraisedValue > 0 && debt > 0 ? debt / appraisedValue : null;
+  const noiMargin = revenue > 0 && noi > 0 ? noi / revenue : null;
+  const hasInternalValueOverride = String((investment && investment.realEstateInternalValueOverride) || "").trim() !== "";
 
   return {
     appraisedValue,
@@ -2455,8 +2493,11 @@ function getRealEstateMetrics(investment) {
     revenue,
     purchasePrice,
     costBasis,
+    internalValueOverride,
+    hasInternalValueOverride,
     capRate,
-    ltv
+    ltv,
+    noiMargin
   };
 }
 
@@ -2466,9 +2507,15 @@ function applyRealEstateValuationSync(payload) {
   }
 
   const metrics = getRealEstateMetrics(payload);
-  const normalizedNetEquity = metrics.netEquity > 0 ? normalizeMoneyString(String(metrics.netEquity), 6) : "";
+  const hasValuationInputs = metrics.appraisedValue > 0 || metrics.debt > 0;
+  const normalizedNetEquity = hasValuationInputs ? normalizeMoneyString(String(metrics.netEquity), 6) : "";
+  const normalizedInternalOverride = metrics.hasInternalValueOverride
+    ? normalizeMoneyString(String(metrics.internalValueOverride), 6)
+    : "";
   const capRatePercent =
     metrics.capRate !== null ? String(Number((metrics.capRate * 100).toFixed(6))) : "";
+  const noiMarginPercent =
+    metrics.noiMargin !== null ? String(Number((metrics.noiMargin * 100).toFixed(6))) : "";
 
   return {
     ...payload,
@@ -2490,9 +2537,10 @@ function applyRealEstateValuationSync(payload) {
     capitalActivity: [],
     valuationDate: payload.realEstateAppraisalDate || payload.valuationDate || "",
     officialValue: normalizedNetEquity || payload.officialValue || "",
-    internalValue: normalizedNetEquity || payload.internalValue || "",
+    internalValue: normalizedInternalOverride || normalizedNetEquity || payload.internalValue || "",
     ownershipPercent: payload.realEstateOwnershipPercent || payload.ownershipPercent || "",
-    realEstateCapRate: capRatePercent
+    realEstateCapRate: capRatePercent,
+    realEstateNoiMargin: noiMarginPercent
   };
 }
 
@@ -2509,6 +2557,10 @@ function buildRealEstateSummary(rows) {
         summary.weightedCapRateNumerator += metrics.capRate * metrics.appraisedValue;
         summary.weightedCapRateDenominator += metrics.appraisedValue;
       }
+      if (metrics.ltv !== null && metrics.appraisedValue > 0) {
+        summary.weightedLtvNumerator += metrics.ltv * metrics.appraisedValue;
+        summary.weightedLtvDenominator += metrics.appraisedValue;
+      }
       return summary;
     },
     {
@@ -2518,7 +2570,9 @@ function buildRealEstateSummary(rows) {
       debt: 0,
       noi: 0,
       weightedCapRateNumerator: 0,
-      weightedCapRateDenominator: 0
+      weightedCapRateDenominator: 0,
+      weightedLtvNumerator: 0,
+      weightedLtvDenominator: 0
     }
   );
   const latestAppraisalDate = positions
@@ -2531,6 +2585,10 @@ function buildRealEstateSummary(rows) {
     weightedCapRate:
       totals.weightedCapRateDenominator > 0
         ? totals.weightedCapRateNumerator / totals.weightedCapRateDenominator
+        : null,
+    weightedLtv:
+      totals.weightedLtvDenominator > 0
+        ? totals.weightedLtvNumerator / totals.weightedLtvDenominator
         : null,
     latestAppraisalDate
   };
@@ -2818,23 +2876,40 @@ function clearBondFields() {
     "bondAccruedInterest",
     "realEstatePropertyName",
     "realEstateAddress",
+    "realEstateCity",
+    "realEstateState",
+    "realEstateZip",
     "realEstateEntityOwner",
     "realEstatePropertyType",
     "realEstateOwnershipPercent",
+    "realEstateOwnershipNotes",
     "realEstateAcquisitionDate",
     "realEstatePurchasePrice",
     "realEstateCostBasis",
     "realEstateAppraisedValue",
     "realEstateAppraisalDate",
     "realEstateAppraiser",
+    "realEstateAppraisalDocument",
+    "realEstateInternalValueOverride",
+    "realEstateInternalValueDate",
     "realEstateDebt",
+    "realEstateLoanLender",
     "realEstateDebtInterestRate",
     "realEstateDebtMaturityDate",
+    "realEstateDebtService",
+    "realEstateLoanNotes",
     "realEstateNoi",
     "realEstateRevenue",
     "realEstateCapRate",
+    "realEstateNoiMargin",
     "realEstateOccupancy",
-    "realEstateSize"
+    "realEstateSquareFootage",
+    "realEstateAcreage",
+    "realEstateUnits",
+    "realEstatePropertyTaxes",
+    "realEstateInsurance",
+    "realEstateOtherExpenses",
+    "realEstateOperatingNotes"
   ].forEach((fieldName) => {
     if (form && form.elements && form.elements[fieldName]) {
       form.elements[fieldName].value = "";
@@ -2846,23 +2921,40 @@ function clearRealEstateFields() {
   [
     "realEstatePropertyName",
     "realEstateAddress",
+    "realEstateCity",
+    "realEstateState",
+    "realEstateZip",
     "realEstateEntityOwner",
     "realEstatePropertyType",
     "realEstateOwnershipPercent",
+    "realEstateOwnershipNotes",
     "realEstateAcquisitionDate",
     "realEstatePurchasePrice",
     "realEstateCostBasis",
     "realEstateAppraisedValue",
     "realEstateAppraisalDate",
     "realEstateAppraiser",
+    "realEstateAppraisalDocument",
+    "realEstateInternalValueOverride",
+    "realEstateInternalValueDate",
     "realEstateDebt",
+    "realEstateLoanLender",
     "realEstateDebtInterestRate",
     "realEstateDebtMaturityDate",
+    "realEstateDebtService",
+    "realEstateLoanNotes",
     "realEstateNoi",
     "realEstateRevenue",
     "realEstateCapRate",
+    "realEstateNoiMargin",
     "realEstateOccupancy",
-    "realEstateSize"
+    "realEstateSquareFootage",
+    "realEstateAcreage",
+    "realEstateUnits",
+    "realEstatePropertyTaxes",
+    "realEstateInsurance",
+    "realEstateOtherExpenses",
+    "realEstateOperatingNotes"
   ].forEach((fieldName) => {
     if (form && form.elements && form.elements[fieldName]) {
       form.elements[fieldName].value = "";
@@ -2983,6 +3075,9 @@ function syncRealEstateFormFields() {
     realEstateCostBasis: realEstateCostBasisField ? realEstateCostBasisField.value : "",
     realEstateAppraisedValue: realEstateAppraisedValueField ? realEstateAppraisedValueField.value : "",
     realEstateAppraisalDate: realEstateAppraisalDateField ? realEstateAppraisalDateField.value : "",
+    realEstateInternalValueOverride: realEstateInternalValueOverrideField
+      ? realEstateInternalValueOverrideField.value
+      : "",
     realEstateDebt: realEstateDebtField ? realEstateDebtField.value : "",
     realEstateNoi: realEstateNoiField ? realEstateNoiField.value : "",
     realEstateRevenue: realEstateRevenueField ? realEstateRevenueField.value : ""
@@ -2990,6 +3085,12 @@ function syncRealEstateFormFields() {
 
   if (realEstateCapRateField) {
     realEstateCapRateField.value = synced.realEstateCapRate || "";
+  }
+  if (form.elements.realEstateCapRate) {
+    form.elements.realEstateCapRate.value = synced.realEstateCapRate || "";
+  }
+  if (form.elements.realEstateNoiMargin) {
+    form.elements.realEstateNoiMargin.value = synced.realEstateNoiMargin || "";
   }
   if (form.elements.amount) {
     form.elements.amount.value = synced.amount || "";
@@ -3016,11 +3117,18 @@ function updateRealEstateValuePreview() {
     realEstateOwnershipPercent: realEstateOwnershipPercentField ? realEstateOwnershipPercentField.value : "",
     realEstateAppraisedValue: realEstateAppraisedValueField ? realEstateAppraisedValueField.value : "",
     realEstateDebt: realEstateDebtField ? realEstateDebtField.value : "",
-    realEstateNoi: realEstateNoiField ? realEstateNoiField.value : ""
+    realEstateNoi: realEstateNoiField ? realEstateNoiField.value : "",
+    realEstateRevenue: realEstateRevenueField ? realEstateRevenueField.value : "",
+    realEstateInternalValueOverride: realEstateInternalValueOverrideField
+      ? realEstateInternalValueOverrideField.value
+      : ""
   });
+  const internalValueText = metrics.hasInternalValueOverride
+    ? ` • internal override ${formatMoney(metrics.internalValueOverride)}`
+    : "";
   realEstateValuePreview.textContent =
     metrics.appraisedValue > 0
-      ? `Net equity ${formatMoney(metrics.netEquity)} • LTV ${formatPercent(metrics.ltv)} • cap rate ${formatPercent(metrics.capRate)}`
+      ? `Gross ${formatMoney(metrics.appraisedValue)} • entity gross ${formatMoney(metrics.entityValue)} • entity debt ${formatMoney(metrics.entityDebt)} • net equity ${formatMoney(metrics.netEquity)} • LTV ${formatPercent(metrics.ltv)} • cap rate ${formatPercent(metrics.capRate)} • NOI margin ${formatPercent(metrics.noiMargin)}${internalValueText}`
       : "Net equity will calculate from appraised value, ownership, and debt.";
 }
 
@@ -4437,7 +4545,7 @@ function renderDashboard(investments) {
         ${
           publicHoldings.positions.length
             ? `
-              <article class="dashboard-card entity-performance-card entity-holdings-card public-holdings-card" data-dashboard-action="public-stocks" data-entity="${escapeHtml(entity)}">
+              <article class="dashboard-card entity-performance-card entity-holdings-card public-holdings-card" data-holdings-action="public-stocks" data-entity="${escapeHtml(entity)}" role="button" tabindex="0">
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Public Holdings</p>
@@ -4471,7 +4579,7 @@ function renderDashboard(investments) {
         ${
           fixedIncomeHoldings.positions.length
             ? `
-              <article class="dashboard-card entity-performance-card entity-holdings-card fixed-income-holdings-card" data-dashboard-action="fixed-income" data-entity="${escapeHtml(entity)}">
+              <article class="dashboard-card entity-performance-card entity-holdings-card fixed-income-holdings-card" data-holdings-action="fixed-income" data-entity="${escapeHtml(entity)}" role="button" tabindex="0">
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Fixed Income Holdings</p>
@@ -4506,7 +4614,7 @@ function renderDashboard(investments) {
         ${
           realEstateHoldings.positions.length
             ? `
-              <article class="dashboard-card entity-performance-card entity-holdings-card real-estate-holdings-card" data-dashboard-action="real-estate" data-entity="${escapeHtml(entity)}">
+              <article class="dashboard-card entity-performance-card entity-holdings-card real-estate-holdings-card" data-holdings-action="real-estate" data-entity="${escapeHtml(entity)}" role="button" tabindex="0">
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Real Estate Holdings</p>
@@ -4521,6 +4629,7 @@ function renderDashboard(investments) {
                     { label: "Total debt", value: formatMoney(realEstateHoldings.debt) },
                     { label: "Annual NOI", value: formatMoney(realEstateHoldings.noi) },
                     { label: "Weighted average cap rate", value: formatPercent(realEstateHoldings.weightedCapRate) },
+                    { label: "Weighted average LTV", value: formatPercent(realEstateHoldings.weightedLtv) },
                     { label: "Properties", value: String(realEstateHoldings.positions.length) },
                     { label: "Latest appraisal date", value: realEstateHoldings.latestAppraisalDate || "N/A" }
                   ]
@@ -4541,7 +4650,7 @@ function renderDashboard(investments) {
         ${
           cashHoldings.positions.length
             ? `
-              <article class="dashboard-card entity-performance-card entity-holdings-card cash-holdings-card" data-dashboard-action="cash" data-entity="${escapeHtml(entity)}">
+              <article class="dashboard-card entity-performance-card entity-holdings-card cash-holdings-card" data-holdings-action="cash" data-entity="${escapeHtml(entity)}" role="button" tabindex="0">
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Cash Holdings</p>
@@ -7298,7 +7407,7 @@ function getFilteredRealEstateRows(realEstateRows) {
     const matchesSearch =
       !search ||
       getRealEstatePropertyName(investment).toLowerCase().includes(search) ||
-      String(investment.realEstateAddress || "").toLowerCase().includes(search);
+      getRealEstateAddress(investment).toLowerCase().includes(search);
     return matchesEntity && matchesType && matchesSearch;
   });
 }
@@ -7319,10 +7428,11 @@ function renderRealEstate() {
 
   realEstateSummary.innerHTML = [
     { label: "Total appraised value", value: formatMoney(summary.appraisedValue) },
-    { label: "Total net equity", value: formatMoney(summary.netEquity) },
     { label: "Total debt", value: formatMoney(summary.debt) },
-    { label: "Weighted average cap rate", value: formatPercent(summary.weightedCapRate) },
+    { label: "Total net equity", value: formatMoney(summary.netEquity) },
     { label: "Annual NOI", value: formatMoney(summary.noi) },
+    { label: "Weighted average cap rate", value: formatPercent(summary.weightedCapRate) },
+    { label: "Weighted average LTV", value: formatPercent(summary.weightedLtv) },
     { label: "Properties", value: String(summary.positions.length) },
     { label: "Latest appraisal date", value: summary.latestAppraisalDate || "N/A" }
   ]
@@ -7340,6 +7450,12 @@ function renderRealEstate() {
     ? filteredRows
         .map((investment) => {
           const metrics = getRealEstateMetrics(investment);
+          const address = getRealEstateAddress(investment);
+          const sizeParts = [
+            investment.realEstateSquareFootage ? `${investment.realEstateSquareFootage} sf` : "",
+            investment.realEstateAcreage ? `${investment.realEstateAcreage} acres` : "",
+            investment.realEstateUnits ? `${investment.realEstateUnits} units` : ""
+          ].filter(Boolean);
           return `
             <article class="update-card real-estate-card">
               <div class="update-head">
@@ -7349,11 +7465,11 @@ function renderRealEstate() {
                 <span class="status-chip">${escapeHtml(getRealEstatePropertyType(investment))}</span>
               </div>
               <p class="update-meta">
-                ${escapeHtml(investment.realEstateAddress || "Address not set")} • ${escapeHtml(normalizeEntityName(investment.entity) || "Entity not specified")}
+                ${escapeHtml(address || "Address not set")} • ${escapeHtml(normalizeEntityName(investment.entity) || "Entity not specified")}
               </p>
               <div class="stock-metric-grid">
                 <div class="entity-metric-box">
-                  <p class="dashboard-label">Appraised value</p>
+                  <p class="dashboard-label">Gross appraised value</p>
                   <p class="highlight-value">${escapeHtml(formatMoney(metrics.appraisedValue))}</p>
                 </div>
                 <div class="entity-metric-box">
@@ -7363,6 +7479,14 @@ function renderRealEstate() {
                 <div class="entity-metric-box">
                   <p class="dashboard-label">Ownership %</p>
                   <p class="highlight-value">${escapeHtml(formatPercent(metrics.ownershipRate))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Entity share gross</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.entityValue))}</p>
+                </div>
+                <div class="entity-metric-box">
+                  <p class="dashboard-label">Entity share debt</p>
+                  <p class="highlight-value">${escapeHtml(formatMoney(metrics.entityDebt))}</p>
                 </div>
                 <div class="entity-metric-box">
                   <p class="dashboard-label">Net equity</p>
@@ -7385,22 +7509,34 @@ function renderRealEstate() {
                   <p class="highlight-value">${escapeHtml(formatPercent(metrics.capRate))}</p>
                 </div>
                 <div class="entity-metric-box">
+                  <p class="dashboard-label">NOI margin</p>
+                  <p class="highlight-value">${escapeHtml(formatPercent(metrics.noiMargin))}</p>
+                </div>
+                <div class="entity-metric-box">
                   <p class="dashboard-label">Occupancy</p>
                   <p class="highlight-value">${escapeHtml(investment.realEstateOccupancy ? `${investment.realEstateOccupancy}%` : "N/A")}</p>
                 </div>
                 <div class="entity-metric-box">
-                  <p class="dashboard-label">Square footage / acreage</p>
-                  <p class="highlight-value">${escapeHtml(investment.realEstateSize || "Not set")}</p>
+                  <p class="dashboard-label">Size</p>
+                  <p class="highlight-value">${escapeHtml(sizeParts.join(" / ") || "Not set")}</p>
                 </div>
               </div>
-              <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
               ${
-                canEditWorkspace()
-                  ? `<div class="card-actions">
-                      <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${escapeHtml(investment.id)}">Edit</button>
-                    </div>`
+                metrics.hasInternalValueOverride
+                  ? `<p class="update-meta">Internal value override: ${escapeHtml(formatMoney(metrics.internalValueOverride))}${investment.realEstateInternalValueDate ? ` as of ${escapeHtml(investment.realEstateInternalValueDate)}` : ""}</p>`
                   : ""
               }
+              <p class="update-notes">${escapeHtml(investment.notes || "No notes provided.")}</p>
+              <div class="card-actions">
+                <button class="secondary-button card-action-button" type="button" data-action="view" data-company="${escapeHtml(investment.company)}" data-entity="${escapeHtml(investment.entity || "")}">View Property</button>
+                ${
+                  canEditWorkspace()
+                    ? `
+                      <button class="secondary-button card-action-button" type="button" data-action="edit" data-id="${escapeHtml(investment.id)}">Edit</button>
+                    `
+                    : ""
+                }
+              </div>
             </article>
           `;
         })
@@ -8464,23 +8600,39 @@ addListener(form, "submit", async (event) => {
     bondAccruedInterest: formData.get("bondAccruedInterest"),
     realEstatePropertyName: formData.get("realEstatePropertyName"),
     realEstateAddress: formData.get("realEstateAddress"),
+    realEstateCity: formData.get("realEstateCity"),
+    realEstateState: formData.get("realEstateState"),
+    realEstateZip: formData.get("realEstateZip"),
     realEstateEntityOwner: formData.get("realEstateEntityOwner"),
     realEstatePropertyType: formData.get("realEstatePropertyType"),
     realEstateOwnershipPercent: formData.get("realEstateOwnershipPercent"),
+    realEstateOwnershipNotes: formData.get("realEstateOwnershipNotes"),
     realEstateAcquisitionDate: formData.get("realEstateAcquisitionDate"),
     realEstatePurchasePrice: formData.get("realEstatePurchasePrice"),
     realEstateCostBasis: formData.get("realEstateCostBasis"),
     realEstateAppraisedValue: formData.get("realEstateAppraisedValue"),
     realEstateAppraisalDate: formData.get("realEstateAppraisalDate"),
     realEstateAppraiser: formData.get("realEstateAppraiser"),
+    realEstateAppraisalDocument: formData.get("realEstateAppraisalDocument"),
+    realEstateInternalValueOverride: formData.get("realEstateInternalValueOverride"),
+    realEstateInternalValueDate: formData.get("realEstateInternalValueDate"),
     realEstateDebt: formData.get("realEstateDebt"),
+    realEstateLoanLender: formData.get("realEstateLoanLender"),
     realEstateDebtInterestRate: formData.get("realEstateDebtInterestRate"),
     realEstateDebtMaturityDate: formData.get("realEstateDebtMaturityDate"),
+    realEstateDebtService: formData.get("realEstateDebtService"),
+    realEstateLoanNotes: formData.get("realEstateLoanNotes"),
     realEstateNoi: formData.get("realEstateNoi"),
     realEstateRevenue: formData.get("realEstateRevenue"),
     realEstateCapRate: formData.get("realEstateCapRate"),
     realEstateOccupancy: formData.get("realEstateOccupancy"),
-    realEstateSize: formData.get("realEstateSize"),
+    realEstateSquareFootage: formData.get("realEstateSquareFootage"),
+    realEstateAcreage: formData.get("realEstateAcreage"),
+    realEstateUnits: formData.get("realEstateUnits"),
+    realEstatePropertyTaxes: formData.get("realEstatePropertyTaxes"),
+    realEstateInsurance: formData.get("realEstateInsurance"),
+    realEstateOtherExpenses: formData.get("realEstateOtherExpenses"),
+    realEstateOperatingNotes: formData.get("realEstateOperatingNotes"),
     amount: formData.get("amount"),
     currency: formData.get("currency"),
     stage: formData.get("stage"),
@@ -8954,22 +9106,38 @@ if (cashBalanceField) {
 [
   realEstatePropertyNameField,
   realEstateAddressField,
+  realEstateCityField,
+  realEstateStateField,
+  realEstateZipField,
   realEstateEntityOwnerField,
   realEstatePropertyTypeField,
   realEstateOwnershipPercentField,
+  realEstateOwnershipNotesField,
   realEstateAcquisitionDateField,
   realEstatePurchasePriceField,
   realEstateCostBasisField,
   realEstateAppraisedValueField,
   realEstateAppraisalDateField,
   realEstateAppraiserField,
+  realEstateAppraisalDocumentField,
+  realEstateInternalValueOverrideField,
+  realEstateInternalValueDateField,
   realEstateDebtField,
+  realEstateLoanLenderField,
   realEstateDebtInterestRateField,
   realEstateDebtMaturityDateField,
+  realEstateDebtServiceField,
+  realEstateLoanNotesField,
   realEstateNoiField,
   realEstateRevenueField,
   realEstateOccupancyField,
-  realEstateSizeField
+  realEstateSquareFootageField,
+  realEstateAcreageField,
+  realEstateUnitsField,
+  realEstatePropertyTaxesField,
+  realEstateInsuranceField,
+  realEstateOtherExpensesField,
+  realEstateOperatingNotesField
 ].forEach((field) => {
   if (field) {
     field.addEventListener("input", () => {
@@ -8987,9 +9155,16 @@ if (cashBalanceField) {
   realEstatePurchasePriceField,
   realEstateCostBasisField,
   realEstateAppraisedValueField,
+  realEstateInternalValueOverrideField,
   realEstateDebtField,
+  realEstateDebtServiceField,
   realEstateNoiField,
-  realEstateRevenueField
+  realEstateRevenueField,
+  realEstateSquareFootageField,
+  realEstateAcreageField,
+  realEstatePropertyTaxesField,
+  realEstateInsuranceField,
+  realEstateOtherExpensesField
 ].forEach((field) => {
   if (field) {
     field.addEventListener("blur", () => {
@@ -9354,14 +9529,16 @@ addListener(entityPerformanceCards, "click", (event) => {
     return;
   }
 
-  const card = event.target.closest("[data-dashboard-action], [data-entity]");
-  if (!card) {
+  const holdingsCard = event.target.closest("[data-holdings-action]");
+  if (holdingsCard) {
+    event.preventDefault();
+    event.stopPropagation();
+    openAssetViewForEntity(holdingsCard.dataset.holdingsAction || "", holdingsCard.dataset.entity || "");
     return;
   }
 
-  const action = card.dataset.dashboardAction || "";
-  if (["public-stocks", "fixed-income", "cash", "real-estate"].includes(action)) {
-    openAssetViewForEntity(action, card.dataset.entity || "");
+  const card = event.target.closest("[data-entity]");
+  if (!card) {
     return;
   }
 
@@ -9369,6 +9546,21 @@ addListener(entityPerformanceCards, "click", (event) => {
   renderEntityDetail();
   showWorkspaceView("entity");
   window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+addListener(entityPerformanceCards, "keydown", (event) => {
+  if (isDashboardViewer() || !["Enter", " "].includes(event.key)) {
+    return;
+  }
+
+  const holdingsCard = event.target.closest("[data-holdings-action]");
+  if (!holdingsCard) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  openAssetViewForEntity(holdingsCard.dataset.holdingsAction || "", holdingsCard.dataset.entity || "");
 });
 
 addListener(dashboardCards, "click", (event) => {

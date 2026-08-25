@@ -512,8 +512,24 @@
                   </label>
 
                   <label>
-                    Property address
-                    <input id="realEstateAddressField" name="realEstateAddress" type="text" placeholder="123 Main Street, Nashville, TN" />
+                    Street address
+                    <input id="realEstateAddressField" name="realEstateAddress" type="text" placeholder="123 Main Street" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    City
+                    <input id="realEstateCityField" name="realEstateCity" type="text" placeholder="Nashville" />
+                  </label>
+
+                  <label>
+                    State
+                    <input id="realEstateStateField" name="realEstateState" type="text" placeholder="TN" />
+                  </label>
+
+                  <label>
+                    ZIP
+                    <input id="realEstateZipField" name="realEstateZip" type="text" placeholder="37203" />
                   </label>
                 </div>
                 <div class="three-up">
@@ -534,6 +550,7 @@
                       <option value="Hospitality">Hospitality</option>
                       <option value="Residential">Residential</option>
                       <option value="Mixed Use">Mixed Use</option>
+                      <option value="Parking">Parking</option>
                       <option value="Other">Other</option>
                     </select>
                   </label>
@@ -543,6 +560,10 @@
                     <input id="realEstateOwnershipPercentField" name="realEstateOwnershipPercent" type="number" min="0" max="100" step="0.01" placeholder="100" />
                   </label>
                 </div>
+                <label>
+                  Ownership structure / notes
+                  <textarea id="realEstateOwnershipNotesField" name="realEstateOwnershipNotes" rows="2" placeholder="LLC ownership, preferred equity, partners, or other notes"></textarea>
+                </label>
                 <div class="three-up">
                   <label>
                     Acquisition date
@@ -550,12 +571,12 @@
                   </label>
 
                   <label>
-                    Purchase price
+                    Original purchase price
                     <input id="realEstatePurchasePriceField" name="realEstatePurchasePrice" type="text" inputmode="decimal" placeholder="1,500,000" />
                   </label>
 
                   <label>
-                    Cost basis
+                    Current cost basis
                     <input id="realEstateCostBasisField" name="realEstateCostBasis" type="text" inputmode="decimal" placeholder="1,650,000" />
                   </label>
                 </div>
@@ -577,18 +598,51 @@
                 </div>
                 <div class="three-up">
                   <label>
+                    Appraisal document reference
+                    <input id="realEstateAppraisalDocumentField" name="realEstateAppraisalDocument" type="text" placeholder="Uploaded file name or document note" />
+                  </label>
+
+                  <label>
+                    Internal value override
+                    <input id="realEstateInternalValueOverrideField" name="realEstateInternalValueOverride" type="text" inputmode="decimal" placeholder="Optional" />
+                  </label>
+
+                  <label>
+                    Internal value date
+                    <input id="realEstateInternalValueDateField" name="realEstateInternalValueDate" type="date" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
                     Debt outstanding
                     <input id="realEstateDebtField" name="realEstateDebt" type="text" inputmode="decimal" placeholder="900,000" />
+                  </label>
+
+                  <label>
+                    Loan lender
+                    <input id="realEstateLoanLenderField" name="realEstateLoanLender" type="text" placeholder="Bank or lender" />
                   </label>
 
                   <label>
                     Debt interest rate %
                     <input id="realEstateDebtInterestRateField" name="realEstateDebtInterestRate" type="number" min="0" step="0.001" placeholder="5.75" />
                   </label>
+                </div>
+                <div class="three-up">
 
                   <label>
                     Debt maturity date
                     <input id="realEstateDebtMaturityDateField" name="realEstateDebtMaturityDate" type="date" />
+                  </label>
+
+                  <label>
+                    Monthly or annual debt service
+                    <input id="realEstateDebtServiceField" name="realEstateDebtService" type="text" inputmode="decimal" placeholder="120,000" />
+                  </label>
+
+                  <label>
+                    Loan notes
+                    <input id="realEstateLoanNotesField" name="realEstateLoanNotes" type="text" placeholder="Rate reset, amortization, guaranty, or covenant notes" />
                   </label>
                 </div>
                 <div class="three-up">
@@ -612,18 +666,51 @@
                     Occupancy %
                     <input id="realEstateOccupancyField" name="realEstateOccupancy" type="number" min="0" max="100" step="0.01" placeholder="95" />
                   </label>
+                </div>
+                <div class="three-up">
 
                   <label>
-                    Square footage / acreage
-                    <input id="realEstateSizeField" name="realEstateSize" type="text" placeholder="24,000 sf or 12 acres" />
+                    Square footage
+                    <input id="realEstateSquareFootageField" name="realEstateSquareFootage" type="text" inputmode="decimal" placeholder="24,000" />
                   </label>
 
+                  <label>
+                    Acreage
+                    <input id="realEstateAcreageField" name="realEstateAcreage" type="text" inputmode="decimal" placeholder="12" />
+                  </label>
+
+                  <label>
+                    Number of units
+                    <input id="realEstateUnitsField" name="realEstateUnits" type="number" min="0" step="1" placeholder="48" />
+                  </label>
+                </div>
+                <div class="three-up">
+                  <label>
+                    Annual property taxes
+                    <input id="realEstatePropertyTaxesField" name="realEstatePropertyTaxes" type="text" inputmode="decimal" placeholder="45,000" />
+                  </label>
+
+                  <label>
+                    Annual insurance
+                    <input id="realEstateInsuranceField" name="realEstateInsurance" type="text" inputmode="decimal" placeholder="18,000" />
+                  </label>
+
+                  <label>
+                    Other major annual expenses
+                    <input id="realEstateOtherExpensesField" name="realEstateOtherExpenses" type="text" inputmode="decimal" placeholder="75,000" />
+                  </label>
+                </div>
+                <label>
+                  Operating notes
+                  <textarea id="realEstateOperatingNotesField" name="realEstateOperatingNotes" rows="2" placeholder="Leasing, rent roll, capex, tenant, or operating context"></textarea>
+                </label>
+                <div class="two-up">
                   <div id="realEstateValuePreview" class="stock-value-preview">
                     Net equity will calculate from appraised value, ownership, and debt.
                   </div>
                 </div>
                 <div class="section-copy subsection-helper">
-                  Real Estate values sync to official and internal value using net equity. Appraisal changes do not create IRR cash flows.
+                  Real Estate official value follows net equity. Internal value follows net equity unless an internal override is entered. Appraisal changes do not create IRR cash flows.
                 </div>
               </div>
 
