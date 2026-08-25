@@ -65,7 +65,6 @@ const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
-  "Lee Beaman Real Estate",
   "Lee Beaman IRA",
   "Katherine Trust",
   "Natalie Trust"
@@ -73,7 +72,6 @@ const INVESTMENT_ENTITIES = [
 const ENTITY_ALIASES = {
   "Beaman Ventures": "Beaman Ventures",
   "Lee Beaman": "Lee Beaman",
-  "Lee Beaman Real Estate": "Lee Beaman Real Estate",
   "Lee Beaman IRA": "Lee Beaman IRA",
   "Kat Trust": "Katherine Trust",
   "Nat Trust": "Natalie Trust",

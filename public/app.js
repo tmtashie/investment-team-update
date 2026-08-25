@@ -567,7 +567,6 @@ const STATUS_ALIASES = {
 const ENTITY_ALIASES = {
   "Beaman Ventures": "Beaman Ventures",
   "Lee Beaman": "Lee Beaman",
-  "Lee Beaman Real Estate": "Lee Beaman Real Estate",
   "Lee Beaman IRA": "Lee Beaman IRA",
   "Kat Trust": "Katherine Trust",
   "Nat Trust": "Natalie Trust",
@@ -4380,7 +4379,7 @@ function buildDataQualityAlerts() {
         row,
         "High",
         "Missing entity",
-        "Assign this investment to Beaman Ventures, Lee Beaman, Lee Beaman Real Estate, Lee Beaman IRA, Katherine Trust, or Natalie Trust."
+        "Assign this investment to Beaman Ventures, Lee Beaman, Lee Beaman IRA, Katherine Trust, or Natalie Trust."
       );
     }
 
