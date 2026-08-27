@@ -406,6 +406,16 @@ function normalizeDocuments(value) {
     .filter((document) => document.name && document.url);
 }
 
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function normalizeCompanyDocument(entry) {
   return {
     id: String((entry && entry.id) || makeId()).trim(),
@@ -900,6 +910,7 @@ function normalizeInvestment(entry) {
     id: investmentId,
     company: String(entry.company || "").trim(),
     companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
+    investmentAliases: normalizeStringList(entry.investmentAliases || entry.aliases),
     entity,
     assetType,
     ticker: isCashAsset || isBondAsset || isRealEstateAsset ? "" : ticker,

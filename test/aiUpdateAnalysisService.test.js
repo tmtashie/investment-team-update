@@ -34,6 +34,24 @@ const investments = [
 
 const entities = ["Beaman Ventures", "Lee Beaman"];
 
+const finsyncInvestments = [
+  {
+    id: "finsync-id",
+    company: "FINSYNC",
+    entity: "Beaman Ventures",
+    assetType: "Private Investment",
+    status: "Active",
+    investmentAliases: ["FINSYNC, Inc."]
+  },
+  {
+    id: "vanguard-id",
+    company: "VANGUARD SHORT-TERM CORPORATE BOND ETF",
+    entity: "Lee Beaman",
+    assetType: "Public Stock",
+    status: "Active"
+  }
+];
+
 function createService(rawResponse) {
   let calls = 0;
   const service = createAiUpdateAnalysisService({
@@ -46,6 +64,152 @@ function createService(rawResponse) {
   });
   return { service, getCalls: () => calls };
 }
+
+test("source explicitly says FINSYNC and portfolio contains FINSYNC", async () => {
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "finsync-id",
+      investmentName: "FINSYNC",
+      confidence: 80,
+      reason: "Model saw FINSYNC."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: ["July revenue increased."],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      subject: "FINSYNC July customer and revenue update",
+      sender: "updates@finsync.com",
+      sourceText: "FINSYNC July revenue was $3.0 million."
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.equal(result.analysis.investmentMatch.confidence, 98);
+  assert.match(result.analysis.investmentMatch.reason, /Exact source body match for 'FINSYNC'/);
+});
+
+test("explicit FINSYNC source must not match Vanguard", async () => {
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "vanguard-id",
+      investmentName: "VANGUARD SHORT-TERM CORPORATE BOND ETF",
+      confidence: 85,
+      reason: "Model guessed from financial context."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: ["FINSYNC reported July operating metrics."],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      subject: "FINSYNC July customer and revenue update",
+      sender: "updates@finsync.com",
+      sourceText: "FINSYNC total customers reached 62,824 in July."
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.notEqual(result.analysis.investmentMatch.investmentId, "vanguard-id");
+  assert.match(result.analysis.warnings.join(" "), /conflicted with explicit source evidence/);
+});
+
+test("exact name match produces high confidence", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 72 },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "FINSYNC, Inc. issued its monthly investor update." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.ok(result.analysis.investmentMatch.confidence >= 95);
+});
+
+test("semantic-only match produces lower confidence and warning", async () => {
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "vanguard-id",
+      investmentName: "VANGUARD SHORT-TERM CORPORATE BOND ETF",
+      confidence: 91,
+      reason: "Financial update sounded similar."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      subject: "July customer and revenue update",
+      sourceText: "Total customers reached 62,824 in July and revenue was $3.0 million."
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "vanguard-id");
+  assert.equal(result.analysis.investmentMatch.confidence, 84);
+  assert.match(result.analysis.warnings.join(" "), /lacks explicit/);
+});
+
+test("competing candidates lower confidence", async () => {
+  const investmentsWithCompetition = finsyncInvestments.concat({
+    id: "finsync-holdings-id",
+    company: "FINSYNC Holdings",
+    entity: "Lee Beaman",
+    assetType: "Private Investment",
+    status: "Active"
+  });
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "finsync-holdings-id",
+      investmentName: "FINSYNC Holdings",
+      confidence: 96,
+      reason: "Exact name appeared."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "FINSYNC Holdings sent an investor update." },
+    investments: investmentsWithCompetition,
+    entities
+  });
+
+  assert.ok(result.analysis.investmentMatch.confidence <= 88);
+  assert.match(result.analysis.warnings.join(" "), /Multiple plausible/);
+});
 
 test("successful manual text analysis returns normalized result", async () => {
   const { service, getCalls } = createService({
