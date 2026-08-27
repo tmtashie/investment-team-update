@@ -1,6 +1,7 @@
 const MAX_SOURCE_TEXT_LENGTH = 60000;
 const MAX_ARRAY_ITEMS = 40;
 const SEMANTIC_ONLY_CONFIDENCE_CAP = 84;
+const NUMERIC_TOLERANCE = 0.015;
 
 function clampConfidence(value) {
   const parsed = Number(value);
@@ -36,6 +37,164 @@ function normalizeMatchText(value) {
 
 function compactMatchText(value) {
   return normalizeMatchText(value).replace(/\s+/g, "");
+}
+
+function splitSourceSpans(sourceText) {
+  return asString(sourceText, MAX_SOURCE_TEXT_LENGTH)
+    .replace(/\r\n/g, "\n")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((span) => span.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 300);
+}
+
+function parseNumericValue(value) {
+  const text = asString(value, 200).toLowerCase();
+  if (!text) {
+    return null;
+  }
+  const match = text.match(/-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.[0-9]+)\s*(m|mm|b|bn|k|thousand|million|billion)?/i);
+  if (!match) {
+    return null;
+  }
+  const base = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(base)) {
+    return null;
+  }
+  const suffix = String(match[2] || "").toLowerCase();
+  const multiplier =
+    suffix === "k" || suffix === "thousand"
+      ? 1000
+      : suffix === "m" || suffix === "mm" || suffix === "million"
+        ? 1000000
+        : suffix === "b" || suffix === "bn" || suffix === "billion"
+          ? 1000000000
+          : 1;
+  return base * multiplier;
+}
+
+function extractNumericValues(text) {
+  const matches = asString(text, 2000).matchAll(
+    /-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.[0-9]+)\s*(m|mm|b|bn|k|thousand|million|billion)?/gi
+  );
+  return Array.from(matches)
+    .map((match) => parseNumericValue(match[0]))
+    .filter((value) => value !== null);
+}
+
+function numericValuesEquivalent(left, right) {
+  const leftValue = parseNumericValue(left);
+  const rightValue = parseNumericValue(right);
+  if (leftValue === null || rightValue === null) {
+    return false;
+  }
+  if (leftValue === rightValue) {
+    return true;
+  }
+  const scale = Math.max(Math.abs(leftValue), Math.abs(rightValue), 1);
+  return Math.abs(leftValue - rightValue) / scale <= NUMERIC_TOLERANCE;
+}
+
+function getFieldContextTerms(field) {
+  const normalized = compactMatchText(field);
+  const terms = {
+    revenue: ["revenue", "sales"],
+    customer: ["customer", "customers", "subscriber", "subscribers"],
+    customercount: ["customer", "customers", "subscriber", "subscribers"],
+    customers: ["customer", "customers", "subscriber", "subscribers"],
+    subscriber: ["subscriber", "subscribers", "customer", "customers"],
+    subscribers: ["subscriber", "subscribers", "customer", "customers"],
+    cash: ["cash", "liquidity"],
+    cashbalance: ["cash", "liquidity"],
+    runway: ["runway", "months"],
+    ebitda: ["ebitda"],
+    arr: ["arr", "annual recurring revenue"],
+    mrr: ["mrr", "monthly recurring revenue"],
+    valuation: ["valuation", "value", "mark"],
+    nav: ["nav", "net asset value"],
+    currentvalue: ["current value", "value", "nav"],
+    capitalcall: ["capital call", "call"],
+    capitalcallamount: ["capital call", "call"],
+    distribution: ["distribution", "distributed", "proceeds"],
+    distributionamount: ["distribution", "distributed", "proceeds"],
+    ownership: ["ownership", "owned"],
+    ownershippercent: ["ownership", "owned"],
+    ownershippercentage: ["ownership", "owned"]
+  };
+  if (terms[normalized]) {
+    return terms[normalized];
+  }
+  const words = normalizeMatchText(field).split(" ").filter((word) => word.length >= 3);
+  return words.length ? words : [normalizeMatchText(field)].filter(Boolean);
+}
+
+function spanHasContext(span, field) {
+  const normalizedSpan = normalizeMatchText(span);
+  const terms = getFieldContextTerms(field);
+  return terms.some((term) => normalizedSpan.includes(normalizeMatchText(term)));
+}
+
+function spanHasValue(span, value) {
+  if (value === null || value === undefined || value === "") {
+    return false;
+  }
+  if (hasExplicitPhrase(span, String(value))) {
+    return true;
+  }
+  const targetValue = parseNumericValue(value);
+  if (targetValue === null) {
+    return false;
+  }
+  return extractNumericValues(span).some((spanValue) => {
+    const scale = Math.max(Math.abs(targetValue), Math.abs(spanValue), 1);
+    return Math.abs(targetValue - spanValue) / scale <= NUMERIC_TOLERANCE;
+  });
+}
+
+function findSupportingSourceSnippet({ sourceText, field, value, alternateValue, period, date, hint }) {
+  const spans = splitSourceSpans(sourceText);
+  const targetNumeric = parseNumericValue(value);
+  if (!spans.length) {
+    return { evidence: "", evidenceStatus: "unresolved" };
+  }
+
+  const exactHint = hint && spans.find((span) => hasExplicitPhrase(span, hint));
+  if (exactHint) {
+    return {
+      evidence: exactHint,
+      evidenceStatus: spanHasContext(exactHint, field) || spanHasValue(exactHint, value) ? "verified" : "probable"
+    };
+  }
+
+  const scored = spans
+    .map((span) => {
+      const hasContext = spanHasContext(span, field);
+      const hasProposedValue = spanHasValue(span, value);
+      const hasAlternateValue = alternateValue !== undefined && alternateValue !== "" && spanHasValue(span, alternateValue);
+      const hasPeriod = period ? hasExplicitPhrase(span, period) : false;
+      const hasDate = date ? hasExplicitPhrase(span, date) : false;
+      let score = 0;
+      if (hasContext) score += 4;
+      if (hasProposedValue) score += 5;
+      if (hasAlternateValue) score += 2;
+      if (hasPeriod) score += 1;
+      if (hasDate) score += 1;
+      return { span, score, hasContext, hasProposedValue };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score || left.span.length - right.span.length);
+
+  const best = scored[0];
+  if (!best) {
+    return { evidence: "", evidenceStatus: "unresolved" };
+  }
+  if (best.hasContext && best.hasProposedValue) {
+    return { evidence: best.span, evidenceStatus: "verified" };
+  }
+  if (best.hasContext && best.score >= 4 && targetNumeric === null) {
+    return { evidence: best.span, evidenceStatus: "probable" };
+  }
+  return { evidence: "", evidenceStatus: "unresolved" };
 }
 
 function getRootDomain(sender) {
@@ -198,6 +357,7 @@ function normalizeFact(fact) {
     date: asString(fact && fact.date, 80),
     factType: asString(fact && (fact.factType || fact.fact_type), 120),
     sourceEvidence,
+    evidenceStatus: sourceEvidence ? "unverified" : "unresolved",
     evidenceUnavailable: !sourceEvidence,
     confidence: clampConfidence(fact && fact.confidence)
   };
@@ -225,6 +385,7 @@ function normalizeProposedChange(change) {
     period: asString(change && change.period, 120),
     date: asString(change && change.date, 80),
     sourceEvidence,
+    evidenceStatus: sourceEvidence ? "unverified" : "unresolved",
     evidenceUnavailable: !sourceEvidence,
     confidence: clampConfidence(change && change.confidence),
     riskLevel: normalizeRiskLevel(change && (change.riskLevel || change.risk_level)),
@@ -275,19 +436,45 @@ function addCurrentValuesFromInvestment(changes, investment) {
   });
 }
 
-function enforceSourceEvidence(items, sourceText, unresolved, label) {
+function evidenceWarningKey(item) {
+  return compactMatchText(item.field || item.actionType || "unlabeled");
+}
+
+function addEvidenceWarning(unresolved, seenWarnings, item) {
+  const key = evidenceWarningKey(item);
+  if (seenWarnings.has(key)) {
+    return;
+  }
+  seenWarnings.add(key);
+  unresolved.push(`Could not verify source evidence for ${item.field || item.actionType || "unlabeled"}.`);
+}
+
+function enforceSourceEvidence(items, sourceText, unresolved, seenWarnings, label) {
   return items.map((item) => {
-    if (!item.sourceEvidence) {
-      unresolved.push(`${label} '${item.field || item.actionType || "unlabeled"}' has no source evidence.`);
-      return { ...item, evidenceUnavailable: true };
+    const located = findSupportingSourceSnippet({
+      sourceText,
+      field: item.field || item.actionType,
+      value: item.proposedValue !== undefined ? item.proposedValue : item.value,
+      alternateValue: item.currentValue,
+      period: item.period,
+      date: item.date,
+      hint: item.sourceEvidence
+    });
+    if (located.evidenceStatus === "unresolved") {
+      addEvidenceWarning(unresolved, seenWarnings, item);
+      return {
+        ...item,
+        sourceEvidence: "",
+        evidenceStatus: "unresolved",
+        evidenceUnavailable: true
+      };
     }
-    if (!hasExplicitPhrase(sourceText, item.sourceEvidence)) {
-      unresolved.push(
-        `${label} '${item.field || item.actionType || "unlabeled"}' source evidence was not found verbatim in the source text.`
-      );
-      return { ...item, sourceEvidence: "", evidenceUnavailable: true };
-    }
-    return item;
+    return {
+      ...item,
+      sourceEvidence: located.evidence,
+      evidenceStatus: located.evidenceStatus,
+      evidenceUnavailable: false
+    };
   });
 }
 
@@ -329,6 +516,124 @@ function mergeCandidates(deterministicCandidates, modelCandidates) {
     }
   });
   return Array.from(merged.values()).slice(0, MAX_ARRAY_ITEMS);
+}
+
+function formatSummaryValue(value) {
+  const text = asString(value, 120);
+  if (!text) {
+    return "";
+  }
+  const numeric = parseNumericValue(text);
+  if (numeric === null) {
+    return text;
+  }
+  const hasCurrency = /\$|usd|dollar/i.test(text);
+  const decimalMatch = text.match(/\d+\.(\d+)/);
+  const decimalPlaces = decimalMatch ? Math.min(2, Math.max(1, decimalMatch[1].length)) : 0;
+  const abs = Math.abs(numeric);
+  const formatted =
+    abs >= 1000000000
+      ? `${decimalPlaces ? (numeric / 1000000000).toFixed(decimalPlaces) : Number((numeric / 1000000000).toFixed(2))}B`
+      : abs >= 1000000
+        ? `${decimalPlaces ? (numeric / 1000000).toFixed(decimalPlaces) : Number((numeric / 1000000).toFixed(2))}M`
+        : abs >= 1000
+          ? numeric.toLocaleString("en-US", { maximumFractionDigits: 0 })
+          : numeric.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return hasCurrency ? `$${formatted}` : formatted;
+}
+
+function getSummaryFieldLabel(field) {
+  const normalized = compactMatchText(field);
+  const labels = {
+    revenue: "Revenue",
+    ebitda: "EBITDA",
+    cash: "Cash",
+    cashbalance: "Cash",
+    runway: "Estimated runway",
+    customercount: "Customer count",
+    customers: "Customer count",
+    subscribers: "Subscriber count",
+    valuation: "Reported valuation",
+    nav: "NAV",
+    currentvalue: "Current value",
+    capitalcallamount: "Capital call",
+    distributionamount: "Distribution"
+  };
+  return labels[normalized] || asString(field, 80).replace(/([a-z])([A-Z])/g, "$1 $2") || "Metric";
+}
+
+function valuesAreComparable(currentValue, proposedValue) {
+  const currentNumeric = parseNumericValue(currentValue);
+  const proposedNumeric = parseNumericValue(proposedValue);
+  if (currentNumeric !== null && proposedNumeric !== null) {
+    return true;
+  }
+  return Boolean(asString(currentValue, 120) && asString(proposedValue, 120) && currentNumeric === null && proposedNumeric === null);
+}
+
+function getDirectionWord(currentValue, proposedValue) {
+  const currentNumeric = parseNumericValue(currentValue);
+  const proposedNumeric = parseNumericValue(proposedValue);
+  if (currentNumeric === null || proposedNumeric === null) {
+    return "changed";
+  }
+  if (proposedNumeric > currentNumeric) {
+    return "increased";
+  }
+  if (proposedNumeric < currentNumeric) {
+    return "decreased";
+  }
+  return "remained";
+}
+
+function buildDeterministicSummaryLine(change) {
+  const currentValue = change && change.currentValue;
+  const proposedValue = change && change.proposedValue;
+  if (!valuesAreComparable(currentValue, proposedValue)) {
+    return "";
+  }
+  const label = getSummaryFieldLabel(change.field || change.actionType);
+  const periodPrefix = change.period ? `${change.period} ` : "";
+  const direction = getDirectionWord(currentValue, proposedValue);
+  if (direction === "changed") {
+    return `${periodPrefix}${label} changed from ${formatSummaryValue(currentValue)} to ${formatSummaryValue(proposedValue)}.`;
+  }
+  return `${periodPrefix}${label} ${direction} from ${formatSummaryValue(currentValue)} to ${formatSummaryValue(proposedValue)}.`;
+}
+
+function getSummaryPriority(line) {
+  const normalized = normalizeMatchText(line);
+  if (/(capital call|distribution)/.test(normalized)) return 1;
+  if (/(valuation|financing|nav|current value)/.test(normalized)) return 2;
+  if (/(revenue|ebitda|cash|runway)/.test(normalized)) return 3;
+  if (/(customer|unit|aum|occupancy)/.test(normalized)) return 4;
+  if (/(win|partnership|launch|customer)/.test(normalized)) return 5;
+  if (/(risk|delay|litigation|regulatory|manufacturing)/.test(normalized)) return 6;
+  if (/(date|deadline|meeting|maturity)/.test(normalized)) return 7;
+  if (/(next step|action|required|follow up)/.test(normalized)) return 8;
+  return 9;
+}
+
+function enrichWhatChangedSummary(modelSummary, proposedChanges) {
+  const deterministicLines = proposedChanges
+    .map(buildDeterministicSummaryLine)
+    .filter(Boolean);
+  const lines = deterministicLines.concat(
+    asArray(modelSummary).map((item) => asString(item, 500)).filter(Boolean)
+  );
+  const deduped = [];
+  const seen = new Set();
+  lines.forEach((line) => {
+    const key = compactMatchText(line);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    deduped.push(line);
+  });
+  return deduped
+    .sort((left, right) => getSummaryPriority(left) - getSummaryPriority(right))
+    .slice(0, 8);
 }
 
 function normalizeAnalysisResult({
@@ -480,17 +785,25 @@ function normalizeAnalysisResult({
     asArray(raw.extractedFacts || raw.extracted_facts).map(normalizeFact),
     sourceText,
     unresolved,
+    new Set(),
     "Extracted fact"
+  );
+  const seenEvidenceWarnings = new Set(
+    extractedFacts
+      .filter((fact) => fact.evidenceStatus === "unresolved")
+      .map(evidenceWarningKey)
   );
   const proposedChanges = addCurrentValuesFromInvestment(
     enforceSourceEvidence(
       asArray(raw.proposedChanges || raw.proposed_changes).map(normalizeProposedChange),
       sourceText,
       unresolved,
+      seenEvidenceWarnings,
       "Proposed change"
     ),
     matchedInvestment
   );
+  const whatChanged = enrichWhatChangedSummary(raw.whatChanged || raw.what_changed, proposedChanges);
 
   return {
     investmentMatch: {
@@ -520,7 +833,7 @@ function normalizeAnalysisResult({
       normalizeCandidates(raw.candidates || raw.investmentCandidates, investments)
     ),
     extractedFacts,
-    whatChanged: asArray(raw.whatChanged || raw.what_changed).map((item) => asString(item, 500)).filter(Boolean),
+    whatChanged,
     proposedChanges,
     warnings: Array.from(new Set(warnings.filter(Boolean))),
     unresolved: Array.from(new Set(unresolved.filter(Boolean)))

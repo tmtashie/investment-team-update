@@ -6757,6 +6757,26 @@ function summarizeJsonValue(value) {
   return JSON.stringify(value, null, 2);
 }
 
+function formatEvidenceStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "verified") {
+    return "Verified";
+  }
+  if (normalized === "probable") {
+    return "Probable";
+  }
+  return "Not verified";
+}
+
+function evidenceStatusClass(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "verified"
+    ? "ai-evidence-verified"
+    : normalized === "probable"
+      ? "ai-evidence-probable"
+      : "ai-evidence-unresolved";
+}
+
 function normalizeProposedChanges(value) {
   if (Array.isArray(value)) {
     return value;
@@ -6966,8 +6986,11 @@ function renderAiAnalysisReview() {
                     <p class="dashboard-label">${escapeHtml(fact.category || "Fact")}</p>
                     <p class="highlight-value">${escapeHtml(fact.field || "Unlabeled fact")}: ${escapeHtml(summarizeJsonValue(fact.value))}</p>
                     <p class="update-meta">${escapeHtml([fact.unit, fact.period, fact.date, fact.factType].filter(Boolean).join(" • ") || "No period or type")}</p>
-                    <p class="update-meta">${escapeHtml(fact.sourceEvidence || "No source evidence.")}</p>
-                    <span class="status-chip">${escapeHtml(formatConfidence(fact.confidence))}</span>
+                    <p class="update-meta"><strong>Source evidence:</strong> ${escapeHtml(fact.sourceEvidence || "Not verified")}</p>
+                    <div class="ai-evidence-row">
+                      <span class="status-chip ${evidenceStatusClass(fact.evidenceStatus)}">${escapeHtml(formatEvidenceStatus(fact.evidenceStatus))}</span>
+                      <span class="status-chip">${escapeHtml(formatConfidence(fact.confidence))}</span>
+                    </div>
                   </article>
                 `
               )
@@ -6993,7 +7016,8 @@ function renderAiAnalysisReview() {
                       <div><p class="dashboard-label">Proposed</p><pre>${escapeHtml(summarizeJsonValue(change.proposedValue))}</pre></div>
                     </div>
                     <p class="update-meta">${escapeHtml([change.period, change.date, formatConfidence(change.confidence)].filter(Boolean).join(" • "))}</p>
-                    <p class="update-meta">${escapeHtml(change.sourceEvidence || "No source evidence.")}</p>
+                    <p class="update-meta"><strong>Source evidence:</strong> ${escapeHtml(change.sourceEvidence || "Not verified")}</p>
+                    <span class="status-chip ${evidenceStatusClass(change.evidenceStatus)}">${escapeHtml(formatEvidenceStatus(change.evidenceStatus))}</span>
                     ${change.notes ? `<p class="update-meta">${escapeHtml(change.notes)}</p>` : ""}
                   </article>
                 `

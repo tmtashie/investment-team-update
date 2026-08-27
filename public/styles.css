@@ -680,6 +680,27 @@ button:disabled {
   margin-top: 8px;
 }
 
+.ai-evidence-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-evidence-verified {
+  background: rgba(35, 95, 67, 0.12);
+  color: var(--success);
+}
+
+.ai-evidence-probable {
+  background: rgba(138, 90, 0, 0.12);
+  color: var(--warning);
+}
+
+.ai-evidence-unresolved {
+  background: rgba(160, 42, 42, 0.1);
+  color: #8a2424;
+}
+
 .ai-change-comparison {
   display: grid;
   gap: 12px;

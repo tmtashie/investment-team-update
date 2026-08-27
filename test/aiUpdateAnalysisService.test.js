@@ -211,6 +211,346 @@ test("competing candidates lower confidence", async () => {
   assert.match(result.analysis.warnings.join(" "), /Multiple plausible/);
 });
 
+test("$3,000,000 source text verifies normalized 3.0M revenue evidence", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "3.0M",
+        unit: "USD",
+        sourceEvidence: "revenue was 3.0M",
+        confidence: 94
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "FINSYNC reported July revenue of $3,000,000." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.extractedFacts[0].sourceEvidence, "FINSYNC reported July revenue of $3,000,000.");
+  assert.equal(result.analysis.extractedFacts[0].evidenceStatus, "verified");
+});
+
+test("$3.0 million source text verifies normalized 3.0M revenue evidence", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "3.0M",
+        unit: "USD",
+        sourceEvidence: "July revenue",
+        confidence: 94
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "FINSYNC July revenue increased to $3.0 million from $2.83 million." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.extractedFacts[0].sourceEvidence, "FINSYNC July revenue increased to $3.0 million from $2.83 million.");
+  assert.equal(result.analysis.extractedFacts[0].evidenceStatus, "verified");
+});
+
+test("62,824 source text verifies normalized 62824 customer evidence", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "customerCount",
+        value: "62824",
+        sourceEvidence: "customers reached 62824",
+        confidence: 96
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "Customer count reached 62,824 in July for FINSYNC." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.extractedFacts[0].sourceEvidence, "Customer count reached 62,824 in July for FINSYNC.");
+  assert.equal(result.analysis.extractedFacts[0].evidenceStatus, "verified");
+});
+
+test("context prevents selecting a cash sentence as evidence for revenue", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "3.0M",
+        sourceEvidence: "Revenue was $3.0M",
+        confidence: 90
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "Cash balance was $3.0M. Revenue was $2.0M." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.extractedFacts[0].sourceEvidence, "");
+  assert.equal(result.analysis.extractedFacts[0].evidenceStatus, "unresolved");
+  assert.match(result.analysis.unresolved.join(" "), /Could not verify source evidence for revenue/);
+});
+
+test("fabricated model evidence is not displayed as verified", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "9.0M",
+        sourceEvidence: "Revenue was $9.0M",
+        confidence: 90
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "FINSYNC July revenue was $3.0 million." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.extractedFacts[0].sourceEvidence, "");
+  assert.equal(result.analysis.extractedFacts[0].evidenceStatus, "unresolved");
+});
+
+test("duplicate fact and change evidence warnings are deduplicated", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "9.0M",
+        sourceEvidence: "Revenue was $9.0M",
+        confidence: 90
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [
+      {
+        field: "revenue",
+        currentValue: "2.83M",
+        proposedValue: "9.0M",
+        sourceEvidence: "Revenue was $9.0M",
+        confidence: 90
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "FINSYNC July revenue was $3.0 million." },
+    investments: finsyncInvestments,
+    entities
+  });
+  const evidenceWarnings = result.analysis.unresolved.filter((item) =>
+    item.includes("Could not verify source evidence for revenue")
+  );
+
+  assert.equal(evidenceWarnings.length, 1);
+});
+
+test("revenue comparison produces useful summary language", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: ["Updated revenue metrics."],
+    proposedChanges: [
+      {
+        field: "revenue",
+        currentValue: "2.83M",
+        proposedValue: "3.0M",
+        period: "July",
+        sourceEvidence: "July revenue increased to $3.0 million from $2.83 million.",
+        confidence: 95
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "FINSYNC July revenue increased to $3.0 million from $2.83 million." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.whatChanged[0], "July Revenue increased from 2.83M to 3.0M.");
+});
+
+test("customerCount comparison produces useful summary language", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: ["Updated customer count metrics."],
+    proposedChanges: [
+      {
+        field: "customerCount",
+        currentValue: "58,626",
+        proposedValue: "62,824",
+        sourceEvidence: "Customer count increased to 62,824 in July.",
+        confidence: 95
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "Customer count increased to 62,824 in July." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.whatChanged[0], "Customer count increased from 58,626 to 62,824.");
+});
+
+test("summary does not claim increase or decrease when comparison is not valid", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: ["Management changed the revenue reporting format."],
+    proposedChanges: [
+      {
+        field: "revenue",
+        currentValue: "",
+        proposedValue: "3.0M",
+        sourceEvidence: "Revenue was $3.0 million.",
+        confidence: 95
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "FINSYNC revenue was $3.0 million." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.whatChanged[0], "Management changed the revenue reporting format.");
+  assert.doesNotMatch(result.analysis.whatChanged.join(" "), /increased|decreased/);
+});
+
+test("FINSYNC regression returns grounded evidence and specific what changed", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", investmentName: "FINSYNC", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "3.0M",
+        unit: "USD",
+        sourceEvidence: "July revenue was 3.0M",
+        confidence: 97
+      },
+      {
+        category: "operating metrics",
+        field: "customerCount",
+        value: "62824",
+        sourceEvidence: "customers reached 62824",
+        confidence: 97
+      }
+    ],
+    whatChanged: ["Updated revenue and customer count metrics."],
+    proposedChanges: [
+      {
+        field: "revenue",
+        currentValue: "2.83M",
+        proposedValue: "3.0M",
+        period: "July",
+        sourceEvidence: "July revenue was 3.0M",
+        confidence: 97,
+        riskLevel: "medium"
+      },
+      {
+        field: "customerCount",
+        currentValue: "58,626",
+        proposedValue: "62,824",
+        period: "July",
+        sourceEvidence: "customers reached 62824",
+        confidence: 97,
+        riskLevel: "medium"
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      subject: "FINSYNC July customer and revenue update",
+      sourceText: [
+        "FINSYNC July revenue increased to $3.0 million from $2.83 million.",
+        "Customer count increased to 62,824 in July."
+      ].join(" ")
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.equal(result.analysis.proposedChanges[0].sourceEvidence, "FINSYNC July revenue increased to $3.0 million from $2.83 million.");
+  assert.equal(result.analysis.proposedChanges[0].evidenceStatus, "verified");
+  assert.equal(result.analysis.proposedChanges[1].sourceEvidence, "Customer count increased to 62,824 in July.");
+  assert.equal(result.analysis.proposedChanges[1].evidenceStatus, "verified");
+  assert.ok(result.analysis.whatChanged.includes("July Revenue increased from 2.83M to 3.0M."));
+  assert.ok(result.analysis.whatChanged.includes("July Customer count increased from 58,626 to 62,824."));
+});
+
 test("successful manual text analysis returns normalized result", async () => {
   const { service, getCalls } = createService({
     investmentMatch: {
