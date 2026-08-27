@@ -277,6 +277,18 @@ const cancelTaskEditButton = document.getElementById("cancelTaskEditButton");
 const editingTaskId = document.getElementById("editingTaskId");
 const tasksList = document.getElementById("tasksList");
 const companyTasks = document.getElementById("companyTasks");
+const aiUpdateInboxSummary = document.getElementById("aiUpdateInboxSummary");
+const aiUpdateInboxMessage = document.getElementById("aiUpdateInboxMessage");
+const aiUpdateInboxList = document.getElementById("aiUpdateInboxList");
+const aiUpdateProposalDetail = document.getElementById("aiUpdateProposalDetail");
+const openAiUpdateAnalyzerButton = document.getElementById("openAiUpdateAnalyzerButton");
+const aiUpdateAnalyzerPanel = document.getElementById("aiUpdateAnalyzerPanel");
+const aiUpdateAnalysisForm = document.getElementById("aiUpdateAnalysisForm");
+const cancelAiUpdateAnalysisButton = document.getElementById("cancelAiUpdateAnalysisButton");
+const runAiUpdateAnalysisButton = document.getElementById("runAiUpdateAnalysisButton");
+const aiAnalysisInvestmentField = document.getElementById("aiAnalysisInvestmentField");
+const aiAnalysisEntityField = document.getElementById("aiAnalysisEntityField");
+const aiUpdateAnalysisReview = document.getElementById("aiUpdateAnalysisReview");
 const researchDeckFeed = document.getElementById("researchDeckFeed");
 const researchNotesFeed = document.getElementById("researchNotesFeed");
 const researchDocumentsFeed = document.getElementById("researchDocumentsFeed");
@@ -295,6 +307,14 @@ let companyPerformanceMap = new Map();
 let entityPerformanceMap = new Map();
 let uploadedDocuments = [];
 let allTasks = [];
+let allAiUpdateProposals = [];
+let aiUpdateProposalCounts = {
+  pending: 0,
+  approved: 0,
+  rejected: 0
+};
+let selectedAiUpdateProposalId = "";
+let latestAiUpdateAnalysis = null;
 let activeWorkspaceView = "home";
 let selectedEntity = "";
 let selectedXirrAuditEntity = "";
@@ -5037,6 +5057,26 @@ function renderConfiguredEntitySelects() {
   renderSelect(form && form.elements ? form.elements.entity : null, "Select entity");
   renderSelect(taskForm && taskForm.elements ? taskForm.elements.entity : null, "Select entity");
   renderSelect(aiAnalystEntityField, "Any entity");
+  renderSelect(aiAnalysisEntityField, "Let AI match entity");
+}
+
+function renderAiAnalysisInvestmentOptions() {
+  if (!aiAnalysisInvestmentField) {
+    return;
+  }
+
+  const currentValue = aiAnalysisInvestmentField.value;
+  aiAnalysisInvestmentField.innerHTML = ['<option value="">Let AI match investment</option>']
+    .concat(
+      sortInvestmentsAlphabetically(allInvestments).map(
+        (investment) =>
+          `<option value="${escapeHtml(investment.id)}">${escapeHtml(investment.company)}${investment.entity ? ` - ${escapeHtml(investment.entity)}` : ""}</option>`
+      )
+    )
+    .join("");
+  aiAnalysisInvestmentField.value = allInvestments.some((investment) => investment.id === currentValue)
+    ? currentValue
+    : "";
 }
 
 function renderCompanySuggestions() {
@@ -6687,6 +6727,503 @@ function renderTasks() {
     .join("");
 }
 
+function getAiProposalInvestmentName(proposal) {
+  return (
+    (proposal && proposal.investment && proposal.investment.company) ||
+    "Unmatched investment"
+  );
+}
+
+function getAiProposalEntity(proposal) {
+  return (
+    (proposal && proposal.investment && proposal.investment.entity) ||
+    (proposal && proposal.entityId) ||
+    "No entity"
+  );
+}
+
+function formatConfidence(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? `${Math.round(parsed)}%` : "Not scored";
+}
+
+function summarizeJsonValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "Not provided";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function normalizeProposedChanges(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).map(([field, change]) =>
+      change && typeof change === "object"
+        ? { field, ...change }
+        : { field, proposedValue: change }
+    );
+  }
+  return [];
+}
+
+function getProposedChangeField(change) {
+  return change.field || change.action || change.actionType || change.type || "Proposed change";
+}
+
+function getProposedChangeCurrentValue(change) {
+  return change.currentValue !== undefined
+    ? change.currentValue
+    : change.current_value !== undefined
+      ? change.current_value
+      : change.current !== undefined
+        ? change.current
+        : "";
+}
+
+function getProposedChangeProposedValue(change) {
+  return change.proposedValue !== undefined
+    ? change.proposedValue
+    : change.proposed_value !== undefined
+      ? change.proposed_value
+      : change.value !== undefined
+        ? change.value
+        : "";
+}
+
+function getProposedChangeEvidence(change) {
+  return change.sourceEvidence || change.source_evidence || change.evidence || change.source || "";
+}
+
+function renderExtractedData(value) {
+  if (!value || (typeof value === "object" && !Array.isArray(value) && !Object.keys(value).length)) {
+    return '<p class="update-meta">No extracted information staged yet.</p>';
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return `
+      <div class="ai-extracted-grid">
+        ${Object.entries(value)
+          .map(
+            ([key, entry]) => `
+              <article class="ai-extracted-item">
+                <p class="dashboard-label">${escapeHtml(key)}</p>
+                <pre>${escapeHtml(summarizeJsonValue(entry))}</pre>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+  }
+
+  return `<pre class="ai-json-block">${escapeHtml(summarizeJsonValue(value))}</pre>`;
+}
+
+function renderProposedChanges(value) {
+  const changes = normalizeProposedChanges(value);
+  if (!changes.length) {
+    return '<p class="update-meta">No proposed field-level changes staged yet.</p>';
+  }
+
+  return `
+    <div class="ai-change-list">
+      ${changes
+        .map((change) => {
+          const currentValue = getProposedChangeCurrentValue(change);
+          const proposedValue = getProposedChangeProposedValue(change);
+          return `
+            <article class="ai-change-card">
+              <div class="update-head">
+                <h4>${escapeHtml(getProposedChangeField(change))}</h4>
+                <span class="status-chip">${escapeHtml(formatConfidence(change.confidence))}</span>
+              </div>
+              <div class="ai-change-comparison">
+                <div>
+                  <p class="dashboard-label">Current</p>
+                  <pre>${escapeHtml(summarizeJsonValue(currentValue))}</pre>
+                </div>
+                <div>
+                  <p class="dashboard-label">Proposed</p>
+                  <pre>${escapeHtml(summarizeJsonValue(proposedValue))}</pre>
+                </div>
+              </div>
+              ${
+                getProposedChangeEvidence(change)
+                  ? `<p class="update-meta"><strong>Evidence:</strong> ${escapeHtml(getProposedChangeEvidence(change))}</p>`
+                  : ""
+              }
+              ${
+                change.notes
+                  ? `<p class="update-meta"><strong>Notes:</strong> ${escapeHtml(change.notes)}</p>`
+                  : ""
+              }
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderAiAnalysisReview() {
+  if (!aiUpdateAnalysisReview) {
+    return;
+  }
+
+  if (!latestAiUpdateAnalysis) {
+    aiUpdateAnalysisReview.classList.add("hidden");
+    aiUpdateAnalysisReview.innerHTML = "";
+    return;
+  }
+
+  const analysis = latestAiUpdateAnalysis.analysis || {};
+  const investmentMatch = analysis.investmentMatch || {};
+  const entityMatch = analysis.entityMatch || {};
+  const selectedInvestment = aiAnalysisInvestmentField && aiAnalysisInvestmentField.value
+    ? allInvestments.find((investment) => investment.id === aiAnalysisInvestmentField.value)
+    : null;
+  const selectedEntity = aiAnalysisEntityField && aiAnalysisEntityField.value
+    ? aiAnalysisEntityField.value
+    : "";
+  const effectiveInvestmentId = selectedInvestment
+    ? selectedInvestment.id
+    : investmentMatch.investmentId || "";
+  const effectiveInvestmentName = selectedInvestment
+    ? selectedInvestment.company
+    : investmentMatch.investmentName || "Unmatched";
+  const effectiveEntity = selectedEntity || entityMatch.entityName || entityMatch.entityId || "";
+  const warnings = Array.isArray(analysis.warnings) ? analysis.warnings : [];
+  const unresolved = Array.isArray(analysis.unresolved) ? analysis.unresolved : [];
+  const facts = Array.isArray(analysis.extractedFacts) ? analysis.extractedFacts : [];
+  const whatChanged = Array.isArray(analysis.whatChanged) ? analysis.whatChanged : [];
+  const proposedChanges = Array.isArray(analysis.proposedChanges) ? analysis.proposedChanges : [];
+  const needsMatch = !effectiveInvestmentId;
+
+  aiUpdateAnalysisReview.classList.remove("hidden");
+  aiUpdateAnalysisReview.innerHTML = `
+    <section class="ai-detail-section">
+      <div class="panel-header">
+        <div>
+          <h4>Analysis Review</h4>
+          <p class="section-copy">Review this result before creating a pending inbox proposal.</p>
+        </div>
+        <span class="status-chip">${escapeHtml(formatDisplayDate(latestAiUpdateAnalysis.analyzedAt))}</span>
+      </div>
+      <div class="company-summary-grid">
+        <article class="company-summary-card">
+          <p class="dashboard-label">Matched investment</p>
+          <p class="highlight-value">${escapeHtml(effectiveInvestmentName)}</p>
+          <p class="update-meta">${escapeHtml(formatConfidence(investmentMatch.confidence))}</p>
+          <p class="update-meta">${escapeHtml(investmentMatch.reason || "No reason provided.")}</p>
+        </article>
+        <article class="company-summary-card">
+          <p class="dashboard-label">Matched entity</p>
+          <p class="highlight-value">${escapeHtml(effectiveEntity || "Unresolved")}</p>
+          <p class="update-meta">${escapeHtml(formatConfidence(entityMatch.confidence))}</p>
+          <p class="update-meta">${escapeHtml(entityMatch.reason || "No reason provided.")}</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Warnings / Needs Review</h4>
+      ${
+        needsMatch || warnings.length || unresolved.length
+          ? `<div class="ai-warning-list">${[
+              needsMatch ? "Choose an investment before creating the proposal." : "",
+              ...warnings,
+              ...unresolved
+            ]
+              .filter(Boolean)
+              .map((item) => `<p>${escapeHtml(item)}</p>`)
+              .join("")}</div>`
+          : '<p class="update-meta">No warnings returned.</p>'
+      }
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>What Changed</h4>
+      ${
+        whatChanged.length
+          ? `<ul class="ai-bullet-list">${whatChanged.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+          : '<p class="update-meta">No material change summary returned.</p>'
+      }
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Extracted Facts</h4>
+      ${
+        facts.length
+          ? `<div class="ai-fact-list">${facts
+              .map(
+                (fact) => `
+                  <article class="ai-extracted-item">
+                    <p class="dashboard-label">${escapeHtml(fact.category || "Fact")}</p>
+                    <p class="highlight-value">${escapeHtml(fact.field || "Unlabeled fact")}: ${escapeHtml(summarizeJsonValue(fact.value))}</p>
+                    <p class="update-meta">${escapeHtml([fact.unit, fact.period, fact.date, fact.factType].filter(Boolean).join(" • ") || "No period or type")}</p>
+                    <p class="update-meta">${escapeHtml(fact.sourceEvidence || "No source evidence.")}</p>
+                    <span class="status-chip">${escapeHtml(formatConfidence(fact.confidence))}</span>
+                  </article>
+                `
+              )
+              .join("")}</div>`
+          : '<p class="update-meta">No extracted facts returned.</p>'
+      }
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Proposed Changes</h4>
+      ${
+        proposedChanges.length
+          ? `<div class="ai-change-list">${proposedChanges
+              .map(
+                (change) => `
+                  <article class="ai-change-card ${change.riskLevel === "high" ? "ai-change-card-high-risk" : ""}">
+                    <div class="update-head">
+                      <h4>${escapeHtml(change.field || change.actionType || "Proposed change")}</h4>
+                      <span class="status-chip">${escapeHtml(change.riskLevel || "medium")} risk</span>
+                    </div>
+                    <div class="ai-change-comparison">
+                      <div><p class="dashboard-label">Current</p><pre>${escapeHtml(summarizeJsonValue(change.currentValue))}</pre></div>
+                      <div><p class="dashboard-label">Proposed</p><pre>${escapeHtml(summarizeJsonValue(change.proposedValue))}</pre></div>
+                    </div>
+                    <p class="update-meta">${escapeHtml([change.period, change.date, formatConfidence(change.confidence)].filter(Boolean).join(" • "))}</p>
+                    <p class="update-meta">${escapeHtml(change.sourceEvidence || "No source evidence.")}</p>
+                    ${change.notes ? `<p class="update-meta">${escapeHtml(change.notes)}</p>` : ""}
+                  </article>
+                `
+              )
+              .join("")}</div>`
+          : '<p class="update-meta">No proposed changes returned.</p>'
+      }
+    </section>
+
+    <div class="card-actions">
+      <button type="button" data-action="create-ai-analysis-proposal"${needsMatch ? " disabled" : ""}>Create Proposal</button>
+      <button type="button" class="secondary-button" data-action="focus-ai-analysis-investment">Change Investment</button>
+      <button type="button" class="secondary-button" data-action="focus-ai-analysis-entity">Change Entity</button>
+      <button type="button" class="secondary-button danger-button" data-action="cancel-ai-analysis">Cancel</button>
+    </div>
+  `;
+}
+
+function openAiUpdateAnalyzer() {
+  if (!aiUpdateAnalyzerPanel) {
+    return;
+  }
+  renderAiAnalysisInvestmentOptions();
+  renderConfiguredEntitySelects();
+  aiUpdateAnalyzerPanel.classList.remove("hidden");
+  latestAiUpdateAnalysis = null;
+  renderAiAnalysisReview();
+  if (aiUpdateInboxMessage) {
+    aiUpdateInboxMessage.textContent = "";
+  }
+}
+
+function closeAiUpdateAnalyzer() {
+  latestAiUpdateAnalysis = null;
+  if (aiUpdateAnalysisForm) {
+    aiUpdateAnalysisForm.reset();
+  }
+  if (aiUpdateAnalyzerPanel) {
+    aiUpdateAnalyzerPanel.classList.add("hidden");
+  }
+  renderAiAnalysisReview();
+}
+
+function buildProposalPayloadFromAnalysis() {
+  if (!latestAiUpdateAnalysis) {
+    return null;
+  }
+
+  const analysis = latestAiUpdateAnalysis.analysis || {};
+  const source = latestAiUpdateAnalysis.source || {};
+  const selectedInvestment = aiAnalysisInvestmentField && aiAnalysisInvestmentField.value
+    ? allInvestments.find((investment) => investment.id === aiAnalysisInvestmentField.value)
+    : null;
+  const investmentId = selectedInvestment
+    ? selectedInvestment.id
+    : (analysis.investmentMatch && analysis.investmentMatch.investmentId) || "";
+  const selectedEntity = aiAnalysisEntityField && aiAnalysisEntityField.value
+    ? aiAnalysisEntityField.value
+    : "";
+  const entityId = selectedEntity || (analysis.entityMatch && (analysis.entityMatch.entityId || analysis.entityMatch.entityName)) || "";
+
+  if (!investmentId) {
+    throw new Error("Choose an investment before creating the proposal.");
+  }
+
+  return {
+    investmentId,
+    entityId,
+    sourceType: source.sourceType,
+    sourceIdentifier: source.sourceIdentifier || [source.sender, source.subject, source.sourceDate].filter(Boolean).join(" | "),
+    sourceDate: source.sourceDate,
+    sender: source.sender,
+    subject: source.subject,
+    confidenceScore: analysis.investmentMatch ? analysis.investmentMatch.confidence : 0,
+    matchReason: [
+      analysis.investmentMatch && analysis.investmentMatch.reason,
+      analysis.entityMatch && analysis.entityMatch.reason,
+      selectedInvestment ? "Investment manually selected in the review form." : "",
+      selectedEntity ? "Entity manually selected in the review form." : ""
+    ]
+      .filter(Boolean)
+      .join(" "),
+    summary: Array.isArray(analysis.whatChanged) && analysis.whatChanged.length
+      ? analysis.whatChanged.map((item) => `• ${item}`).join("\n")
+      : "AI analysis completed; review extracted facts and proposed changes.",
+    extractedData: {
+      facts: analysis.extractedFacts || [],
+      warnings: analysis.warnings || [],
+      unresolved: analysis.unresolved || [],
+      candidates: analysis.candidates || [],
+      analyzedAt: latestAiUpdateAnalysis.analyzedAt
+    },
+    proposedChanges: analysis.proposedChanges || [],
+    documents: [],
+    status: "pending"
+  };
+}
+
+function renderAiUpdateInbox() {
+  if (!aiUpdateInboxSummary || !aiUpdateInboxList || !aiUpdateProposalDetail) {
+    return;
+  }
+
+  aiUpdateInboxSummary.innerHTML = ["pending", "approved", "rejected"]
+    .map(
+      (status) => `
+        <article class="dashboard-card">
+          <p class="dashboard-label">${escapeHtml(status)}</p>
+          <p class="dashboard-value">${escapeHtml(String(aiUpdateProposalCounts[status] || 0))}</p>
+        </article>
+      `
+    )
+    .join("");
+
+  const pending = allAiUpdateProposals.filter((proposal) => proposal.status === "pending");
+  const reviewed = allAiUpdateProposals.filter((proposal) => proposal.status !== "pending");
+  const proposals = pending.concat(reviewed).slice(0, 30);
+
+  aiUpdateInboxList.innerHTML = proposals.length
+    ? proposals
+        .map(
+          (proposal) => `
+            <article class="update-card ai-update-card ${proposal.id === selectedAiUpdateProposalId ? "is-selected" : ""}">
+              <div class="update-head">
+                <button class="link-button company-link" type="button" data-action="view-ai-proposal" data-id="${escapeHtml(proposal.id)}">
+                  ${escapeHtml(getAiProposalInvestmentName(proposal))}
+                </button>
+                <span class="status-chip">${escapeHtml(proposal.status)}</span>
+              </div>
+              <p class="update-meta">
+                ${escapeHtml(getAiProposalEntity(proposal))} • Source ${escapeHtml(proposal.sourceDate || "date not set")} • ${escapeHtml(formatConfidence(proposal.confidenceScore))}
+              </p>
+              <p class="update-meta">
+                ${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")}
+              </p>
+              <p class="update-notes">${escapeHtml(summarizeText(proposal.summary || "No summary staged.", ""))}</p>
+              <p class="update-meta">Created ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="update-meta">No AI-proposed updates are staged yet.</p>';
+
+  renderAiUpdateProposalDetail();
+}
+
+function renderAiUpdateProposalDetail() {
+  if (!aiUpdateProposalDetail) {
+    return;
+  }
+
+  const proposal = allAiUpdateProposals.find((item) => item.id === selectedAiUpdateProposalId);
+  if (!proposal) {
+    aiUpdateProposalDetail.classList.add("hidden");
+    aiUpdateProposalDetail.innerHTML = "";
+    return;
+  }
+
+  aiUpdateProposalDetail.classList.remove("hidden");
+  aiUpdateProposalDetail.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h3>${escapeHtml(getAiProposalInvestmentName(proposal))}</h3>
+        <p class="section-copy">Proposed update staged ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
+      </div>
+      <button class="secondary-button" type="button" data-action="close-ai-proposal">Close</button>
+    </div>
+
+    <section class="ai-detail-section">
+      <h4>Match</h4>
+      <div class="company-summary-grid">
+        <article class="company-summary-card"><p class="dashboard-label">Investment</p><p class="highlight-value">${escapeHtml(getAiProposalInvestmentName(proposal))}</p></article>
+        <article class="company-summary-card"><p class="dashboard-label">Entity</p><p class="highlight-value">${escapeHtml(getAiProposalEntity(proposal))}</p></article>
+        <article class="company-summary-card"><p class="dashboard-label">Confidence</p><p class="highlight-value">${escapeHtml(formatConfidence(proposal.confidenceScore))}</p></article>
+      </div>
+      <p class="update-meta">${escapeHtml(proposal.matchReason || "No match reason provided.")}</p>
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Source</h4>
+      <p class="update-meta">${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")}</p>
+      <p class="update-meta">${escapeHtml(proposal.sourceType || "Source type not set")} • ${escapeHtml(proposal.sourceIdentifier || "No source identifier")} • ${escapeHtml(proposal.sourceDate || "Source date not set")}</p>
+      ${
+        Array.isArray(proposal.documents) && proposal.documents.length
+          ? `<div class="document-pill-row">${proposal.documents
+              .map((document) =>
+                document.url
+                  ? `<a class="document-pill" href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name || document.url)}</a>`
+                  : `<span class="document-pill">${escapeHtml(document.name || document.id || "Attachment")}</span>`
+              )
+              .join("")}</div>`
+          : '<p class="update-meta">No attachment references.</p>'
+      }
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>What Changed</h4>
+      <p class="update-notes ai-summary-note">${escapeHtml(proposal.summary || "No summary staged.")}</p>
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Extracted Information</h4>
+      ${renderExtractedData(proposal.extractedData)}
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Proposed Changes</h4>
+      ${renderProposedChanges(proposal.proposedChanges)}
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Review</h4>
+      <p class="update-meta">Status: ${escapeHtml(proposal.status)}${
+        proposal.reviewedBy
+          ? ` • Reviewed by ${escapeHtml(proposal.reviewedBy)} on ${escapeHtml(formatDisplayDate(proposal.reviewedAt))}`
+          : ""
+      }</p>
+      ${
+        proposal.status === "pending" && canEditWorkspace()
+          ? `<div class="card-actions">
+              <button type="button" data-action="approve-ai-proposal" data-id="${escapeHtml(proposal.id)}">Approve</button>
+              <button class="secondary-button danger-button" type="button" data-action="reject-ai-proposal" data-id="${escapeHtml(proposal.id)}">Reject</button>
+              <button class="secondary-button" type="button" data-action="edit-ai-proposal-source" data-investment-id="${escapeHtml(proposal.investmentId)}">Edit live record first</button>
+            </div>`
+          : ""
+      }
+    </section>
+  `;
+}
+
 function renderResearchLibrary(investments) {
   const latestDecks = investments.filter((investment) => investment.deckSummary).slice(0, 6);
   const latestNotes = investments.filter((investment) => investment.notes).slice(0, 6);
@@ -7732,6 +8269,7 @@ function renderAll() {
   entityPerformanceMap = buildEntityPerformanceMap(allInvestments);
   renderRoleState();
   renderCompanySuggestions();
+  renderAiAnalysisInvestmentOptions();
   renderFilterOptions();
   const filteredInvestments = filterInvestments(allInvestments);
   renderDashboard(allInvestments);
@@ -7743,6 +8281,7 @@ function renderAll() {
   renderResearchLibrary(allInvestments);
   renderUpdates(filteredInvestments);
   renderTasks();
+  renderAiUpdateInbox();
   renderReconciliation();
   renderXirrAudit();
   renderCompanyPanel();
@@ -7888,6 +8427,42 @@ async function loadTasks() {
     }
 
     taskMessage.textContent = error.message || "Tasks could not load.";
+  }
+}
+
+async function loadAiUpdateProposals() {
+  try {
+    const data = await fetchJson("/api/ai-update-proposals");
+    allAiUpdateProposals = Array.isArray(data.proposals) ? data.proposals : [];
+    aiUpdateProposalCounts = {
+      pending: Number((data.counts && data.counts.pending) || 0),
+      approved: Number((data.counts && data.counts.approved) || 0),
+      rejected: Number((data.counts && data.counts.rejected) || 0)
+    };
+    if (
+      selectedAiUpdateProposalId &&
+      !allAiUpdateProposals.some((proposal) => proposal.id === selectedAiUpdateProposalId)
+    ) {
+      selectedAiUpdateProposalId = "";
+    }
+    renderAiUpdateInbox();
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      allAiUpdateProposals = [];
+      renderAiUpdateInbox();
+      return;
+    }
+
+    if (error.status === 403 && isDashboardViewer()) {
+      allAiUpdateProposals = [];
+      renderAiUpdateInbox();
+      return;
+    }
+
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = error.message || "AI Update Inbox could not load.";
+    }
   }
 }
 
@@ -8339,6 +8914,7 @@ addListener(loginForm, "submit", async (event) => {
     await loadUpdates();
     if (investmentsLoaded) {
       await loadTasks();
+      await loadAiUpdateProposals();
     }
   } catch (error) {
     if (loginMessage) {
@@ -10153,11 +10729,221 @@ addListener(tasksList, "click", (event) => {
   }
 });
 
+addListener(openAiUpdateAnalyzerButton, "click", () => {
+  openAiUpdateAnalyzer();
+});
+
+addListener(cancelAiUpdateAnalysisButton, "click", () => {
+  closeAiUpdateAnalyzer();
+});
+
+addListener(aiAnalysisInvestmentField, "change", () => {
+  renderAiAnalysisReview();
+});
+
+addListener(aiAnalysisEntityField, "change", () => {
+  renderAiAnalysisReview();
+});
+
+addListener(aiUpdateAnalysisForm, "submit", async (event) => {
+  event.preventDefault();
+  if (!aiUpdateAnalysisForm) {
+    return;
+  }
+
+  const formData = new FormData(aiUpdateAnalysisForm);
+  const payload = {
+    sourceType: formData.get("sourceType"),
+    sender: formData.get("sender"),
+    subject: formData.get("subject"),
+    sourceDate: formData.get("sourceDate"),
+    sourceText: formData.get("sourceText"),
+    investmentId: formData.get("investmentId"),
+    entityId: formData.get("entityId")
+  };
+
+  if (aiUpdateInboxMessage) {
+    aiUpdateInboxMessage.textContent = "Analyzing source material...";
+  }
+  if (runAiUpdateAnalysisButton) {
+    runAiUpdateAnalysisButton.disabled = true;
+  }
+
+  try {
+    latestAiUpdateAnalysis = await fetchJson("/api/ai-update-proposals/analyze", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    renderAiAnalysisReview();
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = "Analysis ready. Review it before creating a proposal.";
+    }
+    if (aiUpdateAnalysisReview) {
+      aiUpdateAnalysisReview.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      return;
+    }
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = error.message;
+    }
+  } finally {
+    if (runAiUpdateAnalysisButton) {
+      runAiUpdateAnalysisButton.disabled = false;
+    }
+  }
+});
+
+addListener(aiUpdateAnalysisReview, "click", async (event) => {
+  const target = event.target.closest("[data-action]");
+  if (!target) {
+    return;
+  }
+
+  const action = target.dataset.action || "";
+  if (action === "focus-ai-analysis-investment") {
+    if (aiAnalysisInvestmentField) {
+      aiAnalysisInvestmentField.focus();
+    }
+    return;
+  }
+
+  if (action === "focus-ai-analysis-entity") {
+    if (aiAnalysisEntityField) {
+      aiAnalysisEntityField.focus();
+    }
+    return;
+  }
+
+  if (action === "cancel-ai-analysis") {
+    closeAiUpdateAnalyzer();
+    return;
+  }
+
+  if (action !== "create-ai-analysis-proposal") {
+    return;
+  }
+
+  target.disabled = true;
+  if (aiUpdateInboxMessage) {
+    aiUpdateInboxMessage.textContent = "Creating pending AI update proposal...";
+  }
+
+  try {
+    const proposalPayload = buildProposalPayloadFromAnalysis();
+    const result = await fetchJson("/api/ai-update-proposals", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(proposalPayload)
+    });
+    await loadAiUpdateProposals();
+    selectedAiUpdateProposalId = result.proposal ? result.proposal.id : "";
+    closeAiUpdateAnalyzer();
+    renderAiUpdateInbox();
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = "Pending AI update proposal created.";
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      return;
+    }
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = error.message;
+    }
+  } finally {
+    target.disabled = false;
+  }
+});
+
+addListener(aiUpdateInboxList, "click", (event) => {
+  const target = event.target.closest("[data-action='view-ai-proposal']");
+  if (!target) {
+    return;
+  }
+
+  selectedAiUpdateProposalId = target.dataset.id || "";
+  renderAiUpdateInbox();
+  if (aiUpdateProposalDetail) {
+    aiUpdateProposalDetail.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+
+addListener(aiUpdateProposalDetail, "click", async (event) => {
+  const target = event.target.closest("[data-action]");
+  if (!target) {
+    return;
+  }
+
+  const action = target.dataset.action || "";
+  const proposalId = target.dataset.id || selectedAiUpdateProposalId;
+
+  if (action === "close-ai-proposal") {
+    selectedAiUpdateProposalId = "";
+    renderAiUpdateInbox();
+    return;
+  }
+
+  if (action === "edit-ai-proposal-source") {
+    const investmentId = target.dataset.investmentId || "";
+    if (investmentId) {
+      beginEditInvestment(investmentId);
+    } else if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = "No matched live investment is attached to edit.";
+    }
+    return;
+  }
+
+  if (!["approve-ai-proposal", "reject-ai-proposal"].includes(action) || !proposalId) {
+    return;
+  }
+
+  const endpointAction = action === "approve-ai-proposal" ? "approve" : "reject";
+  target.disabled = true;
+  if (aiUpdateInboxMessage) {
+    aiUpdateInboxMessage.textContent =
+      endpointAction === "approve" ? "Approving staged update..." : "Rejecting staged update...";
+  }
+
+  try {
+    const result = await fetchJson(`/api/ai-update-proposals/${proposalId}/${endpointAction}`, {
+      method: "POST"
+    });
+    await loadAiUpdateProposals();
+    selectedAiUpdateProposalId = result.proposal ? result.proposal.id : selectedAiUpdateProposalId;
+    renderAiUpdateInbox();
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent =
+        endpointAction === "approve"
+          ? (result.applyResult && result.applyResult.message) || "AI update approved."
+          : "AI update rejected.";
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      return;
+    }
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = error.message;
+    }
+  } finally {
+    target.disabled = false;
+  }
+});
+
 (async function initializeApp() {
   await loadConfig();
   await loadUpdates();
   if (investmentsLoaded) {
     await loadTasks();
+    await loadAiUpdateProposals();
   }
 })().catch((error) => {
   if (error.status === 401) {

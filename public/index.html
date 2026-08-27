@@ -37,6 +37,7 @@
           <button type="button" class="menu-link" data-view="real-estate">Real Estate</button>
           <button type="button" class="menu-link" data-view="cash">Cash</button>
           <button type="button" class="menu-link" data-view="research">Decks and notes</button>
+          <button type="button" class="menu-link" data-view="ai-inbox">AI Update Inbox</button>
           <button type="button" class="menu-link" data-view="tasks">Tasks and reminders</button>
           <button type="button" class="menu-link" data-view="quality">Data quality</button>
           <button type="button" class="menu-link" data-view="xirr-audit">XIRR Audit</button>
@@ -377,6 +378,85 @@
             <p id="taskMessage" class="form-message" aria-live="polite"></p>
           </form>
           <div id="tasksList" class="updates-list"></div>
+        </section>
+
+        <section id="aiUpdateInboxSection" class="panel workspace-view hidden" data-view="ai-inbox">
+          <div class="panel-header panel-header-stack">
+            <div>
+              <h2>AI Update Inbox</h2>
+              <p class="section-copy">
+                Review staged AI-proposed investment updates before anything reaches live portfolio records.
+              </p>
+            </div>
+            <div class="panel-header-actions">
+              <button id="openAiUpdateAnalyzerButton" type="button" class="secondary-button">
+                Analyze Update
+              </button>
+            </div>
+          </div>
+          <section id="aiUpdateAnalyzerPanel" class="subsection-card hidden">
+            <div class="panel-header">
+              <div>
+                <h3>Analyze Investment Update</h3>
+                <p class="section-copy">Paste source material, optionally pin the match, then review before creating a staged proposal.</p>
+              </div>
+              <button id="cancelAiUpdateAnalysisButton" type="button" class="secondary-button">
+                Cancel
+              </button>
+            </div>
+            <form id="aiUpdateAnalysisForm" class="investment-form">
+              <div class="three-up">
+                <label>
+                  Source type
+                  <select id="aiAnalysisSourceTypeField" name="sourceType">
+                    <option value="Email">Email</option>
+                    <option value="Investor Update">Investor Update</option>
+                    <option value="Call Notes">Call Notes</option>
+                    <option value="Manual Note">Manual Note</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+                <label>
+                  Sender
+                  <input id="aiAnalysisSenderField" name="sender" type="text" placeholder="sender@company.com" />
+                </label>
+                <label>
+                  Source date
+                  <input id="aiAnalysisSourceDateField" name="sourceDate" type="date" />
+                </label>
+              </div>
+              <label>
+                Subject
+                <input id="aiAnalysisSubjectField" name="subject" type="text" placeholder="Q2 investor update" />
+              </label>
+              <div class="two-up">
+                <label>
+                  Investment override
+                  <select id="aiAnalysisInvestmentField" name="investmentId">
+                    <option value="">Let AI match investment</option>
+                  </select>
+                </label>
+                <label>
+                  Entity override
+                  <select id="aiAnalysisEntityField" name="entityId">
+                    <option value="">Let AI match entity</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                Source text
+                <textarea id="aiAnalysisSourceTextField" name="sourceText" rows="10" placeholder="Paste the email, investor update, or call notes here."></textarea>
+              </label>
+              <div class="form-actions">
+                <button id="runAiUpdateAnalysisButton" type="submit">Analyze</button>
+              </div>
+            </form>
+            <div id="aiUpdateAnalysisReview" class="ai-analysis-review hidden"></div>
+          </section>
+          <div id="aiUpdateInboxSummary" class="dashboard-grid"></div>
+          <p id="aiUpdateInboxMessage" class="form-message" aria-live="polite"></p>
+          <div id="aiUpdateInboxList" class="updates-list"></div>
+          <div id="aiUpdateProposalDetail" class="ai-update-detail hidden"></div>
         </section>
 
         <section id="xirrAuditSection" class="panel workspace-view hidden" data-view="xirr-audit">

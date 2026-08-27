@@ -4,6 +4,7 @@ function createJsonStore({
   DATA_DIR,
   DATA_FILE,
   TASKS_FILE,
+  AI_UPDATE_PROPOSALS_FILE,
   COMPANY_DOCUMENTS_FILE,
   METADATA_FILE,
   BACKUPS_DIR,
@@ -29,6 +30,10 @@ function createJsonStore({
 
     if (!fs.existsSync(TASKS_FILE)) {
       fs.writeFileSync(TASKS_FILE, "[]\n", "utf8");
+    }
+
+    if (!fs.existsSync(AI_UPDATE_PROPOSALS_FILE)) {
+      fs.writeFileSync(AI_UPDATE_PROPOSALS_FILE, "[]\n", "utf8");
     }
 
     if (!fs.existsSync(COMPANY_DOCUMENTS_FILE)) {

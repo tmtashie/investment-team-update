@@ -6,6 +6,8 @@ const { createJsonStore } = require("./storage/jsonStore");
 const { createBackupService } = require("./services/backupService");
 const { createInvestmentService } = require("./services/investmentService");
 const { createTaskService } = require("./services/taskService");
+const { createAiUpdateProposalService } = require("./services/aiUpdateProposalService");
+const { createAiUpdateAnalysisService } = require("./services/aiUpdateAnalysisService");
 
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -42,6 +44,7 @@ const DATA_DIR = process.env.DATA_DIR
   : path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "investments.json");
 const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
+const AI_UPDATE_PROPOSALS_FILE = path.join(DATA_DIR, "ai-update-proposals.json");
 const COMPANY_DOCUMENTS_FILE = path.join(DATA_DIR, "company-documents.json");
 const METADATA_FILE = path.join(DATA_DIR, "metadata.json");
 const BACKUPS_DIR = path.join(DATA_DIR, "backups");
@@ -227,6 +230,32 @@ function filterCompanyDocumentsForUser(companyDocuments, user, investments = [])
   return companyDocuments.filter((document) => canViewCompanyDocument(user, document, investments));
 }
 
+function canViewAiUpdateProposal(user, proposal, investments = []) {
+  if (!user) {
+    return false;
+  }
+  const investment = investments.find((item) => item.id === proposal.investmentId);
+  if (investment) {
+    return canViewInvestment(user, investment);
+  }
+  return canViewEntity(user, proposal && proposal.entityId);
+}
+
+function canReviewAiUpdateProposal(user, proposal, investments = []) {
+  if (!user || isDashboardViewerRole(user)) {
+    return false;
+  }
+  const investment = investments.find((item) => item.id === proposal.investmentId);
+  if (investment) {
+    return canEditInvestment(user, investment);
+  }
+  return canViewEntity(user, proposal && proposal.entityId);
+}
+
+function filterAiUpdateProposalsForUser(proposals, user, investments = []) {
+  return proposals.filter((proposal) => canViewAiUpdateProposal(user, proposal, investments));
+}
+
 function entityKey(value) {
   return normalizeCompanyKey(normalizeEntityName(value));
 }
@@ -283,6 +312,7 @@ const { ensureDataFile, readJsonFile, writeJsonFile } = createJsonStore({
   DATA_DIR,
   DATA_FILE,
   TASKS_FILE,
+  AI_UPDATE_PROPOSALS_FILE,
   COMPANY_DOCUMENTS_FILE,
   METADATA_FILE,
   BACKUPS_DIR,
@@ -343,6 +373,7 @@ const { createBackupSnapshot, restoreFromBackupPayload } = createBackupService({
   BACKUPS_DIR,
   DATA_FILE,
   TASKS_FILE,
+  AI_UPDATE_PROPOSALS_FILE,
   COMPANY_DOCUMENTS_FILE,
   DATA_SCHEMA_VERSION,
   ensureDataFile,
@@ -1022,6 +1053,84 @@ function normalizeTask(entry) {
   };
 }
 
+const AI_UPDATE_PROPOSAL_STATUSES = ["pending", "approved", "rejected"];
+
+function normalizeProposalStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return AI_UPDATE_PROPOSAL_STATUSES.includes(normalized) ? normalized : "pending";
+}
+
+function normalizeProposalDocuments(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((document) => ({
+      id: String((document && document.id) || "").trim(),
+      name: String((document && document.name) || "").trim(),
+      url: String((document && document.url) || "").trim(),
+      storedName: String((document && document.storedName) || "").trim(),
+      source: String((document && document.source) || "").trim()
+    }))
+    .filter((document) => document.id || document.name || document.url);
+}
+
+function normalizeJsonObject(value, fallback) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  return fallback;
+}
+
+function normalizeAiUpdateProposal(entry) {
+  const createdAt = String((entry && entry.createdAt) || new Date().toISOString()).trim();
+  const investmentId = String((entry && (entry.investmentId || entry.investment_id)) || "").trim();
+  const entity = normalizeEntityName(
+    (entry && (entry.entity || entry.entityId || entry.entity_id)) || ""
+  );
+  const parsedConfidence = Number(
+    (entry && (entry.confidenceScore || entry.confidence_score)) || 0
+  );
+
+  return {
+    id: String((entry && entry.id) || makeId()).trim(),
+    investmentId,
+    entityId: entity,
+    sourceType: String((entry && (entry.sourceType || entry.source_type)) || "").trim(),
+    sourceIdentifier: String(
+      (entry && (entry.sourceIdentifier || entry.source_identifier)) || ""
+    ).trim(),
+    sourceDate: String((entry && (entry.sourceDate || entry.source_date)) || "").trim(),
+    sender: String((entry && entry.sender) || "").trim(),
+    subject: String((entry && entry.subject) || "").trim(),
+    confidenceScore: Number.isFinite(parsedConfidence)
+      ? Math.max(0, Math.min(100, parsedConfidence))
+      : 0,
+    matchReason: String((entry && (entry.matchReason || entry.match_reason)) || "").trim(),
+    summary: String((entry && entry.summary) || "").trim(),
+    extractedData: normalizeJsonObject(
+      entry && (entry.extractedData || entry.extracted_data),
+      {}
+    ),
+    proposedChanges: normalizeJsonObject(
+      entry && (entry.proposedChanges || entry.proposed_changes),
+      []
+    ),
+    documents: normalizeProposalDocuments(
+      entry && (entry.documents || entry.attachments || entry.attachmentReferences)
+    ),
+    status: normalizeProposalStatus(entry && entry.status),
+    reviewedBy: String((entry && (entry.reviewedBy || entry.reviewed_by)) || "").trim(),
+    reviewedAt: String((entry && (entry.reviewedAt || entry.reviewed_at)) || "").trim(),
+    createdAt,
+    updatedAt: String((entry && entry.updatedAt) || createdAt).trim()
+  };
+}
+
 const { readTasks, writeTasks, saveTask, updateTask, deleteTask } = createTaskService({
   TASKS_FILE,
   readJsonFile,
@@ -1049,6 +1158,101 @@ const {
   normalizeCompanyKey,
   syncNextStepReminderTasks
 });
+
+function applyApprovedAiUpdateProposal(proposal) {
+  // Future action-specific handlers belong here and must call existing investment services.
+  return {
+    applied: false,
+    message:
+      "Approval recorded. Live investment mutation is intentionally deferred until action-specific handlers call existing investment update services.",
+    nextHandler:
+      "Add safe handlers here for each proposedChanges action type, then route allowed patches through updateInvestment or narrower domain services."
+  };
+}
+
+async function callAiUpdateAnalysisModel(prompt) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI analysis is not configured yet.");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: prompt
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_object"
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(formatOpenAiError(errorText, "OpenAI analysis failed"));
+  }
+
+  const payload = await response.json();
+  const parsed = extractJsonObject(extractResponseText(payload));
+  if (!parsed) {
+    throw new Error("OpenAI analysis returned malformed JSON.");
+  }
+
+  return parsed;
+}
+
+const { analyzeInvestmentUpdate } = createAiUpdateAnalysisService({
+  callModel: callAiUpdateAnalysisModel,
+  normalizeEntityName
+});
+
+const {
+  readAiUpdateProposals,
+  saveAiUpdateProposal,
+  approveAiUpdateProposal,
+  rejectAiUpdateProposal
+} = createAiUpdateProposalService({
+  AI_UPDATE_PROPOSALS_FILE,
+  readJsonFile,
+  writeJsonFile,
+  writeMetadata,
+  normalizeAiUpdateProposal,
+  createBackupSnapshot,
+  applyApprovedAiUpdateProposal
+});
+
+function serializeAiUpdateProposal(proposal, investments) {
+  const investment = investments.find((item) => item.id === proposal.investmentId) || null;
+  return {
+    ...proposal,
+    investment: investment
+      ? {
+          id: investment.id,
+          company: investment.company,
+          entity: investment.entity,
+          assetType: investment.assetType,
+          status: investment.status
+        }
+      : null
+  };
+}
 
 function writeCompanyDocuments(documents) {
   writeJsonFile(COMPANY_DOCUMENTS_FILE, documents);
@@ -4497,6 +4701,210 @@ const server = http.createServer(async (request, response) => {
       investments: visibleInvestments,
       companies: buildCompanyRecords(visibleInvestments, tasks, companyDocuments),
       user
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ai-update-proposals") {
+    const user = requireOperatingViewer(request, response);
+    if (!user) {
+      return;
+    }
+
+    const investments = readInvestments();
+    const proposals = filterAiUpdateProposalsForUser(
+      readAiUpdateProposals(),
+      user,
+      investments
+    );
+    sendJson(response, 200, {
+      proposals: proposals.map((proposal) => serializeAiUpdateProposal(proposal, investments)),
+      counts: AI_UPDATE_PROPOSAL_STATUSES.reduce((counts, status) => {
+        counts[status] = proposals.filter((proposal) => proposal.status === status).length;
+        return counts;
+      }, {}),
+      user
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-update-proposals/analyze") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const analyzedAt = new Date().toISOString();
+    try {
+      const payload = await parseRequestBody(request);
+      const investments = filterInvestmentsForUser(readInvestments(), user);
+      const entities = INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity));
+      const selectedInvestmentId = String(payload.investmentId || "").trim();
+      const selectedEntityId = String(payload.entityId || "").trim();
+      const selectedInvestment = selectedInvestmentId
+        ? investments.find((investment) => investment.id === selectedInvestmentId)
+        : null;
+
+      if (selectedInvestmentId && !selectedInvestment) {
+        sendJson(response, 403, { error: "Selected investment is not available." });
+        return;
+      }
+
+      const result = await analyzeInvestmentUpdate({
+        source: {
+          sourceType: payload.sourceType,
+          sender: payload.sender,
+          subject: payload.subject,
+          sourceDate: payload.sourceDate,
+          sourceIdentifier:
+            payload.sourceIdentifier ||
+            [payload.sourceType, payload.sender, payload.subject, payload.sourceDate]
+              .map((item) => String(item || "").trim())
+              .filter(Boolean)
+              .join(" | "),
+          sourceText: payload.sourceText
+        },
+        investments,
+        entities,
+        investmentOverrideId: selectedInvestmentId,
+        entityOverrideId: selectedEntityId
+      });
+
+      console.log(
+        "[ai-update-analysis]",
+        JSON.stringify({
+          analyzedAt,
+          sourceIdentifier: result.source.sourceIdentifier || result.source.subject || "",
+          investmentId: result.analysis.investmentMatch.investmentId,
+          investmentName: result.analysis.investmentMatch.investmentName,
+          matchConfidence: result.analysis.investmentMatch.confidence,
+          succeeded: true
+        })
+      );
+
+      sendJson(response, 200, result);
+      return;
+    } catch (error) {
+      console.warn(
+        "[ai-update-analysis]",
+        JSON.stringify({
+          analyzedAt,
+          succeeded: false,
+          error: error.message || "Analysis failed"
+        })
+      );
+      sendJson(response, 500, { error: error.message || "AI update analysis failed." });
+      return;
+    }
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/api/ai-update-proposals/")) {
+    const user = requireOperatingViewer(request, response);
+    if (!user) {
+      return;
+    }
+
+    const proposalId = url.pathname.split("/")[3];
+    const investments = readInvestments();
+    const proposal = readAiUpdateProposals().find((item) => item.id === proposalId);
+    if (!proposal || !canViewAiUpdateProposal(user, proposal, investments)) {
+      sendJson(response, 404, { error: "AI update proposal not found." });
+      return;
+    }
+
+    sendJson(response, 200, {
+      proposal: serializeAiUpdateProposal(proposal, investments),
+      user
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-update-proposals") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const proposal = normalizeAiUpdateProposal(payload || {});
+      const investments = readInvestments();
+      if (!canReviewAiUpdateProposal(user, proposal, investments)) {
+        sendJson(response, 403, { error: "You do not have access to stage that proposed update." });
+        return;
+      }
+
+      const saved = saveAiUpdateProposal({
+        ...proposal,
+        status: "pending",
+        reviewedBy: "",
+        reviewedAt: ""
+      });
+      sendJson(response, 201, {
+        proposal: serializeAiUpdateProposal(saved, investments)
+      });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "AI update proposal could not be saved." });
+      return;
+    }
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/api/ai-update-proposals/") &&
+    url.pathname.endsWith("/approve")
+  ) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const proposalId = url.pathname.split("/")[3];
+    const investments = readInvestments();
+    const existing = readAiUpdateProposals().find((item) => item.id === proposalId);
+    if (!existing || !canReviewAiUpdateProposal(user, existing, investments)) {
+      sendJson(response, 404, { error: "AI update proposal not found." });
+      return;
+    }
+    if (existing.status !== "pending") {
+      sendJson(response, 409, { error: "Only pending AI update proposals can be approved." });
+      return;
+    }
+
+    const result = approveAiUpdateProposal(proposalId, user.email);
+    sendJson(response, 200, {
+      proposal: serializeAiUpdateProposal(result.proposal, investments),
+      applyResult: result.applyResult
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/api/ai-update-proposals/") &&
+    url.pathname.endsWith("/reject")
+  ) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const proposalId = url.pathname.split("/")[3];
+    const investments = readInvestments();
+    const existing = readAiUpdateProposals().find((item) => item.id === proposalId);
+    if (!existing || !canReviewAiUpdateProposal(user, existing, investments)) {
+      sendJson(response, 404, { error: "AI update proposal not found." });
+      return;
+    }
+    if (existing.status !== "pending") {
+      sendJson(response, 409, { error: "Only pending AI update proposals can be rejected." });
+      return;
+    }
+
+    const proposal = rejectAiUpdateProposal(proposalId, user.email);
+    sendJson(response, 200, {
+      proposal: serializeAiUpdateProposal(proposal, investments)
     });
     return;
   }

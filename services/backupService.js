@@ -5,6 +5,7 @@ function createBackupService({
   BACKUPS_DIR,
   DATA_FILE,
   TASKS_FILE,
+  AI_UPDATE_PROPOSALS_FILE,
   COMPANY_DOCUMENTS_FILE,
   DATA_SCHEMA_VERSION,
   ensureDataFile,
@@ -23,6 +24,9 @@ function createBackupService({
       metadata: readMetadata(),
       investments: readJsonFile(DATA_FILE, []),
       tasks: readJsonFile(TASKS_FILE, []),
+      aiUpdateProposals: AI_UPDATE_PROPOSALS_FILE
+        ? readJsonFile(AI_UPDATE_PROPOSALS_FILE, [])
+        : [],
       companyDocuments: readJsonFile(COMPANY_DOCUMENTS_FILE, [])
     };
     const fileName = `bvb-backup-${timestamp}-${String(reason)
@@ -42,9 +46,15 @@ function createBackupService({
   function restoreFromBackupPayload(payload) {
     const investments = Array.isArray(payload.investments) ? payload.investments : [];
     const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
+    const aiUpdateProposals = Array.isArray(payload.aiUpdateProposals)
+      ? payload.aiUpdateProposals
+      : [];
     const companyDocuments = Array.isArray(payload.companyDocuments) ? payload.companyDocuments : [];
     writeJsonFile(DATA_FILE, investments);
     writeJsonFile(TASKS_FILE, tasks);
+    if (AI_UPDATE_PROPOSALS_FILE) {
+      writeJsonFile(AI_UPDATE_PROPOSALS_FILE, aiUpdateProposals);
+    }
     writeJsonFile(COMPANY_DOCUMENTS_FILE, companyDocuments);
     writeMetadata({
       schemaVersion: DATA_SCHEMA_VERSION,
