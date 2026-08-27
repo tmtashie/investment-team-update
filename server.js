@@ -73,6 +73,11 @@ const ENTITY_ALIASES = {
   "Beaman Ventures": "Beaman Ventures",
   "Lee Beaman": "Lee Beaman",
   "Lee Beaman IRA": "Lee Beaman IRA",
+  "Lee Beaman Ira": "Lee Beaman IRA",
+  "Lee's IRA": "Lee Beaman IRA",
+  "Lees IRA": "Lee Beaman IRA",
+  "Lee IRA": "Lee Beaman IRA",
+  "Lee Beaman Individual Retirement Account": "Lee Beaman IRA",
   "Kat Trust": "Katherine Trust",
   "Nat Trust": "Natalie Trust",
   "Katherine Trust": "Katherine Trust",
@@ -91,7 +96,135 @@ function splitCsv(value) {
 
 function normalizeEntityName(value) {
   const raw = String(value || "").trim();
-  return ENTITY_ALIASES[raw] || raw;
+  const aliasKey = Object.keys(ENTITY_ALIASES).find(
+    (key) => key.toLowerCase() === raw.toLowerCase()
+  );
+  return ENTITY_ALIASES[raw] || (aliasKey ? ENTITY_ALIASES[aliasKey] : raw);
+}
+
+const ROLE_LABELS = {
+  "master-editor": "Master Editor",
+  editor: "Editor",
+  "dashboard-viewer": "Lee Dashboard"
+};
+
+function normalizeUserRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (["master-editor", "master", "admin", "administrator"].includes(normalized)) {
+    return "master-editor";
+  }
+  if (["dashboard-viewer", "dashboard", "lee-dashboard", "lee"].includes(normalized)) {
+    return "dashboard-viewer";
+  }
+  return "editor";
+}
+
+function getRoleLabel(role) {
+  return ROLE_LABELS[normalizeUserRole(role)] || ROLE_LABELS.editor;
+}
+
+function isMasterEditor(user) {
+  return Boolean(user && normalizeUserRole(user.role) === "master-editor");
+}
+
+function isDashboardViewerRole(user) {
+  return Boolean(user && normalizeUserRole(user.role) === "dashboard-viewer");
+}
+
+function isRestrictedEditorInvestment(investment) {
+  const entity = normalizeEntityName(investment && investment.entity);
+  const assetType = String((investment && investment.assetType) || "").trim();
+  return (
+    entity === "Lee Beaman IRA" ||
+    (entity === "Lee Beaman" && ["Public Stock", "Bond / Fixed Income"].includes(assetType))
+  );
+}
+
+function canViewInvestment(user, investment) {
+  if (!user) {
+    return false;
+  }
+  if (isMasterEditor(user) || isDashboardViewerRole(user)) {
+    return true;
+  }
+  return !isRestrictedEditorInvestment(investment);
+}
+
+function canEditInvestment(user, investment) {
+  if (!user || isDashboardViewerRole(user)) {
+    return false;
+  }
+  if (isMasterEditor(user)) {
+    return true;
+  }
+  return !isRestrictedEditorInvestment(investment);
+}
+
+function canViewEntity(user, entity) {
+  if (!user) {
+    return false;
+  }
+  if (isMasterEditor(user) || isDashboardViewerRole(user)) {
+    return true;
+  }
+  return normalizeEntityName(entity) !== "Lee Beaman IRA";
+}
+
+function canUseAdminFeature(user) {
+  return isMasterEditor(user);
+}
+
+function filterInvestmentsForUser(investments, user) {
+  return investments.filter((investment) => canViewInvestment(user, investment));
+}
+
+function canViewTask(user, task, investments = []) {
+  if (!user) {
+    return false;
+  }
+  if (isMasterEditor(user) || isDashboardViewerRole(user)) {
+    return true;
+  }
+  const sourceInvestmentId = String(task && task.sourceInvestmentId || "").trim();
+  if (sourceInvestmentId) {
+    const sourceInvestment = investments.find((investment) => investment.id === sourceInvestmentId);
+    if (sourceInvestment) {
+      return canViewInvestment(user, sourceInvestment);
+    }
+  }
+  return canViewEntity(user, task && task.entity);
+}
+
+function filterTasksForUser(tasks, user, investments = []) {
+  return tasks.filter((task) => canViewTask(user, task, investments));
+}
+
+function canViewCompanyDocument(user, document, investments = []) {
+  if (!user) {
+    return false;
+  }
+  if (isMasterEditor(user) || isDashboardViewerRole(user)) {
+    return true;
+  }
+  const documentEntity = normalizeEntityName(document && document.entity);
+  if (documentEntity === "Lee Beaman IRA") {
+    return false;
+  }
+  const company = normalizeCompanyKey(document && document.company);
+  const entity = normalizeEntityName(document && document.entity);
+  if (!company) {
+    return true;
+  }
+  const matchingInvestments = investments.filter(
+    (investment) =>
+      normalizeCompanyKey(investment.company) === company &&
+      (!entity || normalizeEntityName(investment.entity) === entity)
+  );
+  return !matchingInvestments.length || matchingInvestments.some((investment) => canViewInvestment(user, investment));
+}
+
+function filterCompanyDocumentsForUser(companyDocuments, user, investments = []) {
+  return companyDocuments.filter((document) => canViewCompanyDocument(user, document, investments));
 }
 
 function entityKey(value) {
@@ -122,9 +255,7 @@ function parseTeamUsers(value) {
     const [emailRaw, passwordRaw, roleRaw] = parts;
     const email = emailRaw.toLowerCase();
     const password = passwordRaw;
-    const role = ["viewer", "dashboard-viewer"].includes(roleRaw)
-      ? roleRaw
-      : "editor";
+    const role = normalizeUserRole(roleRaw || "editor");
 
     if (!email || !password) {
       return users;
@@ -1493,16 +1624,17 @@ function getSessionUser(request) {
   return {
     email: session.email,
     name: session.name || session.email,
-    role: session.role || "editor"
+    role: normalizeUserRole(session.role || "editor"),
+    roleLabel: getRoleLabel(session.role || "editor")
   };
 }
 
 function canEdit(user) {
-  return user && !["viewer", "dashboard-viewer"].includes(user.role);
+  return Boolean(user && ["master-editor", "editor"].includes(normalizeUserRole(user.role)));
 }
 
 function canAccessOperatingViews(user) {
-  return user && user.role !== "dashboard-viewer";
+  return Boolean(user && !isDashboardViewerRole(user));
 }
 
 function sendJson(response, statusCode, payload, headers = {}) {
@@ -2270,7 +2402,7 @@ function findRelevantCompanyRecord({ companies, company, entity, question }) {
   return matched || null;
 }
 
-async function askInvestmentAnalyst({ question, company, entity }) {
+async function askInvestmentAnalyst({ question, company, entity, user }) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -2278,9 +2410,10 @@ async function askInvestmentAnalyst({ question, company, entity }) {
   }
 
   const investments = readInvestments();
-  const tasks = syncNextStepReminderTasks(investments, readTasks());
-  const companyDocuments = readCompanyDocuments();
-  const companies = buildCompanyRecords(investments, tasks, companyDocuments);
+  const visibleInvestments = filterInvestmentsForUser(investments, user);
+  const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
+  const companyDocuments = filterCompanyDocumentsForUser(readCompanyDocuments(), user, investments);
+  const companies = buildCompanyRecords(visibleInvestments, tasks, companyDocuments);
   const matchedCompany = findRelevantCompanyRecord({ companies, company, entity, question });
 
   const context = matchedCompany
@@ -2290,7 +2423,7 @@ async function askInvestmentAnalyst({ question, company, entity }) {
       }
     : {
         scope: "portfolio",
-        portfolio: buildPortfolioAnalystContext(investments, tasks, companyDocuments)
+        portfolio: buildPortfolioAnalystContext(visibleInvestments, tasks, companyDocuments)
       };
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -3793,7 +3926,7 @@ function validateLogin(payload) {
       return { error: "Incorrect password." };
     }
 
-    return { value: email, role: teamUser.role || "editor" };
+    return { value: email, role: normalizeUserRole(teamUser.role || "editor") };
   }
 
   if (!sharedPassword) {
@@ -3808,7 +3941,7 @@ function validateLogin(payload) {
     return { error: "Incorrect password." };
   }
 
-  return { value: email, role: "editor" };
+  return { value: email, role: normalizeUserRole(process.env.TEAM_SHARED_ROLE || "master-editor") };
 }
 
 function validateTaskSubmission(payload, sessionUser) {
@@ -4157,6 +4290,20 @@ function requireOperatingViewer(request, response) {
   return user;
 }
 
+function requireMasterEditor(request, response) {
+  const user = requireAuth(request, response);
+  if (!user) {
+    return null;
+  }
+
+  if (!canUseAdminFeature(user)) {
+    sendJson(response, 403, { error: "Master Editor access is required for this action." });
+    return null;
+  }
+
+  return user;
+}
+
 process.on("uncaughtException", (error) => {
   console.error("Uncaught exception:", error);
 });
@@ -4185,7 +4332,10 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/api/config") {
     const user = getSessionUser(request);
     const metadata = readMetadata();
-    const tasks = syncNextStepReminderTasks();
+    const investments = readInvestments();
+    const tasks = user
+      ? filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments)
+      : [];
     const openReminderCount = tasks.filter(
       (task) =>
         task.autoManaged &&
@@ -4201,7 +4351,7 @@ const server = http.createServer(async (request, response) => {
       updateRequestFromEmail: getUpdateRequestFromEmail(),
       updateRequestReplyToEmail: getUpdateRequestReplyToEmail(),
       aiConfigured: Boolean(process.env.OPENAI_API_KEY),
-      entities: INVESTMENT_ENTITIES,
+      entities: INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity)),
       familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
       authConfigured: Boolean(
         (process.env.TEAM_PASSWORD || Object.keys(TEAM_USERS).length > 0) && process.env.SESSION_SECRET
@@ -4290,10 +4440,11 @@ const server = http.createServer(async (request, response) => {
       }
 
       const expiresAt = Date.now() + SESSION_DURATION_MS;
+      const role = normalizeUserRole(validation.role || "editor");
       const sessionValue = signSession({
         email: validation.value,
         name: validation.value,
-        role: validation.role || "editor",
+        role,
         expiresAt
       });
 
@@ -4305,7 +4456,8 @@ const server = http.createServer(async (request, response) => {
           user: {
             email: validation.value,
             name: validation.value,
-            role: validation.role || "editor"
+            role,
+            roleLabel: getRoleLabel(role)
           }
         },
         {
@@ -4338,11 +4490,12 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investments = readInvestments();
-    const tasks = syncNextStepReminderTasks(investments, readTasks());
-    const companyDocuments = readCompanyDocuments();
+    const visibleInvestments = filterInvestmentsForUser(investments, user);
+    const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
+    const companyDocuments = filterCompanyDocumentsForUser(readCompanyDocuments(), user, investments);
     sendJson(response, 200, {
-      investments,
-      companies: buildCompanyRecords(investments, tasks, companyDocuments),
+      investments: visibleInvestments,
+      companies: buildCompanyRecords(visibleInvestments, tasks, companyDocuments),
       user
     });
     return;
@@ -4354,7 +4507,9 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    sendJson(response, 200, { tasks: syncNextStepReminderTasks(readInvestments(), readTasks()), user });
+    const investments = readInvestments();
+    const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
+    sendJson(response, 200, { tasks, user });
     return;
   }
 
@@ -4364,7 +4519,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    const csv = buildInvestmentsCsv(readInvestments());
+    const csv = buildInvestmentsCsv(filterInvestmentsForUser(readInvestments(), user));
     response.writeHead(200, {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": 'attachment; filename="investment-updates.csv"'
@@ -4380,7 +4535,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     try {
-      const workbookBuffer = buildInvestmentsWorkbookBuffer(readInvestments());
+      const workbookBuffer = buildInvestmentsWorkbookBuffer(filterInvestmentsForUser(readInvestments(), user));
       response.writeHead(200, {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -4395,7 +4550,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/api/backup-export") {
-    const user = requireOperatingViewer(request, response);
+    const user = requireMasterEditor(request, response);
     if (!user) {
       return;
     }
@@ -4416,9 +4571,10 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investments = readInvestments();
-    const tasks = syncNextStepReminderTasks(investments, readTasks());
+    const visibleInvestments = filterInvestmentsForUser(investments, user);
+    const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
     const metadata = readMetadata();
-    const digest = buildBiweeklyDigest(investments, tasks, metadata);
+    const digest = buildBiweeklyDigest(visibleInvestments, tasks, metadata);
     sendJson(response, 200, {
       digest: {
         subject: digest.subject,
@@ -4448,9 +4604,10 @@ const server = http.createServer(async (request, response) => {
         ? payload.recipients.map((item) => String(item).trim()).filter(Boolean)
         : DEFAULT_RECIPIENTS;
       const investments = readInvestments();
-      const tasks = syncNextStepReminderTasks(investments, readTasks());
+      const visibleInvestments = filterInvestmentsForUser(investments, user);
+      const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
       const metadata = readMetadata();
-      const digest = buildBiweeklyDigest(investments, tasks, metadata, recipients);
+      const digest = buildBiweeklyDigest(visibleInvestments, tasks, metadata, recipients);
       const email = await sendEmail(
         {
           subject: digest.subject,
@@ -4490,7 +4647,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     try {
-      const workbookBuffer = buildFamilyOfficeWorkbookBuffer(readInvestments());
+      const workbookBuffer = buildFamilyOfficeWorkbookBuffer(filterInvestmentsForUser(readInvestments(), user));
       response.writeHead(200, {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -4508,7 +4665,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/import-workbook") {
-    const user = requireEditor(request, response);
+    const user = requireMasterEditor(request, response);
     if (!user) {
       return;
     }
@@ -4545,7 +4702,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/restore-backup") {
-    const user = requireEditor(request, response);
+    const user = requireMasterEditor(request, response);
     if (!user) {
       return;
     }
@@ -4642,6 +4799,11 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      if (!canViewCompanyDocument(user, { company, entity }, readInvestments())) {
+        sendJson(response, 403, { error: "You do not have access to documents for that investment." });
+        return;
+      }
+
       ensureDataFile();
       const storedName = safeFilename(filename);
       const filePath = path.join(UPLOADS_DIR, storedName);
@@ -4673,6 +4835,12 @@ const server = http.createServer(async (request, response) => {
     }
 
     const documentId = url.pathname.split("/").pop();
+    const investments = readInvestments();
+    const document = readCompanyDocuments().find((item) => item.id === documentId);
+    if (document && !canViewCompanyDocument(user, document, investments)) {
+      sendJson(response, 403, { error: "You do not have access to delete that investment file." });
+      return;
+    }
     const deleted = deleteCompanyDocument(documentId);
 
     if (!deleted) {
@@ -4711,6 +4879,10 @@ const server = http.createServer(async (request, response) => {
       }
 
       const entry = validation.value;
+      if (!canEditInvestment(user, entry)) {
+        sendJson(response, 403, { error: "You do not have access to create or edit that holding." });
+        return;
+      }
       const recipients = entry.recipients.length > 0 ? entry.recipients : DEFAULT_RECIPIENTS;
       const completeEntry = {
         ...entry,
@@ -4748,6 +4920,11 @@ const server = http.createServer(async (request, response) => {
     try {
       const investmentId = url.pathname.split("/")[3];
       const payload = await parseRequestBody(request);
+      const investment = readInvestments().find((item) => item.id === investmentId);
+      if (investment && !canEditInvestment(user, investment)) {
+        sendJson(response, 403, { error: "You do not have access to request updates for that holding." });
+        return;
+      }
       const result = await sendUpdateRequestEmail(investmentId, payload, user);
       if (result.error) {
         sendJson(response, result.statusCode || 400, { error: result.error });
@@ -4770,11 +4947,21 @@ const server = http.createServer(async (request, response) => {
 
     try {
       const investmentId = url.pathname.split("/").pop();
+      const existingInvestment = readInvestments().find((investment) => investment.id === investmentId);
+      if (existingInvestment && !canEditInvestment(user, existingInvestment)) {
+        sendJson(response, 403, { error: "You do not have access to edit that holding." });
+        return;
+      }
       const payload = await parseRequestBody(request);
       const validation = validateInvestmentPatch(payload);
 
       if (validation.error) {
         sendJson(response, 400, { error: validation.error });
+        return;
+      }
+
+      if (!canEditInvestment(user, validation.value)) {
+        sendJson(response, 403, { error: "You do not have access to move or edit that holding." });
         return;
       }
 
@@ -4799,6 +4986,11 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investmentId = url.pathname.split("/").pop();
+    const existingInvestment = readInvestments().find((investment) => investment.id === investmentId);
+    if (existingInvestment && !canEditInvestment(user, existingInvestment)) {
+      sendJson(response, 403, { error: "You do not have access to delete that holding." });
+      return;
+    }
     const deleted = deleteInvestment(investmentId);
 
     if (!deleted) {
@@ -4926,7 +5118,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = await askInvestmentAnalyst({ question, company, entity });
+      const result = await askInvestmentAnalyst({ question, company, entity, user });
       sendJson(response, 200, result);
       return;
     } catch (error) {
@@ -4950,6 +5142,11 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      if (!canViewTask(user, validation.value, readInvestments())) {
+        sendJson(response, 403, { error: "You do not have access to create tasks for that holding." });
+        return;
+      }
+
       const task = saveTask(validation.value);
       sendJson(response, 201, { task });
       return;
@@ -4967,11 +5164,22 @@ const server = http.createServer(async (request, response) => {
 
     try {
       const taskId = url.pathname.split("/").pop();
+      const investments = readInvestments();
+      const existingTask = readTasks().find((task) => task.id === taskId);
+      if (existingTask && !canViewTask(user, existingTask, investments)) {
+        sendJson(response, 403, { error: "You do not have access to edit that task." });
+        return;
+      }
       const payload = await parseRequestBody(request);
       const validation = validateTaskPatch(payload);
 
       if (validation.error) {
         sendJson(response, 400, { error: validation.error });
+        return;
+      }
+
+      if (!canViewTask(user, validation.value, investments)) {
+        sendJson(response, 403, { error: "You do not have access to move that task." });
         return;
       }
 
@@ -4996,6 +5204,12 @@ const server = http.createServer(async (request, response) => {
     }
 
     const taskId = url.pathname.split("/").pop();
+    const investments = readInvestments();
+    const existingTask = readTasks().find((task) => task.id === taskId);
+    if (existingTask && !canViewTask(user, existingTask, investments)) {
+      sendJson(response, 403, { error: "You do not have access to delete that task." });
+      return;
+    }
     const deleted = deleteTask(taskId);
 
     if (!deleted) {
@@ -5009,12 +5223,24 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET") {
     if (url.pathname.startsWith("/uploads/")) {
+      const user = requireAuth(request, response);
+      if (!user) {
+        return;
+      }
       const requestedUpload = path
         .normalize(url.pathname.replace(/^\/uploads\//, ""))
         .replace(/^(\.\.[/\\])+/, "");
       const filePath = path.join(UPLOADS_DIR, requestedUpload);
 
       if (!filePath.startsWith(UPLOADS_DIR)) {
+        sendText(response, 403, "Forbidden");
+        return;
+      }
+
+      const document = readCompanyDocuments().find(
+        (item) => String(item.storedName || "").trim() === requestedUpload
+      );
+      if (document && !canViewCompanyDocument(user, document, readInvestments())) {
         sendText(response, 403, "Forbidden");
         return;
       }

@@ -41,6 +41,8 @@ const digestPreview = document.getElementById("digestPreview");
 const reconciliationMessage = document.getElementById("reconciliationMessage");
 const importWorkbookFile = document.getElementById("importWorkbookFile");
 const restoreBackupFile = document.getElementById("restoreBackupFile");
+const importWorkbookLabel = document.querySelector("label[for='importWorkbookFile']");
+const restoreBackupLabel = document.querySelector("label[for='restoreBackupFile']");
 const importWorkbookMessage = document.getElementById("importWorkbookMessage");
 const cancelEditButton = document.getElementById("cancelEditButton");
 const editingInvestmentId = document.getElementById("editingInvestmentId");
@@ -568,6 +570,11 @@ const ENTITY_ALIASES = {
   "Beaman Ventures": "Beaman Ventures",
   "Lee Beaman": "Lee Beaman",
   "Lee Beaman IRA": "Lee Beaman IRA",
+  "Lee Beaman Ira": "Lee Beaman IRA",
+  "Lee's IRA": "Lee Beaman IRA",
+  "Lees IRA": "Lee Beaman IRA",
+  "Lee IRA": "Lee Beaman IRA",
+  "Lee Beaman Individual Retirement Account": "Lee Beaman IRA",
   "Kat Trust": "Katherine Trust",
   "Nat Trust": "Natalie Trust",
   "Katherine Trust": "Katherine Trust",
@@ -603,7 +610,10 @@ function statusEquals(left, right) {
 
 function normalizeEntityName(value) {
   const raw = String(value || "").trim();
-  return ENTITY_ALIASES[raw] || raw;
+  const aliasKey = Object.keys(ENTITY_ALIASES).find(
+    (key) => key.toLowerCase() === raw.toLowerCase()
+  );
+  return ENTITY_ALIASES[raw] || (aliasKey ? ENTITY_ALIASES[aliasKey] : raw);
 }
 
 function entityKey(value) {
@@ -713,6 +723,7 @@ function setSignedInState(user) {
   currentUser = user;
   const isSignedIn = Boolean(user);
   const dashboardViewer = Boolean(user && user.role === "dashboard-viewer");
+  const roleLabel = user && (user.roleLabel || getRoleLabel(user.role));
 
   loginPanel.classList.toggle("hidden", isSignedIn);
   appPanel.classList.toggle("hidden", !isSignedIn);
@@ -720,7 +731,7 @@ function setSignedInState(user) {
   authStatus.textContent = isSignedIn
     ? dashboardViewer
       ? getDashboardViewerGreeting(user)
-      : `Signed in as ${user.email}${user.role ? ` • ${user.role}` : ""}`
+      : `Signed in as ${user.email}${roleLabel ? ` • Role: ${roleLabel}` : ""}`
     : "Please sign in to view updates";
   brandSubtitle.textContent = dashboardViewer
     ? getDashboardViewerBrandSubtitle(user)
@@ -835,8 +846,22 @@ function canEditWorkspace() {
   return !currentUser || !["viewer", "dashboard-viewer"].includes(currentUser.role);
 }
 
+function isMasterEditor() {
+  return Boolean(currentUser && currentUser.role === "master-editor");
+}
+
 function isDashboardViewer() {
   return Boolean(currentUser && currentUser.role === "dashboard-viewer");
+}
+
+function getRoleLabel(role) {
+  if (role === "master-editor") {
+    return "Master Editor";
+  }
+  if (role === "dashboard-viewer") {
+    return "Lee Dashboard";
+  }
+  return "Editor";
 }
 
 function canAccessWorkspaceView(viewName) {
@@ -1878,11 +1903,19 @@ function renderUploadedDocuments() {
 function renderRoleState() {
   const editable = canEditWorkspace();
   const dashboardViewer = isDashboardViewer();
+  const masterEditor = isMasterEditor();
   const dashboardCopy = dashboardSection.querySelector(".section-copy");
   const entityPerformanceCopy = entityPerformanceSection.querySelector(".section-copy");
   form.classList.toggle("hidden", !editable);
   taskForm.classList.toggle("hidden", !editable);
   sendDigestButton.classList.toggle("hidden", !editable);
+  downloadBackupButton.classList.toggle("hidden", !masterEditor);
+  if (importWorkbookLabel) {
+    importWorkbookLabel.classList.toggle("hidden", !masterEditor);
+  }
+  if (restoreBackupLabel) {
+    restoreBackupLabel.classList.toggle("hidden", !masterEditor);
+  }
   menuToggleButton.classList.toggle("hidden", dashboardViewer);
   if (dashboardViewer) {
     workspaceMenu.classList.add("hidden");
@@ -1904,9 +1937,11 @@ function renderRoleState() {
     ? DASHBOARD_VIEWER_ENTITY_PERFORMANCE_COPY
     : DEFAULT_ENTITY_PERFORMANCE_COPY;
   syncAiAnalystWidgetAvailability();
-  roleNotice.textContent = editable
-    ? "Editors can add investments, tasks, documents, and research."
-    : dashboardViewer
+  roleNotice.textContent = masterEditor
+    ? "Role: Master Editor. Full portfolio administration is enabled."
+    : editable
+      ? "Role: Editor. Lee Beaman IRA plus Lee Beaman public stock and fixed income holdings are restricted."
+      : dashboardViewer
       ? "This account is configured for a clean read-only family dashboard."
       : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
 }
@@ -4964,6 +4999,27 @@ function renderFilterOptions() {
   assignOptions(ownerFilter, "All owners", owners);
 }
 
+function renderConfiguredEntitySelects() {
+  const renderSelect = (element, placeholder) => {
+    if (!element) {
+      return;
+    }
+    const currentValue = normalizeEntityName(element.value);
+    element.innerHTML = [`<option value="">${placeholder}</option>`]
+      .concat(
+        configuredEntities.map(
+          (entity) => `<option value="${escapeHtml(entity)}">${escapeHtml(entity)}</option>`
+        )
+      )
+      .join("");
+    element.value = configuredEntities.includes(currentValue) ? currentValue : "";
+  };
+
+  renderSelect(form && form.elements ? form.elements.entity : null, "Select entity");
+  renderSelect(taskForm && taskForm.elements ? taskForm.elements.entity : null, "Select entity");
+  renderSelect(aiAnalystEntityField, "Any entity");
+}
+
 function renderCompanySuggestions() {
   const companies = Array.from(
     new Set(
@@ -7731,10 +7787,11 @@ async function loadConfig() {
     recipientStatus.textContent += ` • Last digest sent ${formatDisplayDate(digestStatus.lastDigestSentAt)}`;
   }
   configuredEntities = Array.isArray(config.entities) ? config.entities : [];
+  renderConfiguredEntitySelects();
 
   loginCopy.textContent =
     config.authMode === "individual"
-      ? `Use your email and your personal workspace password to sign in. ${config.teamUserCount} team login${config.teamUserCount === 1 ? "" : "s"} configured. Add :viewer for full read-only access or :dashboard-viewer for dashboard-only access in TEAM_USERS.`
+      ? `Use your email and your personal workspace password to sign in. ${config.teamUserCount} team login${config.teamUserCount === 1 ? "" : "s"} configured. TEAM_USERS roles: master-editor, editor, or dashboard-viewer.`
       : "Use your email and the shared workspace password to unlock updates.";
 
   if (!config.aiConfigured) {
@@ -7753,7 +7810,7 @@ async function loadConfig() {
   }
 
   roleNotice.textContent = config.canEdit
-    ? "Editors can add investments, tasks, documents, and research."
+    ? `Role: ${config.user && config.user.roleLabel ? config.user.roleLabel : getRoleLabel(config.user && config.user.role)}.`
     : "Your account is view-only. You can review investments, research, and tasks, but editing is disabled.";
 
   if (investmentsLoaded || !currentUser) {
