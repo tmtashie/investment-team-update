@@ -4555,14 +4555,17 @@ function renderDashboard(investments) {
         ];
 
         return `
-        <article class="dashboard-card entity-performance-card" data-entity="${escapeHtml(entity)}">
-          <div class="entity-performance-header">
+        <section class="entity-performance-group" data-entity="${escapeHtml(entity)}" data-entity-group="${escapeHtml(entity)}">
+          <div class="entity-performance-group-header">
             <div>
               <p class="dashboard-label">Entity</p>
               <h3>${escapeHtml(entity)}</h3>
             </div>
             ${isDashboardViewer() ? "" : '<span class="entity-open-pill">Open entity</span>'}
           </div>
+          <div class="entity-performance-group-grid">
+        <article class="dashboard-card entity-performance-card entity-summary-card" data-entity="${escapeHtml(entity)}">
+          <p class="dashboard-label">Entity summary</p>
           <div class="entity-metric-grid">
             ${metrics
               .map(
@@ -4583,7 +4586,7 @@ function renderDashboard(investments) {
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Public Holdings</p>
-                    <h3>${escapeHtml(entity)}</h3>
+                    <h3>Public equity</h3>
                   </div>
                   <span class="status-chip">${escapeHtml(String(publicHoldings.positions.length))} position${publicHoldings.positions.length === 1 ? "" : "s"}</span>
                 </div>
@@ -4617,7 +4620,7 @@ function renderDashboard(investments) {
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Fixed Income Holdings</p>
-                    <h3>${escapeHtml(entity)}</h3>
+                    <h3>Fixed income</h3>
                   </div>
                   <span class="status-chip">${escapeHtml(String(fixedIncomeHoldings.positions.length))} position${fixedIncomeHoldings.positions.length === 1 ? "" : "s"}</span>
                 </div>
@@ -4652,7 +4655,7 @@ function renderDashboard(investments) {
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Real Estate Holdings</p>
-                    <h3>${escapeHtml(entity)}</h3>
+                    <h3>Real estate</h3>
                   </div>
                   <span class="status-chip">${escapeHtml(String(realEstateHoldings.positions.length))} propert${realEstateHoldings.positions.length === 1 ? "y" : "ies"}</span>
                 </div>
@@ -4688,7 +4691,7 @@ function renderDashboard(investments) {
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Cash Holdings</p>
-                    <h3>${escapeHtml(entity)}</h3>
+                    <h3>Cash</h3>
                   </div>
                   <span class="status-chip">${escapeHtml(String(cashHoldings.positions.length))} account${cashHoldings.positions.length === 1 ? "" : "s"}</span>
                 </div>
@@ -4719,6 +4722,8 @@ function renderDashboard(investments) {
             `
             : ""
         }
+          </div>
+        </section>
       `;
       }
     )
