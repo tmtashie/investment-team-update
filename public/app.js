@@ -4553,32 +4553,46 @@ function renderDashboard(investments) {
           { label: "Internal XIRR", value: formatPercent(totals.internal.xirr) },
           { label: "Internal MOIC", value: formatTurns(totals.internal.moic) }
         ];
+        const isLeeBeamanIraEntity = normalizeEntityName(entity) === "Lee Beaman IRA";
+        const publicHoldingsTitle = isLeeBeamanIraEntity ? entity : "Public equity";
 
         return `
         <section class="entity-performance-group" data-entity="${escapeHtml(entity)}" data-entity-group="${escapeHtml(entity)}">
-          <div class="entity-performance-group-header">
-            <div>
-              <p class="dashboard-label">Entity</p>
-              <h3>${escapeHtml(entity)}</h3>
-            </div>
-            ${isDashboardViewer() ? "" : '<span class="entity-open-pill">Open entity</span>'}
-          </div>
-          <div class="entity-performance-group-grid">
-        <article class="dashboard-card entity-performance-card entity-summary-card" data-entity="${escapeHtml(entity)}">
-          <p class="dashboard-label">Entity summary</p>
-          <div class="entity-metric-grid">
-            ${metrics
-              .map(
-                (metric) => `
-                  <div class="entity-metric-box">
-                    <p class="dashboard-label">${escapeHtml(metric.label)}</p>
-                    <p class="dashboard-value">${escapeHtml(metric.value)}</p>
+          ${
+            isLeeBeamanIraEntity
+              ? ""
+              : `
+                <div class="entity-performance-group-header">
+                  <div>
+                    <p class="dashboard-label">Entity</p>
+                    <h3>${escapeHtml(entity)}</h3>
                   </div>
-                `
-              )
-              .join("")}
-          </div>
-        </article>
+                  ${isDashboardViewer() ? "" : '<span class="entity-open-pill">Open entity</span>'}
+                </div>
+              `
+          }
+          <div class="entity-performance-group-grid">
+        ${
+          isLeeBeamanIraEntity
+            ? ""
+            : `
+              <article class="dashboard-card entity-performance-card entity-summary-card" data-entity="${escapeHtml(entity)}">
+                <p class="dashboard-label">Entity summary</p>
+                <div class="entity-metric-grid">
+                  ${metrics
+                    .map(
+                      (metric) => `
+                        <div class="entity-metric-box">
+                          <p class="dashboard-label">${escapeHtml(metric.label)}</p>
+                          <p class="dashboard-value">${escapeHtml(metric.value)}</p>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+        }
         ${
           publicHoldings.positions.length
             ? `
@@ -4586,7 +4600,7 @@ function renderDashboard(investments) {
                 <div class="entity-performance-header">
                   <div>
                     <p class="dashboard-label">Public Holdings</p>
-                    <h3>Public equity</h3>
+                    <h3>${escapeHtml(publicHoldingsTitle)}</h3>
                   </div>
                   <span class="status-chip">${escapeHtml(String(publicHoldings.positions.length))} position${publicHoldings.positions.length === 1 ? "" : "s"}</span>
                 </div>
