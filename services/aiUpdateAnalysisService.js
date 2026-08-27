@@ -39,12 +39,21 @@ function compactMatchText(value) {
   return normalizeMatchText(value).replace(/\s+/g, "");
 }
 
-function splitSourceSpans(sourceText) {
-  return asString(sourceText, MAX_SOURCE_TEXT_LENGTH)
-    .replace(/\r\n/g, "\n")
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((span) => span.replace(/\s+/g, " ").trim())
-    .filter(Boolean)
+function splitSourceSpans(sourceText, pages = []) {
+  const sourcePages = Array.isArray(pages) && pages.length
+    ? pages
+    : [{ pageNumber: "", text: sourceText }];
+  return sourcePages
+    .flatMap((page) =>
+      asString(page && page.text, MAX_SOURCE_TEXT_LENGTH)
+        .replace(/\r\n/g, "\n")
+        .split(/(?<=[.!?])\s+|\n+/)
+        .map((span) => ({
+          text: span.replace(/\s+/g, " ").trim(),
+          pageNumber: page && page.pageNumber ? page.pageNumber : ""
+        }))
+    )
+    .filter((span) => span.text)
     .slice(0, 300);
 }
 
@@ -151,28 +160,29 @@ function spanHasValue(span, value) {
   });
 }
 
-function findSupportingSourceSnippet({ sourceText, field, value, alternateValue, period, date, hint }) {
-  const spans = splitSourceSpans(sourceText);
+function findSupportingSourceSnippet({ sourceText, pages, field, value, alternateValue, period, date, hint }) {
+  const spans = splitSourceSpans(sourceText, pages);
   const targetNumeric = parseNumericValue(value);
   if (!spans.length) {
     return { evidence: "", evidenceStatus: "unresolved" };
   }
 
-  const exactHint = hint && spans.find((span) => hasExplicitPhrase(span, hint));
+  const exactHint = hint && spans.find((span) => hasExplicitPhrase(span.text, hint));
   if (exactHint) {
     return {
-      evidence: exactHint,
-      evidenceStatus: spanHasContext(exactHint, field) || spanHasValue(exactHint, value) ? "verified" : "probable"
+      evidence: exactHint.text,
+      evidenceStatus: spanHasContext(exactHint.text, field) || spanHasValue(exactHint.text, value) ? "verified" : "probable",
+      sourcePage: exactHint.pageNumber
     };
   }
 
   const scored = spans
     .map((span) => {
-      const hasContext = spanHasContext(span, field);
-      const hasProposedValue = spanHasValue(span, value);
-      const hasAlternateValue = alternateValue !== undefined && alternateValue !== "" && spanHasValue(span, alternateValue);
-      const hasPeriod = period ? hasExplicitPhrase(span, period) : false;
-      const hasDate = date ? hasExplicitPhrase(span, date) : false;
+      const hasContext = spanHasContext(span.text, field);
+      const hasProposedValue = spanHasValue(span.text, value);
+      const hasAlternateValue = alternateValue !== undefined && alternateValue !== "" && spanHasValue(span.text, alternateValue);
+      const hasPeriod = period ? hasExplicitPhrase(span.text, period) : false;
+      const hasDate = date ? hasExplicitPhrase(span.text, date) : false;
       let score = 0;
       if (hasContext) score += 4;
       if (hasProposedValue) score += 5;
@@ -182,17 +192,17 @@ function findSupportingSourceSnippet({ sourceText, field, value, alternateValue,
       return { span, score, hasContext, hasProposedValue };
     })
     .filter((candidate) => candidate.score > 0)
-    .sort((left, right) => right.score - left.score || left.span.length - right.span.length);
+    .sort((left, right) => right.score - left.score || left.span.text.length - right.span.text.length);
 
   const best = scored[0];
   if (!best) {
     return { evidence: "", evidenceStatus: "unresolved" };
   }
   if (best.hasContext && best.hasProposedValue) {
-    return { evidence: best.span, evidenceStatus: "verified" };
+    return { evidence: best.span.text, evidenceStatus: "verified", sourcePage: best.span.pageNumber };
   }
   if (best.hasContext && best.score >= 4 && targetNumeric === null) {
-    return { evidence: best.span, evidenceStatus: "probable" };
+    return { evidence: best.span.text, evidenceStatus: "probable", sourcePage: best.span.pageNumber };
   }
   return { evidence: "", evidenceStatus: "unresolved" };
 }
@@ -247,6 +257,9 @@ function findMatchedAlias(sourceParts, aliases) {
     if (hasExplicitPhrase(sourceParts.subject, alias)) {
       return { alias, location: "subject", weight: 92 };
     }
+    if (hasExplicitPhrase(sourceParts.filename, alias)) {
+      return { alias, location: "filename", weight: 72 };
+    }
   }
   return null;
 }
@@ -274,7 +287,8 @@ function generateInvestmentMatchCandidates({ source, investments }) {
   const sourceParts = {
     body: asString(source && source.sourceText, MAX_SOURCE_TEXT_LENGTH),
     subject: asString(source && source.subject, 240),
-    sender: asString(source && source.sender, 240)
+    sender: asString(source && source.sender, 240),
+    filename: asString(source && source.filename, 240)
   };
 
   const candidates = investments
@@ -325,6 +339,9 @@ function generateInvestmentMatchCandidates({ source, investments }) {
 function confidenceFromDeterministicCandidate(candidate, hasCompetingCandidate) {
   if (!candidate) {
     return 0;
+  }
+  if (candidate.hasExplicitNameEvidence && /filename/i.test(candidate.reason || "")) {
+    return hasCompetingCandidate ? 72 : candidate.hasDomainEvidence ? 84 : 78;
   }
   if (candidate.hasExplicitNameEvidence && !hasCompetingCandidate) {
     return candidate.hasDomainEvidence ? 98 : 96;
@@ -449,10 +466,11 @@ function addEvidenceWarning(unresolved, seenWarnings, item) {
   unresolved.push(`Could not verify source evidence for ${item.field || item.actionType || "unlabeled"}.`);
 }
 
-function enforceSourceEvidence(items, sourceText, unresolved, seenWarnings, label) {
+function enforceSourceEvidence(items, source, unresolved, seenWarnings, label) {
   return items.map((item) => {
     const located = findSupportingSourceSnippet({
-      sourceText,
+      sourceText: source.sourceText,
+      pages: source.pages,
       field: item.field || item.actionType,
       value: item.proposedValue !== undefined ? item.proposedValue : item.value,
       alternateValue: item.currentValue,
@@ -466,14 +484,16 @@ function enforceSourceEvidence(items, sourceText, unresolved, seenWarnings, labe
         ...item,
         sourceEvidence: "",
         evidenceStatus: "unresolved",
-        evidenceUnavailable: true
+        evidenceUnavailable: true,
+        sourcePage: ""
       };
     }
     return {
       ...item,
       sourceEvidence: located.evidence,
       evidenceStatus: located.evidenceStatus,
-      evidenceUnavailable: false
+      evidenceUnavailable: false,
+      sourcePage: located.sourcePage || ""
     };
   });
 }
@@ -644,7 +664,8 @@ function normalizeAnalysisResult({
   investmentOverrideId,
   entityOverrideId,
   deterministicMatch,
-  sourceText = ""
+  sourceText = "",
+  sourcePages = []
 }) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("AI analysis returned malformed JSON.");
@@ -783,7 +804,7 @@ function normalizeAnalysisResult({
 
   const extractedFacts = enforceSourceEvidence(
     asArray(raw.extractedFacts || raw.extracted_facts).map(normalizeFact),
-    sourceText,
+    { sourceText, pages: sourcePages },
     unresolved,
     new Set(),
     "Extracted fact"
@@ -796,7 +817,7 @@ function normalizeAnalysisResult({
   const proposedChanges = addCurrentValuesFromInvestment(
     enforceSourceEvidence(
       asArray(raw.proposedChanges || raw.proposed_changes).map(normalizeProposedChange),
-      sourceText,
+      { sourceText, pages: sourcePages },
       unresolved,
       seenEvidenceWarnings,
       "Proposed change"
@@ -881,6 +902,7 @@ function buildAnalysisPrompt({ source, investments, entities, selectedInvestment
       ? "A deterministic local pass found candidate investments. Choose only from these candidates unless no candidate fits the source."
       : "No deterministic name, alias, subject, or sender-domain match was found. If matching semantically, keep confidence at 84 or below and explain the uncertainty.",
     "For every material fact, sourceEvidence must be the shortest actual quote or phrase from the source text. If no supporting phrase exists, leave sourceEvidence empty and add an unresolved item.",
+    "When the source is a PDF, use the page labels in the source text to keep evidence page-aware.",
     "Return only valid JSON matching this shape:",
     JSON.stringify(
       {
@@ -980,14 +1002,18 @@ function buildAnalysisPrompt({ source, investments, entities, selectedInvestment
         sourceType: source.sourceType,
         sender: source.sender,
         subject: source.subject,
-        sourceDate: source.sourceDate
+        sourceDate: source.sourceDate,
+        filename: source.filename,
+        pageCount: source.pageCount
       },
       null,
       2
     ),
     "",
     "Untrusted source material:",
-    source.sourceText
+    Array.isArray(source.pages) && source.pages.length
+      ? source.pages.map((page) => `Page ${page.pageNumber}:\n${page.text}`).join("\n\n")
+      : source.sourceText
   ].join("\n");
 }
 
@@ -1009,6 +1035,16 @@ function createAiUpdateAnalysisService({
       subject: asString(source && source.subject, 240),
       sourceDate: asString(source && source.sourceDate, 80),
       sourceIdentifier: asString(source && source.sourceIdentifier, 240),
+      filename: asString(source && source.filename, 240),
+      pageCount: Number(source && source.pageCount) || 0,
+      pages: Array.isArray(source && source.pages)
+        ? source.pages
+            .map((page) => ({
+              pageNumber: Number(page && page.pageNumber) || "",
+              text: asString(page && page.text, MAX_SOURCE_TEXT_LENGTH)
+            }))
+            .filter((page) => page.text)
+        : [],
       sourceText: asString(source && source.sourceText, MAX_SOURCE_TEXT_LENGTH)
     };
 
@@ -1044,7 +1080,8 @@ function createAiUpdateAnalysisService({
       investmentOverrideId,
       entityOverrideId,
       deterministicMatch,
-      sourceText: cleanSource.sourceText
+      sourceText: cleanSource.sourceText,
+      sourcePages: cleanSource.pages
     });
 
     return {

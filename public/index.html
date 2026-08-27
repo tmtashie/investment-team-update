@@ -447,6 +447,11 @@
                 Source text
                 <textarea id="aiAnalysisSourceTextField" name="sourceText" rows="10" placeholder="Paste the email, investor update, or call notes here."></textarea>
               </label>
+              <label class="deck-drop-zone ai-pdf-drop-zone" for="aiAnalysisPdfFileField">
+                <span class="deck-drop-title">PDF source</span>
+                <input id="aiAnalysisPdfFileField" name="sourceFile" type="file" accept="application/pdf,.pdf" />
+                <span id="aiAnalysisPdfFileName" class="deck-drop-subtitle">No PDF selected.</span>
+              </label>
               <div class="form-actions">
                 <button id="runAiUpdateAnalysisButton" type="submit">Analyze</button>
               </div>

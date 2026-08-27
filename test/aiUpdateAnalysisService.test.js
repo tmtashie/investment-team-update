@@ -861,3 +861,110 @@ test("distribution extraction remains a high-risk staged proposal", () => {
   assert.equal(result.proposedChanges[0].riskLevel, "high");
   assert.equal(result.proposedChanges[0].field, "distributionAmount");
 });
+
+test("PDF page spans preserve source page on verified evidence", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 76 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "$3.0M",
+        sourceEvidence: "July revenue was $3.0 million",
+        confidence: 94
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [
+      {
+        actionType: "update operating metric",
+        field: "revenue",
+        currentValue: "",
+        proposedValue: "$3.0M",
+        sourceEvidence: "July revenue was $3.0 million",
+        confidence: 94,
+        riskLevel: "medium"
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      filename: "FINSYNC July investor update.pdf",
+      pageCount: 2,
+      sourceText: "Page 1:\nFINSYNC investor update.\n\nPage 2:\nJuly revenue was $3.0 million.",
+      pages: [
+        { pageNumber: 1, text: "FINSYNC investor update." },
+        { pageNumber: 2, text: "July revenue was $3.0 million." }
+      ]
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.extractedFacts[0].evidenceStatus, "verified");
+  assert.equal(result.analysis.extractedFacts[0].sourcePage, 2);
+  assert.equal(result.analysis.proposedChanges[0].sourcePage, 2);
+});
+
+test("PDF filename can support matching but does not override explicit body evidence", async () => {
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "vanguard-id",
+      investmentName: "VANGUARD SHORT-TERM CORPORATE BOND ETF",
+      confidence: 82,
+      reason: "Filename mentioned Vanguard."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      filename: "Vanguard update.pdf",
+      sourceText: "FINSYNC July investor update reported revenue of $3.0 million.",
+      pages: [{ pageNumber: 1, text: "FINSYNC July investor update reported revenue of $3.0 million." }]
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.notEqual(result.analysis.investmentMatch.investmentId, "vanguard-id");
+});
+
+test("PDF filename-only match stays below high-confidence body matches", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 82 },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      filename: "FINSYNC board package.pdf",
+      sourceText: "July revenue was $3.0 million.",
+      pages: [{ pageNumber: 1, text: "July revenue was $3.0 million." }]
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.equal(result.analysis.investmentMatch.confidence, 78);
+  assert.match(result.analysis.investmentMatch.reason, /filename/);
+});

@@ -288,6 +288,8 @@ const cancelAiUpdateAnalysisButton = document.getElementById("cancelAiUpdateAnal
 const runAiUpdateAnalysisButton = document.getElementById("runAiUpdateAnalysisButton");
 const aiAnalysisInvestmentField = document.getElementById("aiAnalysisInvestmentField");
 const aiAnalysisEntityField = document.getElementById("aiAnalysisEntityField");
+const aiAnalysisPdfFileField = document.getElementById("aiAnalysisPdfFileField");
+const aiAnalysisPdfFileName = document.getElementById("aiAnalysisPdfFileName");
 const aiUpdateAnalysisReview = document.getElementById("aiUpdateAnalysisReview");
 const researchDeckFeed = document.getElementById("researchDeckFeed");
 const researchNotesFeed = document.getElementById("researchNotesFeed");
@@ -6819,12 +6821,35 @@ function getProposedChangeEvidence(change) {
   return change.sourceEvidence || change.source_evidence || change.evidence || change.source || "";
 }
 
+function formatEvidencePage(item) {
+  const page = item && (item.sourcePage || item.source_page || item.pageNumber || item.page);
+  return page ? `Page ${page}` : "";
+}
+
 function renderExtractedData(value) {
   if (!value || (typeof value === "object" && !Array.isArray(value) && !Object.keys(value).length)) {
     return '<p class="update-meta">No extracted information staged yet.</p>';
   }
 
   if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (Array.isArray(value.facts)) {
+      return `
+        <div class="ai-extracted-grid">
+          ${value.facts
+            .map(
+              (fact) => `
+                <article class="ai-extracted-item">
+                  <p class="dashboard-label">${escapeHtml(fact.category || "Fact")}</p>
+                  <pre>${escapeHtml(`${fact.field || "Unlabeled"}: ${summarizeJsonValue(fact.value)}`)}</pre>
+                  <p class="update-meta">${escapeHtml([fact.unit, fact.period, fact.date, fact.factType, formatEvidencePage(fact)].filter(Boolean).join(" • ") || "No period or type")}</p>
+                  ${fact.sourceEvidence ? `<p class="update-meta"><strong>Evidence:</strong> ${escapeHtml(fact.sourceEvidence)}</p>` : ""}
+                </article>
+              `
+            )
+            .join("")}
+        </div>
+      `;
+    }
     return `
       <div class="ai-extracted-grid">
         ${Object.entries(value)
@@ -6874,7 +6899,7 @@ function renderProposedChanges(value) {
               </div>
               ${
                 getProposedChangeEvidence(change)
-                  ? `<p class="update-meta"><strong>Evidence:</strong> ${escapeHtml(getProposedChangeEvidence(change))}</p>`
+                  ? `<p class="update-meta"><strong>Evidence:</strong> ${escapeHtml([formatEvidencePage(change), getProposedChangeEvidence(change)].filter(Boolean).join(" • "))}</p>`
                   : ""
               }
               ${
@@ -6922,7 +6947,15 @@ function renderAiAnalysisReview() {
   const facts = Array.isArray(analysis.extractedFacts) ? analysis.extractedFacts : [];
   const whatChanged = Array.isArray(analysis.whatChanged) ? analysis.whatChanged : [];
   const proposedChanges = Array.isArray(analysis.proposedChanges) ? analysis.proposedChanges : [];
+  const source = latestAiUpdateAnalysis.source || {};
   const needsMatch = !effectiveInvestmentId;
+  const sourceDescription = [
+    source.sourceType,
+    source.filename,
+    source.pageCount ? `${source.pageCount} pages` : "",
+    source.sender,
+    source.subject
+  ].filter(Boolean).join(" • ");
 
   aiUpdateAnalysisReview.classList.remove("hidden");
   aiUpdateAnalysisReview.innerHTML = `
@@ -6948,6 +6981,7 @@ function renderAiAnalysisReview() {
           <p class="update-meta">${escapeHtml(entityMatch.reason || "No reason provided.")}</p>
         </article>
       </div>
+      ${sourceDescription ? `<p class="update-meta">${escapeHtml(sourceDescription)}</p>` : ""}
     </section>
 
     <section class="ai-detail-section">
@@ -6985,7 +7019,7 @@ function renderAiAnalysisReview() {
                   <article class="ai-extracted-item">
                     <p class="dashboard-label">${escapeHtml(fact.category || "Fact")}</p>
                     <p class="highlight-value">${escapeHtml(fact.field || "Unlabeled fact")}: ${escapeHtml(summarizeJsonValue(fact.value))}</p>
-                    <p class="update-meta">${escapeHtml([fact.unit, fact.period, fact.date, fact.factType].filter(Boolean).join(" • ") || "No period or type")}</p>
+                    <p class="update-meta">${escapeHtml([fact.unit, fact.period, fact.date, fact.factType, formatEvidencePage(fact)].filter(Boolean).join(" • ") || "No period or type")}</p>
                     <p class="update-meta"><strong>Source evidence:</strong> ${escapeHtml(fact.sourceEvidence || "Not verified")}</p>
                     <div class="ai-evidence-row">
                       <span class="status-chip ${evidenceStatusClass(fact.evidenceStatus)}">${escapeHtml(formatEvidenceStatus(fact.evidenceStatus))}</span>
@@ -7016,7 +7050,7 @@ function renderAiAnalysisReview() {
                       <div><p class="dashboard-label">Proposed</p><pre>${escapeHtml(summarizeJsonValue(change.proposedValue))}</pre></div>
                     </div>
                     <p class="update-meta">${escapeHtml([change.period, change.date, formatConfidence(change.confidence)].filter(Boolean).join(" • "))}</p>
-                    <p class="update-meta"><strong>Source evidence:</strong> ${escapeHtml(change.sourceEvidence || "Not verified")}</p>
+                    <p class="update-meta"><strong>Source evidence:</strong> ${escapeHtml([formatEvidencePage(change), change.sourceEvidence || "Not verified"].filter(Boolean).join(" • "))}</p>
                     <span class="status-chip ${evidenceStatusClass(change.evidenceStatus)}">${escapeHtml(formatEvidenceStatus(change.evidenceStatus))}</span>
                     ${change.notes ? `<p class="update-meta">${escapeHtml(change.notes)}</p>` : ""}
                   </article>
@@ -7108,10 +7142,14 @@ function buildProposalPayloadFromAnalysis() {
       warnings: analysis.warnings || [],
       unresolved: analysis.unresolved || [],
       candidates: analysis.candidates || [],
+      source: {
+        filename: source.filename || "",
+        pageCount: source.pageCount || 0
+      },
       analyzedAt: latestAiUpdateAnalysis.analyzedAt
     },
     proposedChanges: analysis.proposedChanges || [],
-    documents: [],
+    documents: latestAiUpdateAnalysis.document ? [latestAiUpdateAnalysis.document] : [],
     status: "pending"
   };
 }
@@ -10769,6 +10807,13 @@ addListener(aiAnalysisEntityField, "change", () => {
   renderAiAnalysisReview();
 });
 
+addListener(aiAnalysisPdfFileField, "change", () => {
+  const file = aiAnalysisPdfFileField && aiAnalysisPdfFileField.files && aiAnalysisPdfFileField.files[0];
+  if (aiAnalysisPdfFileName) {
+    aiAnalysisPdfFileName.textContent = file ? file.name : "No PDF selected.";
+  }
+});
+
 addListener(aiUpdateAnalysisForm, "submit", async (event) => {
   event.preventDefault();
   if (!aiUpdateAnalysisForm) {
@@ -10776,15 +10821,19 @@ addListener(aiUpdateAnalysisForm, "submit", async (event) => {
   }
 
   const formData = new FormData(aiUpdateAnalysisForm);
+  const sourceFile = aiAnalysisPdfFileField && aiAnalysisPdfFileField.files
+    ? aiAnalysisPdfFileField.files[0]
+    : null;
   const payload = {
     sourceType: formData.get("sourceType"),
     sender: formData.get("sender"),
     subject: formData.get("subject"),
     sourceDate: formData.get("sourceDate"),
-    sourceText: formData.get("sourceText"),
+    sourceText: sourceFile ? "" : formData.get("sourceText"),
     investmentId: formData.get("investmentId"),
     entityId: formData.get("entityId")
   };
+  let endpoint = "/api/ai-update-proposals/analyze";
 
   if (aiUpdateInboxMessage) {
     aiUpdateInboxMessage.textContent = "Analyzing source material...";
@@ -10794,7 +10843,18 @@ addListener(aiUpdateAnalysisForm, "submit", async (event) => {
   }
 
   try {
-    latestAiUpdateAnalysis = await fetchJson("/api/ai-update-proposals/analyze", {
+    if (sourceFile) {
+      if (!/\.pdf$/i.test(sourceFile.name || "")) {
+        throw new Error("Choose a PDF file for document analysis.");
+      }
+      payload.filename = sourceFile.name;
+      payload.mimeType = sourceFile.type || "application/pdf";
+      payload.fileData = await readFileAsBase64(sourceFile);
+      payload.sourceType = "PDF";
+      endpoint = "/api/ai-update-proposals/analyze-document";
+    }
+
+    latestAiUpdateAnalysis = await fetchJson(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

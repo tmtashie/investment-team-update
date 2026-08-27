@@ -8,6 +8,7 @@ const { createInvestmentService } = require("./services/investmentService");
 const { createTaskService } = require("./services/taskService");
 const { createAiUpdateProposalService } = require("./services/aiUpdateProposalService");
 const { createAiUpdateAnalysisService } = require("./services/aiUpdateAnalysisService");
+const { extractPdfTextFromUpload } = require("./services/pdfTextExtractionService");
 
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -4805,6 +4806,112 @@ const server = http.createServer(async (request, response) => {
         })
       );
       sendJson(response, 500, { error: error.message || "AI update analysis failed." });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-update-proposals/analyze-document") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const analyzedAt = new Date().toISOString();
+    try {
+      const payload = await parseRequestBody(request);
+      const investments = filterInvestmentsForUser(readInvestments(), user);
+      const entities = INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity));
+      const selectedInvestmentId = String(payload.investmentId || "").trim();
+      const selectedEntityId = String(payload.entityId || "").trim();
+      const selectedInvestment = selectedInvestmentId
+        ? investments.find((investment) => investment.id === selectedInvestmentId)
+        : null;
+
+      if (selectedInvestmentId && !selectedInvestment) {
+        sendJson(response, 403, { error: "Selected investment is not available." });
+        return;
+      }
+
+      const extracted = await extractPdfTextFromUpload({
+        filename: payload.filename,
+        mimeType: payload.mimeType,
+        fileData: payload.fileData
+      });
+      const sourceIdentifier =
+        payload.sourceIdentifier ||
+        [payload.sourceType || "PDF", payload.sender, payload.subject, payload.sourceDate, extracted.filename]
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+          .join(" | ");
+      const result = await analyzeInvestmentUpdate({
+        source: {
+          sourceType: payload.sourceType || "PDF",
+          sender: payload.sender,
+          subject: payload.subject,
+          sourceDate: payload.sourceDate,
+          sourceIdentifier,
+          filename: extracted.filename,
+          pageCount: extracted.pageCount,
+          pages: extracted.pages,
+          sourceText: extracted.combinedText
+        },
+        investments,
+        entities,
+        investmentOverrideId: selectedInvestmentId,
+        entityOverrideId: selectedEntityId
+      });
+
+      ensureDataFile();
+      const storedName = safeFilename(extracted.filename);
+      const filePath = path.join(UPLOADS_DIR, storedName);
+      fs.writeFileSync(filePath, extracted.buffer);
+      const document = {
+        id: makeId(),
+        name: extracted.filename,
+        storedName,
+        url: `/uploads/${storedName}`,
+        uploadedAt: analyzedAt,
+        uploadedBy: user.email
+      };
+
+      result.document = document;
+      result.source = {
+        ...result.source,
+        filename: extracted.filename,
+        pageCount: extracted.pageCount,
+        sourceIdentifier
+      };
+
+      console.log(
+        "[ai-update-analysis]",
+        JSON.stringify({
+          analyzedAt,
+          sourceIdentifier,
+          filename: extracted.filename,
+          pageCount: extracted.pageCount,
+          extractedTextLength: extracted.extractedTextLength,
+          investmentId: result.analysis.investmentMatch.investmentId,
+          investmentName: result.analysis.investmentMatch.investmentName,
+          matchConfidence: result.analysis.investmentMatch.confidence,
+          succeeded: true
+        })
+      );
+
+      sendJson(response, 200, result);
+      return;
+    } catch (error) {
+      console.warn(
+        "[ai-update-analysis]",
+        JSON.stringify({
+          analyzedAt,
+          succeeded: false,
+          error: error.message || "PDF analysis failed"
+        })
+      );
+      const status = /required|only pdf|valid pdf|limited|image-based|password|encrypted/i.test(error.message || "")
+        ? 400
+        : 500;
+      sendJson(response, status, { error: error.message || "PDF update analysis failed." });
       return;
     }
   }

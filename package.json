@@ -8,6 +8,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "pdf-parse": "^1.1.1",
     "xlsx": "^0.18.5"
   },
   "engines": {
