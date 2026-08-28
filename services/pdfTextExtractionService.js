@@ -2,6 +2,49 @@ const path = require("path");
 
 const MAX_PDF_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_LENGTH = 60000;
+const VERY_SHORT_PAGE_TEXT_LENGTH = 80;
+
+function looksFinancialPage(text) {
+  return /\b(financial|balance sheet|income statement|statement of operations|cash flow|p&l|profit and loss|revenue|ebitda|runway|cash|debt|line of credit|loc|valuation|409a)\b/i.test(
+    String(text || "")
+  );
+}
+
+function buildDocumentDiagnostics({ pageCount, pages, combinedText }) {
+  const pageMap = new Map((pages || []).map((page) => [Number(page.pageNumber), page]));
+  const pagesWithUsableText = [];
+  const pagesWithLittleText = [];
+  const pagesSkipped = [];
+  const financialImageHeavyPages = [];
+  const totalPages = Number(pageCount) || pages.length || 0;
+
+  for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+    const page = pageMap.get(pageNumber);
+    const text = page ? asString(page.text, MAX_EXTRACTED_TEXT_LENGTH) : "";
+    if (!text) {
+      pagesSkipped.push(pageNumber);
+      continue;
+    }
+    if (text.length < VERY_SHORT_PAGE_TEXT_LENGTH) {
+      pagesWithLittleText.push(pageNumber);
+    } else {
+      pagesWithUsableText.push(pageNumber);
+    }
+    if (text.length < VERY_SHORT_PAGE_TEXT_LENGTH && looksFinancialPage(text)) {
+      financialImageHeavyPages.push(pageNumber);
+    }
+  }
+
+  return {
+    totalPages,
+    pagesWithUsableText,
+    pagesWithLittleText,
+    pagesAnalyzed: pages.map((page) => page.pageNumber).filter(Boolean),
+    pagesSkipped,
+    financialImageHeavyPages,
+    extractedCharacterCount: String(combinedText || "").length
+  };
+}
 
 function asString(value, maxLength = 2000) {
   return String(value || "").trim().slice(0, maxLength);
@@ -105,7 +148,12 @@ function extractWithFallback(buffer, filename) {
     pageCount: Math.max(pageNumber - 1, pages.length),
     pages,
     combinedText: combinedText.slice(0, MAX_EXTRACTED_TEXT_LENGTH),
-    extractedTextLength: combinedText.length
+    extractedTextLength: combinedText.length,
+    diagnostics: buildDocumentDiagnostics({
+      pageCount: Math.max(pageNumber - 1, pages.length),
+      pages,
+      combinedText
+    })
   };
 }
 
@@ -143,7 +191,12 @@ async function extractWithPdfParse(buffer, filename) {
     pageCount: Number(data && data.numpages) || readablePages.length || pages.length,
     pages: readablePages.length ? readablePages : [{ pageNumber: 1, text: combinedText }],
     combinedText: combinedText.slice(0, MAX_EXTRACTED_TEXT_LENGTH),
-    extractedTextLength: combinedText.length
+    extractedTextLength: combinedText.length,
+    diagnostics: buildDocumentDiagnostics({
+      pageCount: Number(data && data.numpages) || readablePages.length || pages.length,
+      pages: readablePages.length ? readablePages : pages,
+      combinedText
+    })
   };
 }
 

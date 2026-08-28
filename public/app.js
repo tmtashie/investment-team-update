@@ -286,10 +286,13 @@ const aiUpdateAnalyzerPanel = document.getElementById("aiUpdateAnalyzerPanel");
 const aiUpdateAnalysisForm = document.getElementById("aiUpdateAnalysisForm");
 const cancelAiUpdateAnalysisButton = document.getElementById("cancelAiUpdateAnalysisButton");
 const runAiUpdateAnalysisButton = document.getElementById("runAiUpdateAnalysisButton");
+const aiAnalysisSourceTypeField = document.getElementById("aiAnalysisSourceTypeField");
+const aiAnalysisSourceTextField = document.getElementById("aiAnalysisSourceTextField");
 const aiAnalysisInvestmentField = document.getElementById("aiAnalysisInvestmentField");
 const aiAnalysisEntityField = document.getElementById("aiAnalysisEntityField");
 const aiAnalysisPdfFileField = document.getElementById("aiAnalysisPdfFileField");
 const aiAnalysisPdfFileName = document.getElementById("aiAnalysisPdfFileName");
+const aiAnalysisPdfFileStatus = document.getElementById("aiAnalysisPdfFileStatus");
 const aiUpdateAnalysisReview = document.getElementById("aiUpdateAnalysisReview");
 const researchDeckFeed = document.getElementById("researchDeckFeed");
 const researchNotesFeed = document.getElementById("researchNotesFeed");
@@ -1405,7 +1408,27 @@ function normalizeReportUpdateRows(rows) {
       materialsRequested: Array.isArray(row && row.materialsRequested)
         ? row.materialsRequested.map((item) => String(item).trim()).filter(Boolean)
         : [],
-      sourceUpdateId: String((row && row.sourceUpdateId) || "").trim()
+      sourceUpdateId: String((row && row.sourceUpdateId) || "").trim(),
+      aiProposalId: String((row && row.aiProposalId) || "").trim(),
+      aiApprovedBy: String((row && row.aiApprovedBy) || "").trim(),
+      aiApprovedAt: String((row && row.aiApprovedAt) || "").trim(),
+      aiSourceFilename: String((row && row.aiSourceFilename) || "").trim(),
+      aiSourceIdentifier: String((row && row.aiSourceIdentifier) || "").trim(),
+      aiMaterialDevelopments: Array.isArray(row && row.aiMaterialDevelopments)
+        ? row.aiMaterialDevelopments.map((item) => ({
+            category: String((item && item.category) || "").trim(),
+            summary: String((item && item.summary) || "").trim(),
+            sourceEvidence: String((item && item.sourceEvidence) || "").trim(),
+            sourcePage: String((item && item.sourcePage) || "").trim(),
+            confidence: Number((item && item.confidence) || 0) || 0,
+            riskLevel: String((item && item.riskLevel) || "").trim(),
+            importance: String((item && item.importance) || "").trim(),
+            evidenceStatus: String((item && item.evidenceStatus) || "").trim(),
+            verification: item && item.verification && typeof item.verification === "object"
+              ? item.verification
+              : {}
+          })).filter((item) => item.summary || item.sourceEvidence)
+        : []
     }))
     .filter((row) =>
       Object.values(row).some((value) =>
@@ -1673,6 +1696,9 @@ function renderReportUpdatesSection(companyRecord) {
   });
 
   if (reportUpdatesList) {
+    const emptyMessage = getAiUpdateSafety().getReportUpdatesEmptyMessage
+      ? getAiUpdateSafety().getReportUpdatesEmptyMessage(reportRows.length, filteredRows.length)
+      : "No saved updates or reports yet. Add your first monthly report, quarterly letter, capital call, or call note above.";
     reportUpdatesList.innerHTML = filteredRows.length
       ? filteredRows
           .map(
@@ -1721,7 +1747,7 @@ function renderReportUpdatesSection(companyRecord) {
             `
           )
           .join("")
-      : '<p class="update-meta">No saved updates or reports yet. Add your first monthly report, quarterly letter, capital call, or call note above.</p>';
+      : `<p class="update-meta">${escapeHtml(emptyMessage)}</p>`;
   }
 
   if (compareLatestReportUpdatesButton) {
@@ -6821,6 +6847,52 @@ function getProposedChangeEvidence(change) {
   return change.sourceEvidence || change.source_evidence || change.evidence || change.source || "";
 }
 
+function getAiUpdateSafety() {
+  return window.AiUpdateSafety || {
+    isVerified: (item) => String((item && item.evidenceStatus) || "").trim().toLowerCase() === "verified",
+    sanitizeForActionableView: (analysis) => ({
+      ...(analysis || {}),
+      extractedFacts: [],
+      proposedChanges: [],
+      materialDevelopments: [],
+      unverifiedClaims: Array.isArray(analysis && analysis.unverifiedClaims)
+        ? analysis.unverifiedClaims
+        : []
+    })
+  };
+}
+
+function renderUnverifiedClaims(value) {
+  const claims = Array.isArray(value) ? value : [];
+  if (!claims.length) {
+    return '<p class="update-meta">No unverified claims returned.</p>';
+  }
+
+  return `
+    <div class="ai-fact-list">
+      ${claims
+        .map(
+          (claim) => `
+            <article class="ai-extracted-item">
+              <p class="dashboard-label">${escapeHtml(claim.source || "Unverified claim")}</p>
+              <p class="highlight-value">${escapeHtml(claim.field || "Unlabeled claim")}: ${escapeHtml(summarizeJsonValue(claim.value))}</p>
+              ${claim.currentValue ? `<p class="update-meta">Current claimed: ${escapeHtml(claim.currentValue)}</p>` : ""}
+              <p class="update-meta"><strong>Source evidence:</strong> ${escapeHtml(claim.sourceEvidence || "Not verified")}</p>
+              <span class="status-chip ${evidenceStatusClass(claim.evidenceStatus)}">${escapeHtml(formatEvidenceStatus(claim.evidenceStatus))}</span>
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function getAiWarningMessage(value) {
+  return getAiUpdateSafety().warningMessage
+    ? getAiUpdateSafety().warningMessage(value)
+    : String(value || "").trim();
+}
+
 function formatEvidencePage(item) {
   const page = item && (item.sourcePage || item.source_page || item.pageNumber || item.page);
   return page ? `Page ${page}` : "";
@@ -6867,6 +6939,32 @@ function renderExtractedData(value) {
   }
 
   return `<pre class="ai-json-block">${escapeHtml(summarizeJsonValue(value))}</pre>`;
+}
+
+function renderMaterialDevelopments(value) {
+  const developments = value && Array.isArray(value.materialDevelopments)
+    ? value.materialDevelopments
+    : [];
+  if (!developments.length) {
+    return '<p class="update-meta">No material developments staged yet.</p>';
+  }
+
+  return `
+    <div class="ai-extracted-grid">
+      ${developments
+        .map(
+          (development) => `
+            <article class="ai-extracted-item">
+              <p class="dashboard-label">${escapeHtml(development.category || "Development")}</p>
+              <pre>${escapeHtml(development.summary || "Unlabeled development")}</pre>
+              <p class="update-meta">${escapeHtml([formatEvidencePage(development), development.importance, development.riskLevel ? `${development.riskLevel} risk` : "", formatConfidence(development.confidence)].filter(Boolean).join(" • "))}</p>
+              ${development.sourceEvidence ? `<p class="update-meta"><strong>Evidence:</strong> ${escapeHtml(development.sourceEvidence)}</p>` : ""}
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+  `;
 }
 
 function renderProposedChanges(value) {
@@ -6926,7 +7024,8 @@ function renderAiAnalysisReview() {
     return;
   }
 
-  const analysis = latestAiUpdateAnalysis.analysis || {};
+  const analysis = getAiUpdateSafety().sanitizeForActionableView(latestAiUpdateAnalysis.analysis || {});
+  const safety = getAiUpdateSafety();
   const investmentMatch = analysis.investmentMatch || {};
   const entityMatch = analysis.entityMatch || {};
   const selectedInvestment = aiAnalysisInvestmentField && aiAnalysisInvestmentField.value
@@ -6942,13 +7041,29 @@ function renderAiAnalysisReview() {
     ? selectedInvestment.company
     : investmentMatch.investmentName || "Unmatched";
   const effectiveEntity = selectedEntity || entityMatch.entityName || entityMatch.entityId || "";
-  const warnings = Array.isArray(analysis.warnings) ? analysis.warnings : [];
-  const unresolved = Array.isArray(analysis.unresolved) ? analysis.unresolved : [];
+  const rawWarnings = Array.isArray(analysis.warnings)
+    ? analysis.warnings.map(getAiWarningMessage).filter(Boolean)
+    : [];
+  const rawUnresolved = Array.isArray(analysis.unresolved)
+    ? analysis.unresolved.map(getAiWarningMessage).filter(Boolean)
+    : [];
   const facts = Array.isArray(analysis.extractedFacts) ? analysis.extractedFacts : [];
+  const materialDevelopments = Array.isArray(analysis.materialDevelopments) ? analysis.materialDevelopments : [];
   const whatChanged = Array.isArray(analysis.whatChanged) ? analysis.whatChanged : [];
   const proposedChanges = Array.isArray(analysis.proposedChanges) ? analysis.proposedChanges : [];
+  const unverifiedClaims = Array.isArray(analysis.unverifiedClaims) ? analysis.unverifiedClaims : [];
+  const userFacingWarnings = Array.isArray(analysis.userFacingWarnings) && analysis.userFacingWarnings.length
+    ? analysis.userFacingWarnings.map(getAiWarningMessage).filter(Boolean)
+    : safety.buildUserFacingWarnings
+      ? safety.buildUserFacingWarnings({ ...analysis, unverifiedClaims })
+      : [];
+  const warnings = userFacingWarnings.length ? userFacingWarnings : rawWarnings.concat(rawUnresolved);
   const source = latestAiUpdateAnalysis.source || {};
+  const diagnostics = latestAiUpdateAnalysis.diagnostics || source.diagnostics || {};
   const needsMatch = !effectiveInvestmentId;
+  const hasVerifiedProposedChange = proposedChanges.some((change) => safety.isVerified(change));
+  const hasVerifiedMaterialDevelopment = materialDevelopments.some((development) => safety.isVerified(development));
+  const canCreateProposal = !needsMatch && (hasVerifiedProposedChange || hasVerifiedMaterialDevelopment);
   const sourceDescription = [
     source.sourceType,
     source.filename,
@@ -6982,22 +7097,31 @@ function renderAiAnalysisReview() {
         </article>
       </div>
       ${sourceDescription ? `<p class="update-meta">${escapeHtml(sourceDescription)}</p>` : ""}
+      ${
+        diagnostics.totalPages
+          ? `<p class="update-meta">Coverage: ${escapeHtml(String(diagnostics.pagesAnalyzed ? diagnostics.pagesAnalyzed.length : 0))}/${escapeHtml(String(diagnostics.totalPages))} pages analyzed • ${escapeHtml(String(diagnostics.extractedCharacterCount || 0))} extracted characters</p>`
+          : ""
+      }
     </section>
 
     <section class="ai-detail-section">
       <h4>Warnings / Needs Review</h4>
       ${
-        needsMatch || warnings.length || unresolved.length
+        needsMatch || warnings.length
           ? `<div class="ai-warning-list">${[
               needsMatch ? "Choose an investment before creating the proposal." : "",
-              ...warnings,
-              ...unresolved
+              ...warnings
             ]
               .filter(Boolean)
               .map((item) => `<p>${escapeHtml(item)}</p>`)
               .join("")}</div>`
           : '<p class="update-meta">No warnings returned.</p>'
       }
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Unverified Claims / Needs Review</h4>
+      ${renderUnverifiedClaims(unverifiedClaims)}
     </section>
 
     <section class="ai-detail-section">
@@ -7010,7 +7134,28 @@ function renderAiAnalysisReview() {
     </section>
 
     <section class="ai-detail-section">
-      <h4>Extracted Facts</h4>
+      <h4>Material Developments</h4>
+      ${
+        materialDevelopments.length
+          ? `<div class="ai-fact-list">${materialDevelopments
+              .map(
+                (development) => `
+                  <article class="ai-extracted-item">
+                    <p class="dashboard-label">${escapeHtml(development.category || "Development")}</p>
+                    <p class="highlight-value">${escapeHtml(development.summary || "Unlabeled development")}</p>
+                    <p class="update-meta">${escapeHtml([formatEvidencePage(development), development.importance, development.riskLevel ? `${development.riskLevel} risk` : "", formatConfidence(development.confidence)].filter(Boolean).join(" • "))}</p>
+                    <p class="update-meta"><strong>Source evidence:</strong> ${escapeHtml(development.sourceEvidence || "Not verified")}</p>
+                    <span class="status-chip ${evidenceStatusClass(development.evidenceStatus)}">${escapeHtml(formatEvidenceStatus(development.evidenceStatus))}</span>
+                  </article>
+                `
+              )
+              .join("")}</div>`
+          : '<p class="update-meta">No material developments returned.</p>'
+      }
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Structured Facts</h4>
       ${
         facts.length
           ? `<div class="ai-fact-list">${facts
@@ -7062,12 +7207,56 @@ function renderAiAnalysisReview() {
     </section>
 
     <div class="card-actions">
-      <button type="button" data-action="create-ai-analysis-proposal"${needsMatch ? " disabled" : ""}>Create Proposal</button>
+      <button type="button" data-action="create-ai-analysis-proposal"${canCreateProposal ? "" : " disabled"}>Create Proposal</button>
       <button type="button" class="secondary-button" data-action="focus-ai-analysis-investment">Change Investment</button>
       <button type="button" class="secondary-button" data-action="focus-ai-analysis-entity">Change Entity</button>
       <button type="button" class="secondary-button danger-button" data-action="cancel-ai-analysis">Cancel</button>
     </div>
   `;
+}
+
+function getCurrentAiAnalysisPdfFile() {
+  return aiAnalysisPdfFileField && aiAnalysisPdfFileField.files
+    ? aiAnalysisPdfFileField.files[0] || null
+    : null;
+}
+
+function isPdfFile(file) {
+  return Boolean(file && /\.pdf$/i.test(file.name || ""));
+}
+
+function getDisplayedAiAnalysisPdfName() {
+  const text = aiAnalysisPdfFileName ? aiAnalysisPdfFileName.textContent.trim() : "";
+  return text && text !== "No PDF selected." ? text : "";
+}
+
+function clearLatestAiAnalysisResult() {
+  latestAiUpdateAnalysis = null;
+  renderAiAnalysisReview();
+}
+
+function syncAiAnalysisPdfSelection() {
+  const file = getCurrentAiAnalysisPdfFile();
+  if (file && isPdfFile(file)) {
+    if (aiAnalysisSourceTypeField) {
+      aiAnalysisSourceTypeField.value = "PDF";
+    }
+    if (aiAnalysisPdfFileName) {
+      aiAnalysisPdfFileName.textContent = file.name;
+    }
+    if (aiAnalysisPdfFileStatus) {
+      aiAnalysisPdfFileStatus.textContent = "PDF selected";
+    }
+    return file;
+  }
+
+  if (aiAnalysisPdfFileName) {
+    aiAnalysisPdfFileName.textContent = "No PDF selected.";
+  }
+  if (aiAnalysisPdfFileStatus) {
+    aiAnalysisPdfFileStatus.textContent = "No PDF selected";
+  }
+  return null;
 }
 
 function openAiUpdateAnalyzer() {
@@ -7077,22 +7266,22 @@ function openAiUpdateAnalyzer() {
   renderAiAnalysisInvestmentOptions();
   renderConfiguredEntitySelects();
   aiUpdateAnalyzerPanel.classList.remove("hidden");
-  latestAiUpdateAnalysis = null;
-  renderAiAnalysisReview();
+  clearLatestAiAnalysisResult();
+  syncAiAnalysisPdfSelection();
   if (aiUpdateInboxMessage) {
     aiUpdateInboxMessage.textContent = "";
   }
 }
 
 function closeAiUpdateAnalyzer() {
-  latestAiUpdateAnalysis = null;
   if (aiUpdateAnalysisForm) {
     aiUpdateAnalysisForm.reset();
   }
+  syncAiAnalysisPdfSelection();
   if (aiUpdateAnalyzerPanel) {
     aiUpdateAnalyzerPanel.classList.add("hidden");
   }
-  renderAiAnalysisReview();
+  clearLatestAiAnalysisResult();
 }
 
 function buildProposalPayloadFromAnalysis() {
@@ -7100,7 +7289,7 @@ function buildProposalPayloadFromAnalysis() {
     return null;
   }
 
-  const analysis = latestAiUpdateAnalysis.analysis || {};
+  const analysis = getAiUpdateSafety().sanitizeForActionableView(latestAiUpdateAnalysis.analysis || {});
   const source = latestAiUpdateAnalysis.source || {};
   const selectedInvestment = aiAnalysisInvestmentField && aiAnalysisInvestmentField.value
     ? allInvestments.find((investment) => investment.id === aiAnalysisInvestmentField.value)
@@ -7142,9 +7331,12 @@ function buildProposalPayloadFromAnalysis() {
       warnings: analysis.warnings || [],
       unresolved: analysis.unresolved || [],
       candidates: analysis.candidates || [],
+      materialDevelopments: analysis.materialDevelopments || [],
+      unverifiedClaims: analysis.unverifiedClaims || [],
       source: {
         filename: source.filename || "",
-        pageCount: source.pageCount || 0
+        pageCount: source.pageCount || 0,
+        diagnostics: latestAiUpdateAnalysis.diagnostics || source.diagnostics || {}
       },
       analyzedAt: latestAiUpdateAnalysis.analyzedAt
     },
@@ -7259,6 +7451,11 @@ function renderAiUpdateProposalDetail() {
     <section class="ai-detail-section">
       <h4>Extracted Information</h4>
       ${renderExtractedData(proposal.extractedData)}
+    </section>
+
+    <section class="ai-detail-section">
+      <h4>Material Developments</h4>
+      ${renderMaterialDevelopments(proposal.extractedData)}
     </section>
 
     <section class="ai-detail-section">
@@ -10808,10 +11005,24 @@ addListener(aiAnalysisEntityField, "change", () => {
 });
 
 addListener(aiAnalysisPdfFileField, "change", () => {
-  const file = aiAnalysisPdfFileField && aiAnalysisPdfFileField.files && aiAnalysisPdfFileField.files[0];
-  if (aiAnalysisPdfFileName) {
-    aiAnalysisPdfFileName.textContent = file ? file.name : "No PDF selected.";
+  syncAiAnalysisPdfSelection();
+  clearLatestAiAnalysisResult();
+  if (aiUpdateInboxMessage) {
+    aiUpdateInboxMessage.textContent = "";
   }
+});
+
+addListener(aiAnalysisSourceTextField, "input", () => {
+  if (latestAiUpdateAnalysis) {
+    clearLatestAiAnalysisResult();
+  }
+});
+
+addListener(aiUpdateAnalysisForm, "reset", () => {
+  window.setTimeout(() => {
+    syncAiAnalysisPdfSelection();
+    clearLatestAiAnalysisResult();
+  }, 0);
 });
 
 addListener(aiUpdateAnalysisForm, "submit", async (event) => {
@@ -10821,9 +11032,8 @@ addListener(aiUpdateAnalysisForm, "submit", async (event) => {
   }
 
   const formData = new FormData(aiUpdateAnalysisForm);
-  const sourceFile = aiAnalysisPdfFileField && aiAnalysisPdfFileField.files
-    ? aiAnalysisPdfFileField.files[0]
-    : null;
+  const sourceFile = getCurrentAiAnalysisPdfFile();
+  const displayedPdfName = getDisplayedAiAnalysisPdfName();
   const payload = {
     sourceType: formData.get("sourceType"),
     sender: formData.get("sender"),
@@ -10843,8 +11053,14 @@ addListener(aiUpdateAnalysisForm, "submit", async (event) => {
   }
 
   try {
+    if (!sourceFile && displayedPdfName) {
+      syncAiAnalysisPdfSelection();
+      throw new Error("Please re-select the PDF before analyzing.");
+    }
+
     if (sourceFile) {
-      if (!/\.pdf$/i.test(sourceFile.name || "")) {
+      if (!isPdfFile(sourceFile)) {
+        syncAiAnalysisPdfSelection();
         throw new Error("Choose a PDF file for document analysis.");
       }
       payload.filename = sourceFile.name;
@@ -10852,6 +11068,7 @@ addListener(aiUpdateAnalysisForm, "submit", async (event) => {
       payload.fileData = await readFileAsBase64(sourceFile);
       payload.sourceType = "PDF";
       endpoint = "/api/ai-update-proposals/analyze-document";
+      syncAiAnalysisPdfSelection();
     }
 
     latestAiUpdateAnalysis = await fetchJson(endpoint, {
@@ -11002,7 +11219,12 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
     });
     await loadAiUpdateProposals();
     selectedAiUpdateProposalId = result.proposal ? result.proposal.id : selectedAiUpdateProposalId;
-    renderAiUpdateInbox();
+    if (getAiUpdateSafety().shouldRefreshInvestmentsAfterAiProposalAction
+      && getAiUpdateSafety().shouldRefreshInvestmentsAfterAiProposalAction(endpointAction, result)) {
+      await loadUpdates();
+    } else {
+      renderAiUpdateInbox();
+    }
     if (aiUpdateInboxMessage) {
       aiUpdateInboxMessage.textContent =
         endpointAction === "approve"

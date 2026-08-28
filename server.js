@@ -7,8 +7,15 @@ const { createBackupService } = require("./services/backupService");
 const { createInvestmentService } = require("./services/investmentService");
 const { createTaskService } = require("./services/taskService");
 const { createAiUpdateProposalService } = require("./services/aiUpdateProposalService");
+const {
+  applyApprovedAiUpdateProposalToInvestment
+} = require("./services/aiUpdateProposalApplyService");
 const { createAiUpdateAnalysisService } = require("./services/aiUpdateAnalysisService");
 const { extractPdfTextFromUpload } = require("./services/pdfTextExtractionService");
+const {
+  enforceProposalSafetyInvariant,
+  finalizeAnalysisForResponse
+} = require("./services/aiUpdateSafetyBoundary");
 
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -514,7 +521,29 @@ function normalizeStructuredRow(row, fallback = {}) {
       : Array.isArray(fallback.materialsRequested)
         ? fallback.materialsRequested.map((item) => String(item).trim()).filter(Boolean)
         : [],
-    sourceUpdateId: String(row.sourceUpdateId || fallback.sourceUpdateId || "").trim()
+    sourceUpdateId: String(row.sourceUpdateId || fallback.sourceUpdateId || "").trim(),
+    aiProposalId: String(row.aiProposalId || fallback.aiProposalId || "").trim(),
+    aiApprovedBy: String(row.aiApprovedBy || fallback.aiApprovedBy || "").trim(),
+    aiApprovedAt: String(row.aiApprovedAt || fallback.aiApprovedAt || "").trim(),
+    aiSourceFilename: String(row.aiSourceFilename || fallback.aiSourceFilename || "").trim(),
+    aiSourceIdentifier: String(row.aiSourceIdentifier || fallback.aiSourceIdentifier || "").trim(),
+    aiMaterialDevelopments: Array.isArray(row.aiMaterialDevelopments)
+      ? row.aiMaterialDevelopments.map((item) => ({
+          category: String((item && item.category) || "").trim(),
+          summary: String((item && item.summary) || "").trim(),
+          sourceEvidence: String((item && item.sourceEvidence) || "").trim(),
+          sourcePage: String((item && item.sourcePage) || "").trim(),
+          confidence: Number((item && item.confidence) || 0) || 0,
+          riskLevel: String((item && item.riskLevel) || "").trim(),
+          importance: String((item && item.importance) || "").trim(),
+          evidenceStatus: String((item && item.evidenceStatus) || "").trim(),
+          verification: item && item.verification && typeof item.verification === "object"
+            ? item.verification
+            : {}
+        })).filter((item) => item.summary || item.sourceEvidence)
+      : Array.isArray(fallback.aiMaterialDevelopments)
+        ? fallback.aiMaterialDevelopments
+        : []
   };
 }
 
@@ -1172,14 +1201,16 @@ const {
 });
 
 function applyApprovedAiUpdateProposal(proposal) {
-  // Future action-specific handlers belong here and must call existing investment services.
-  return {
-    applied: false,
-    message:
-      "Approval recorded. Live investment mutation is intentionally deferred until action-specific handlers call existing investment update services.",
-    nextHandler:
-      "Add safe handlers here for each proposedChanges action type, then route allowed patches through updateInvestment or narrower domain services."
-  };
+  const investments = readInvestments();
+  const investment = investments.find((item) => item.id === proposal.investmentId) || null;
+  return applyApprovedAiUpdateProposalToInvestment({
+    proposal,
+    investment,
+    approver: proposal.reviewedBy,
+    approvedAt: proposal.reviewedAt || new Date().toISOString(),
+    updateInvestment,
+    normalizeStructuredRows
+  });
 }
 
 async function callAiUpdateAnalysisModel(prompt) {
@@ -4781,7 +4812,6 @@ const server = http.createServer(async (request, response) => {
         investmentOverrideId: selectedInvestmentId,
         entityOverrideId: selectedEntityId
       });
-
       console.log(
         "[ai-update-analysis]",
         JSON.stringify({
@@ -4794,6 +4824,7 @@ const server = http.createServer(async (request, response) => {
         })
       );
 
+      result.analysis = finalizeAnalysisForResponse(result.analysis);
       sendJson(response, 200, result);
       return;
     } catch (error) {
@@ -4860,6 +4891,16 @@ const server = http.createServer(async (request, response) => {
         investmentOverrideId: selectedInvestmentId,
         entityOverrideId: selectedEntityId
       });
+      const diagnostics = extracted.diagnostics || {};
+      const financialWarnings = Array.isArray(diagnostics.financialImageHeavyPages)
+        ? diagnostics.financialImageHeavyPages.map(
+            (pageNumber) =>
+              `Financial statement page ${pageNumber} contained insufficient extractable text for reliable metric extraction.`
+          )
+        : [];
+      result.analysis.warnings = Array.from(
+        new Set([...(result.analysis.warnings || []), ...financialWarnings])
+      );
 
       ensureDataFile();
       const storedName = safeFilename(extracted.filename);
@@ -4879,8 +4920,10 @@ const server = http.createServer(async (request, response) => {
         ...result.source,
         filename: extracted.filename,
         pageCount: extracted.pageCount,
-        sourceIdentifier
+        sourceIdentifier,
+        diagnostics
       };
+      result.diagnostics = diagnostics;
 
       console.log(
         "[ai-update-analysis]",
@@ -4897,6 +4940,7 @@ const server = http.createServer(async (request, response) => {
         })
       );
 
+      result.analysis = finalizeAnalysisForResponse(result.analysis);
       sendJson(response, 200, result);
       return;
     } catch (error) {
@@ -4945,8 +4989,10 @@ const server = http.createServer(async (request, response) => {
 
     try {
       const payload = await parseRequestBody(request);
-      const proposal = normalizeAiUpdateProposal(payload || {});
       const investments = readInvestments();
+      const normalizedProposal = normalizeAiUpdateProposal(payload || {});
+      const matchedInvestment = investments.find((investment) => investment.id === normalizedProposal.investmentId) || null;
+      const proposal = enforceProposalSafetyInvariant(normalizedProposal, matchedInvestment);
       if (!canReviewAiUpdateProposal(user, proposal, investments)) {
         sendJson(response, 403, { error: "You do not have access to stage that proposed update." });
         return;

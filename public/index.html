@@ -410,6 +410,7 @@
                   Source type
                   <select id="aiAnalysisSourceTypeField" name="sourceType">
                     <option value="Email">Email</option>
+                    <option value="PDF">PDF</option>
                     <option value="Investor Update">Investor Update</option>
                     <option value="Call Notes">Call Notes</option>
                     <option value="Manual Note">Manual Note</option>
@@ -451,6 +452,7 @@
                 <span class="deck-drop-title">PDF source</span>
                 <input id="aiAnalysisPdfFileField" name="sourceFile" type="file" accept="application/pdf,.pdf" />
                 <span id="aiAnalysisPdfFileName" class="deck-drop-subtitle">No PDF selected.</span>
+                <span id="aiAnalysisPdfFileStatus" class="deck-drop-subtitle">No PDF selected</span>
               </label>
               <div class="form-actions">
                 <button id="runAiUpdateAnalysisButton" type="submit">Analyze</button>
@@ -2044,6 +2046,7 @@
       </section>
     </main>
 
+    <script src="/aiUpdateSafety.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

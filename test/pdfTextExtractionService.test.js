@@ -73,3 +73,16 @@ test("enforces PDF upload size limit", () => {
     /limited to 10 MB/
   );
 });
+
+test("flags sparse financial pages for future OCR instead of metric extraction", async () => {
+  const result = await extractPdfTextFromUpload(
+    asUpload(makeTinyPdf([
+      "Financial statements",
+      "Operational update contained readable details for the quarter, including installations, trainings, customer activity, and management objectives."
+    ]))
+  );
+
+  assert.deepEqual(result.diagnostics.financialImageHeavyPages, [1]);
+  assert.deepEqual(result.diagnostics.pagesWithLittleText, [1]);
+  assert.ok(result.diagnostics.pagesWithUsableText.includes(2));
+});

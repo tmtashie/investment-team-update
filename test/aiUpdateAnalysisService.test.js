@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createAiUpdateAnalysisService, normalizeAnalysisResult } = require("../services/aiUpdateAnalysisService");
+const {
+  createAiUpdateAnalysisService,
+  normalizeAnalysisResult,
+  _test
+} = require("../services/aiUpdateAnalysisService");
 
 function normalizeEntityName(value) {
   return String(value || "").trim();
@@ -64,6 +68,62 @@ function createService(rawResponse) {
   });
   return { service, getCalls: () => calls };
 }
+
+function createSequenceService(rawResponses) {
+  let calls = 0;
+  const prompts = [];
+  const service = createAiUpdateAnalysisService({
+    normalizeEntityName,
+    getNow: () => new Date("2026-08-27T12:00:00.000Z"),
+    callModel: async (prompt) => {
+      prompts.push(prompt);
+      const response = rawResponses[Math.min(calls, rawResponses.length - 1)];
+      calls += 1;
+      return response;
+    }
+  });
+  return { service, getCalls: () => calls, prompts };
+}
+
+const healingInvestments = [
+  {
+    id: "healing-id",
+    company: "Healing Innovations",
+    entity: "Beaman Ventures",
+    assetType: "Private Investment",
+    status: "Active",
+    investmentAliases: ["Healing Innovations, Inc.", "Healing Innovations Board"]
+  },
+  {
+    id: "other-id",
+    company: "Other Medical Device Company",
+    entity: "Lee Beaman",
+    assetType: "Private Investment",
+    status: "Active"
+  }
+];
+
+test("strict numeric equivalence preserves financial scale", () => {
+  assert.equal(_test.numericValuesExactlyEquivalent("21.7M", "21,700,000"), true);
+  assert.equal(_test.numericValuesExactlyEquivalent("21.7M", "$21.7 million"), true);
+  assert.equal(_test.numericValuesExactlyEquivalent("21.7M", "21"), false);
+  assert.equal(_test.numericValuesExactlyEquivalent("21.7M", "21.7"), false);
+  assert.equal(_test.numericValuesExactlyEquivalent("21.7M", "21,700"), false);
+  assert.equal(_test.numericValuesExactlyEquivalent("172.2K", "172,200"), true);
+  assert.equal(_test.numericValuesExactlyEquivalent("172.2K", "172.2"), false);
+  assert.equal(_test.numericValuesExactlyEquivalent("3M", "3,000,000"), true);
+  assert.equal(_test.numericValuesExactlyEquivalent("3M", "3"), false);
+});
+
+test("strict numeric matcher rejects Page 9 KPI tokens for 21.7M", () => {
+  const page9 =
+    "Q2 KPIs Total Units Sold: 57 Sales Meetings: 89 Total Units Deployed: 53 Total Units Trained: 51 Total Steps Last Quarter: 3,920,989 Total Sessions: 23,908 Total Patients: 4,093 Service Calls: 45 Operations FTE: 21 (+1) Part-Time: 4 Key Contractors: 6 People";
+
+  const match = _test.findNumericMatch(page9, "21.7M");
+
+  assert.equal(match.numericMatchFound, false);
+  assert.equal(match.matchedNumericText, "");
+});
 
 test("source explicitly says FINSYNC and portfolio contains FINSYNC", async () => {
   const { service } = createService({
@@ -325,8 +385,10 @@ test("context prevents selecting a cash sentence as evidence for revenue", async
     entities
   });
 
-  assert.equal(result.analysis.extractedFacts[0].sourceEvidence, "");
-  assert.equal(result.analysis.extractedFacts[0].evidenceStatus, "unresolved");
+  assert.equal(result.analysis.extractedFacts.length, 0);
+  assert.equal(result.analysis.unverifiedClaims[0].field, "revenue");
+  assert.equal(result.analysis.unverifiedClaims[0].verification.numericMatchFound, true);
+  assert.equal(result.analysis.unverifiedClaims[0].verification.contextMatchFound, false);
   assert.match(result.analysis.unresolved.join(" "), /Could not verify source evidence for revenue/);
 });
 
@@ -355,8 +417,9 @@ test("fabricated model evidence is not displayed as verified", async () => {
     entities
   });
 
-  assert.equal(result.analysis.extractedFacts[0].sourceEvidence, "");
-  assert.equal(result.analysis.extractedFacts[0].evidenceStatus, "unresolved");
+  assert.equal(result.analysis.extractedFacts.length, 0);
+  assert.equal(result.analysis.unverifiedClaims[0].field, "revenue");
+  assert.equal(result.analysis.unverifiedClaims[0].verification.numericMatchFound, false);
 });
 
 test("duplicate fact and change evidence warnings are deduplicated", async () => {
@@ -424,7 +487,8 @@ test("revenue comparison produces useful summary language", async () => {
     entities
   });
 
-  assert.equal(result.analysis.whatChanged[0], "July Revenue increased from 2.83M to 3.0M.");
+  assert.equal(result.analysis.proposedChanges[0].currentValue, "Not currently recorded");
+  assert.equal(result.analysis.whatChanged[0], "No verified portfolio changes identified from this document.");
 });
 
 test("customerCount comparison produces useful summary language", async () => {
@@ -452,7 +516,8 @@ test("customerCount comparison produces useful summary language", async () => {
     entities
   });
 
-  assert.equal(result.analysis.whatChanged[0], "Customer count increased from 58,626 to 62,824.");
+  assert.equal(result.analysis.proposedChanges[0].currentValue, "Not currently recorded");
+  assert.equal(result.analysis.whatChanged[0], "No verified portfolio changes identified from this document.");
 });
 
 test("summary does not claim increase or decrease when comparison is not valid", async () => {
@@ -480,7 +545,7 @@ test("summary does not claim increase or decrease when comparison is not valid",
     entities
   });
 
-  assert.equal(result.analysis.whatChanged[0], "Management changed the revenue reporting format.");
+  assert.equal(result.analysis.whatChanged[0], "No verified portfolio changes identified from this document.");
   assert.doesNotMatch(result.analysis.whatChanged.join(" "), /increased|decreased/);
 });
 
@@ -545,10 +610,11 @@ test("FINSYNC regression returns grounded evidence and specific what changed", a
   assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
   assert.equal(result.analysis.proposedChanges[0].sourceEvidence, "FINSYNC July revenue increased to $3.0 million from $2.83 million.");
   assert.equal(result.analysis.proposedChanges[0].evidenceStatus, "verified");
+  assert.equal(result.analysis.proposedChanges[0].currentValue, "Not currently recorded");
   assert.equal(result.analysis.proposedChanges[1].sourceEvidence, "Customer count increased to 62,824 in July.");
   assert.equal(result.analysis.proposedChanges[1].evidenceStatus, "verified");
-  assert.ok(result.analysis.whatChanged.includes("July Revenue increased from 2.83M to 3.0M."));
-  assert.ok(result.analysis.whatChanged.includes("July Customer count increased from 58,626 to 62,824."));
+  assert.equal(result.analysis.proposedChanges[1].currentValue, "Not currently recorded");
+  assert.equal(result.analysis.whatChanged[0], "No verified portfolio changes identified from this document.");
 });
 
 test("successful manual text analysis returns normalized result", async () => {
@@ -600,7 +666,7 @@ test("successful manual text analysis returns normalized result", async () => {
   assert.equal(getCalls(), 1);
   assert.equal(result.analysis.investmentMatch.investmentId, "inv-1");
   assert.equal(result.analysis.extractedFacts[0].field, "revenue");
-  assert.equal(result.analysis.proposedChanges[0].currentValue, "$18.2M");
+  assert.equal(result.analysis.proposedChanges[0].currentValue, "Not currently recorded");
   assert.equal(result.analyzedAt, "2026-08-27T12:00:00.000Z");
 });
 
@@ -967,4 +1033,727 @@ test("PDF filename-only match stays below high-confidence body matches", async (
   assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
   assert.equal(result.analysis.investmentMatch.confidence, 78);
   assert.match(result.analysis.investmentMatch.reason, /filename/);
+});
+
+test("unsupported numeric facts cannot create proposed changes or What Changed claims", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "healing-id", confidence: 90 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "financial metric",
+        field: "revenue",
+        value: "21.7M",
+        sourceEvidence: "revenue was 21.7M",
+        confidence: 95
+      }
+    ],
+    whatChanged: ["Healing Innovations revenue increased to 21.7M."],
+    proposedChanges: [
+      {
+        actionType: "update financial metric",
+        field: "revenue",
+        proposedValue: "21.7M",
+        sourceEvidence: "revenue was 21.7M",
+        confidence: 95,
+        riskLevel: "high"
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceText: "Healing Innovations sold 5 units in Q2. No reliable revenue value was extracted."
+    },
+    investments: healingInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.proposedChanges.length, 0);
+  assert.doesNotMatch(result.analysis.whatChanged.join(" "), /21\.7M|revenue increased/i);
+  assert.match(result.analysis.warnings.join(" "), /Removed unsupported proposed change for revenue/);
+});
+
+test("verified high-risk fact can support a proposed change and preserve page", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "healing-id", confidence: 90 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "recurring revenue",
+        field: "subscription MRR",
+        value: "$172,200",
+        sourceEvidence: "subscription MRR of $172,200",
+        confidence: 95
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [
+      {
+        actionType: "update recurring revenue",
+        field: "subscription MRR",
+        proposedValue: "$172,200",
+        sourceEvidence: "",
+        confidence: 92,
+        riskLevel: "high"
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      sourceText: "Page 6:\nRaaS subscription MRR of $172,200 across 41 units under contract.",
+      pages: [{ pageNumber: 6, text: "RaaS subscription MRR of $172,200 across 41 units under contract." }]
+    },
+    investments: healingInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.proposedChanges.length, 1);
+  assert.equal(result.analysis.proposedChanges[0].evidenceStatus, "verified");
+  assert.equal(result.analysis.proposedChanges[0].sourcePage, 6);
+});
+
+test("verified narrative material development is preserved without a structured field", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "healing-id", confidence: 90 },
+    entityMatch: {},
+    extractedFacts: [],
+    materialDevelopments: [
+      {
+        category: "customer win",
+        summary: "Healing Innovations added Nobis Rehabilitation Partners as a new corporate account.",
+        sourceEvidence: "new corporate account: Nobis Rehabilitation Partners",
+        sourcePage: 3,
+        confidence: 95,
+        riskLevel: "low"
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      sourceText: "Page 3:\nnew corporate account: Nobis Rehabilitation Partners",
+      pages: [{ pageNumber: 3, text: "new corporate account: Nobis Rehabilitation Partners" }]
+    },
+    investments: healingInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.proposedChanges.length, 0);
+  assert.equal(result.analysis.materialDevelopments[0].sourcePage, 3);
+  assert.match(result.analysis.whatChanged.join(" "), /Nobis Rehabilitation Partners/);
+});
+
+test("Healing Innovations deck regression rejects unsupported revenue and keeps verified developments", async () => {
+  const pageResults = Array.from({ length: 5 }, () => ({
+    extractedFacts: [],
+    materialDevelopments: [],
+    warnings: [],
+    unresolved: []
+  }));
+  const finalResult = {
+    investmentMatch: { investmentId: "healing-id", confidence: 90 },
+    entityMatch: { entityName: "Beaman Ventures", confidence: 90 },
+    extractedFacts: [
+      {
+        category: "sales",
+        field: "units sold",
+        value: "5",
+        period: "Q2 2026",
+        sourceEvidence: "Q2: 5 units sold",
+        confidence: 94
+      },
+      {
+        category: "recurring revenue",
+        field: "subscription MRR",
+        value: "$172,200",
+        sourceEvidence: "subscription MRR of $172,200",
+        confidence: 95
+      },
+      {
+        category: "pipeline",
+        field: "proposal pipeline",
+        value: "$2.5M",
+        period: "2026",
+        sourceEvidence: "proposal $2.5M",
+        confidence: 93
+      },
+      {
+        category: "financial metric",
+        field: "revenue",
+        value: "21.7M",
+        sourceEvidence: "revenue was 21.7M",
+        confidence: 95
+      }
+    ],
+    materialDevelopments: [
+      {
+        category: "operations",
+        summary: "Healing Innovations sold 5 units in Q2 and installed 7 units.",
+        sourceEvidence: "Q2: 5 units sold; 7 units installed",
+        sourcePage: 3,
+        confidence: 95,
+        riskLevel: "medium"
+      },
+      {
+        category: "customer win",
+        summary: "Nobis Rehabilitation Partners was added as a new corporate account.",
+        sourceEvidence: "new corporate account: Nobis Rehabilitation Partners",
+        sourcePage: 3,
+        confidence: 95,
+        riskLevel: "low"
+      },
+      {
+        category: "recurring revenue",
+        summary: "RaaS subscription MRR reached $172,200 across 41 units under contract.",
+        sourceEvidence: "subscription MRR of $172,200; 41 units under contract",
+        sourcePage: 6,
+        confidence: 95,
+        riskLevel: "high"
+      },
+      {
+        category: "pipeline",
+        summary: "The 2026 sales pipeline includes $2.5M in proposal stage and $2.1M in contracting.",
+        sourceEvidence: "proposal $2.5M; contracting $2.1M",
+        sourcePage: 8,
+        confidence: 94,
+        riskLevel: "medium"
+      },
+      {
+        category: "capital support commitment",
+        summary: "Beaman Ventures committed to support an expansion of the line of credit to $5M.",
+        sourceEvidence: "line of credit expansion to $5M; Beaman Ventures committed to support the expansion",
+        sourcePage: 15,
+        confidence: 96,
+        riskLevel: "high"
+      }
+    ],
+    whatChanged: ["Revenue increased to 21.7M."],
+    proposedChanges: [
+      {
+        actionType: "update financial metric",
+        field: "revenue",
+        proposedValue: "21.7M",
+        sourceEvidence: "revenue was 21.7M",
+        confidence: 95,
+        riskLevel: "high"
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  };
+  const { service, getCalls, prompts } = createSequenceService(pageResults.concat(finalResult));
+  const pages = [
+    { pageNumber: 3, text: "Healing Innovations Q2: 5 units sold; 7 units installed; 6 trainings; new corporate account: Nobis Rehabilitation Partners." },
+    { pageNumber: 6, text: "RaaS subscription MRR of $172,200; 41 units under contract." },
+    { pageNumber: 8, text: "2026 pipeline: discovery $2.3M; demo $215K; proposal $2.5M; contracting $2.1M; closed won $1.2M." },
+    { pageNumber: 9, text: "Q2 KPIs: 57 total units sold; 53 total units deployed; 51 total units trained; 21 FTE." },
+    { pageNumber: 15, text: "Line of credit expansion to $5M. Beaman Ventures committed to support the expansion." }
+  ];
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      filename: "Healing Innovations Board Deck July 29 2026.pdf",
+      pageCount: 16,
+      sourceText: pages.map((page) => `Page ${page.pageNumber}:\n${page.text}`).join("\n\n"),
+      pages
+    },
+    investments: healingInvestments,
+    entities
+  });
+
+  assert.equal(getCalls(), 6);
+  assert.match(prompts[0], /Page 3:/);
+  assert.match(prompts[5], /Page-level candidate extraction results/);
+  assert.equal(result.analysis.investmentMatch.investmentId, "healing-id");
+  assert.equal(result.analysis.proposedChanges.length, 0);
+  assert.doesNotMatch(result.analysis.whatChanged.join(" "), /21\.7M|Revenue increased/i);
+  assert.match(result.analysis.whatChanged.join(" "), /RaaS subscription MRR reached \$172,200/);
+  assert.match(result.analysis.whatChanged.join(" "), /line of credit to \$5M/);
+  assert.equal(result.analysis.materialDevelopments.find((item) => /line of credit/i.test(item.summary)).sourcePage, 15);
+  assert.ok(result.analysis.materialDevelopments.every((item) => item.sourcePage));
+});
+
+test("numeric verification rejects 21.7M revenue when cited page lacks that number", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "healing-id", confidence: 97 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "financial metric",
+        field: "revenue",
+        value: "21.7M",
+        sourceEvidence: "Q2 2026 Review 5 Units Sold 7 Units Installed 6 Trainings",
+        sourcePage: 3,
+        confidence: 97
+      }
+    ],
+    whatChanged: ["Revenue increased to 21.7M."],
+    proposedChanges: [
+      {
+        actionType: "update financial metric",
+        field: "revenue",
+        proposedValue: "21.7M",
+        sourceEvidence: "Q2 2026 Review 5 Units Sold 7 Units Installed 6 Trainings",
+        sourcePage: 3,
+        confidence: 99,
+        riskLevel: "high"
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      sourceText: "Page 3:\nQ2 2026 Review\n5 Units Sold\n7 Units Installed\n6 Trainings\nNEW Corporate account: Nobis Rehabilitation Partners",
+      pages: [
+        {
+          pageNumber: 3,
+          text: "Q2 2026 Review\n5 Units Sold\n7 Units Installed\n6 Trainings\nNEW Corporate account: Nobis Rehabilitation Partners"
+        }
+      ]
+    },
+    investments: healingInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.extractedFacts.length, 0);
+  assert.equal(result.analysis.unverifiedClaims[0].field, "revenue");
+  assert.equal(result.analysis.unverifiedClaims[0].verification.numericMatchFound, false);
+  assert.equal(result.analysis.proposedChanges.length, 0);
+  assert.doesNotMatch(result.analysis.whatChanged.join(" "), /21\.7M|Revenue increased/i);
+  assert.match(result.analysis.unresolved.join(" "), /Could not verify numeric value 21\.7M for revenue on source page 3/);
+});
+
+test("revenue 3.0M verifies from revenue context but not cash context", async () => {
+  const verified = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 90 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "financial metric",
+        field: "revenue",
+        value: "3.0M",
+        sourceEvidence: "Revenue was $3.0 million",
+        confidence: 95
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+  const verifiedResult = await verified.service.analyzeInvestmentUpdate({
+    source: { sourceText: "Revenue was $3.0 million." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(verifiedResult.analysis.extractedFacts[0].evidenceStatus, "verified");
+  assert.equal(verifiedResult.analysis.extractedFacts[0].verification.numericMatchFound, true);
+  assert.equal(verifiedResult.analysis.extractedFacts[0].verification.contextMatchFound, true);
+
+  const rejected = createService({
+    investmentMatch: { investmentId: "finsync-id", confidence: 90 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "financial metric",
+        field: "revenue",
+        value: "3.0M",
+        sourceEvidence: "Cash balance was $3.0 million",
+        confidence: 95
+      }
+    ],
+    whatChanged: ["Revenue increased to 3.0M."],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+  const rejectedResult = await rejected.service.analyzeInvestmentUpdate({
+    source: { sourceText: "Cash balance was $3.0 million." },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(rejectedResult.analysis.extractedFacts.length, 0);
+  assert.equal(rejectedResult.analysis.unverifiedClaims[0].verification.numericMatchFound, true);
+  assert.equal(rejectedResult.analysis.unverifiedClaims[0].verification.contextMatchFound, false);
+  assert.doesNotMatch(rejectedResult.analysis.whatChanged.join(" "), /Revenue increased/);
+});
+
+test("Healing numeric positives verify MRR units installed sold and trainings", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "healing-id", confidence: 97 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "recurring revenue",
+        field: "MRR",
+        value: "172,200",
+        sourceEvidence: "Subscription Program TOTAL $172,200",
+        sourcePage: 6,
+        confidence: 96
+      },
+      {
+        category: "operations",
+        field: "units sold",
+        value: "5",
+        sourceEvidence: "5 Units Sold",
+        sourcePage: 3,
+        confidence: 96
+      },
+      {
+        category: "operations",
+        field: "units installed",
+        value: "7",
+        sourceEvidence: "7 Units Installed",
+        sourcePage: 3,
+        confidence: 96
+      },
+      {
+        category: "operations",
+        field: "trainings",
+        value: "6",
+        sourceEvidence: "6 Trainings",
+        sourcePage: 3,
+        confidence: 96
+      }
+    ],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      sourceText: [
+        "Page 3:\nQ2 2026 Review\n5 Units Sold\n7 Units Installed\n6 Trainings",
+        "Page 6:\nSubscription Program\nTOTAL $172,200\n41 Units under contract for the RaaS Program"
+      ].join("\n\n"),
+      pages: [
+        { pageNumber: 3, text: "Q2 2026 Review\n5 Units Sold\n7 Units Installed\n6 Trainings" },
+        { pageNumber: 6, text: "Subscription Program\nTOTAL $172,200\n41 Units under contract for the RaaS Program" }
+      ]
+    },
+    investments: healingInvestments,
+    entities
+  });
+
+  assert.deepEqual(
+    result.analysis.extractedFacts.map((fact) => fact.evidenceStatus),
+    ["verified", "verified", "verified", "verified"]
+  );
+  assert.deepEqual(
+    result.analysis.extractedFacts.map((fact) => fact.verification.numericMatchFound),
+    [true, true, true, true]
+  );
+});
+
+test("final response uses portfolio currentValue instead of model supplied currentValue", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "inv-1", confidence: 96 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "valuation",
+        field: "valuation",
+        value: "$21.7M",
+        sourceEvidence: "Valuation was $21.7M",
+        confidence: 96
+      }
+    ],
+    materialDevelopments: [
+      {
+        category: "valuation",
+        summary: "Valuation was updated to $21.7M.",
+        sourceEvidence: "Valuation was $21.7M",
+        confidence: 96,
+        riskLevel: "high"
+      }
+    ],
+    whatChanged: ["Valuation increased from $1.18M to $21.7M."],
+    proposedChanges: [
+      {
+        field: "valuation",
+        currentValue: "$1.18M",
+        proposedValue: "$21.7M",
+        sourceEvidence: "Valuation was $21.7M",
+        confidence: 96,
+        riskLevel: "high"
+      }
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "Northwind valuation was $21.7M." },
+    investments,
+    entities
+  });
+
+  assert.equal(result.analysis.proposedChanges[0].currentValue, "18,200,000");
+  assert.doesNotMatch(result.analysis.whatChanged.join(" "), /1\.18M/);
+  assert.match(result.analysis.whatChanged.join(" "), /18.2M.*21.7M/);
+});
+
+test("structured warning object normalizes to message instead of object serialization", () => {
+  assert.equal(_test.warningMessage({ message: "Use this warning." }), "Use this warning.");
+  assert.equal(_test.warningMessage({ reason: "Use this reason." }), "Use this reason.");
+  assert.equal(_test.warningMessage({ unused: "raw object" }), "");
+});
+
+test("material evidence locator returns exact short evidence for units sold", () => {
+  const located = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "operations",
+      summary: "Healing Innovations sold 5 units in Q2, including 3 RaaS and 2 DP.",
+      sourceEvidence: "Page 3 broad block",
+      sourcePage: 3
+    },
+    sourceText: "",
+    pages: [
+      {
+        pageNumber: 3,
+        text: "Q2 2026 Review\nNEW Corporate account: Nobis Rehabilitation Partners\n5 Units Sold (3 RaaS + 2 DP)\n7 Units Installed + 6 Trainings"
+      }
+    ],
+    sourcePage: 3
+  });
+
+  assert.equal(located.evidenceStatus, "verified");
+  assert.equal(located.sourcePage, 3);
+  assert.equal(located.evidence, "5 Units Sold (3 RaaS + 2 DP)");
+});
+
+test("material evidence locator returns exact short evidence for installed units and trainings", () => {
+  const located = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "operations",
+      summary: "Healing Innovations installed 7 units and completed 6 trainings.",
+      sourcePage: 3
+    },
+    sourceText: "",
+    pages: [
+      {
+        pageNumber: 3,
+        text: "Q2 2026 Review\n5 Units Sold (3 RaaS + 2 DP)\n7 Units Installed + 6 Trainings\nNEW Corporate account: Nobis Rehabilitation Partners"
+      }
+    ],
+    sourcePage: 3
+  });
+
+  assert.equal(located.evidenceStatus, "verified");
+  assert.equal(located.sourcePage, 3);
+  assert.equal(located.evidence, "7 Units Installed + 6 Trainings");
+});
+
+test("numeric material development cannot verify against unrelated same-page evidence", () => {
+  const located = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "clinical",
+      summary: "2 papers in the publishing process",
+      sourcePage: 3
+    },
+    sourceText: "",
+    pages: [
+      {
+        pageNumber: 3,
+        text: "Q2 2026 Review\n5 Units Sold (3 RaaS + 2 DP)\n7 Units Installed + 6 Trainings"
+      }
+    ],
+    sourcePage: 3
+  });
+
+  assert.equal(located.evidenceStatus, "unresolved");
+});
+
+test("numeric material development verifies when evidence supports the publishing claim", () => {
+  const located = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "clinical",
+      summary: "2 papers in the publishing process",
+      sourcePage: 3
+    },
+    sourceText: "",
+    pages: [
+      {
+        pageNumber: 3,
+        text: "Clinical progress: 2 papers in the publishing process\n5 Units Sold (3 RaaS + 2 DP)"
+      }
+    ],
+    sourcePage: 3
+  });
+
+  assert.equal(located.evidenceStatus, "verified");
+  assert.equal(located.sourcePage, 3);
+  assert.equal(located.evidence, "Clinical progress: 2 papers in the publishing process");
+});
+
+test("broad page text cannot independently verify a material development", () => {
+  const located = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "customer win",
+      summary: "Nobis Rehabilitation Partners became a new corporate account.",
+      sourcePage: 3
+    },
+    sourceText: "",
+    pages: [
+      {
+        pageNumber: 3,
+        text: "Q2 2026 Review " +
+          "Total Units Sold: 57 Sales Meetings: 89 Total Units Deployed: 53 Total Units Trained: 51 " +
+          "Service Calls: 45 Operations FTE: 21 Part-Time: 4 Key Contractors: 6 People " +
+          "The deck mentions Nobis Rehabilitation Partners in one section and corporate planning in another section with account operations elsewhere."
+      }
+    ],
+    sourcePage: 3
+  });
+
+  assert.equal(located.evidenceStatus, "unresolved");
+});
+
+test("numeric material-development mismatch fails claim-level verification", () => {
+  const located = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "operations",
+      summary: "Healing Innovations sold 5 units in Q2.",
+      sourcePage: 3
+    },
+    sourceText: "",
+    pages: [{ pageNumber: 3, text: "Q2 2026 Review\n4 Units Sold (3 RaaS + 1 DP)" }],
+    sourcePage: 3
+  });
+
+  assert.equal(located.evidenceStatus, "unresolved");
+});
+
+test("$5M LOC material development requires local LOC context", () => {
+  const located = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "financing",
+      summary: "The company expanded its line of credit to $5M.",
+      sourcePage: 15
+    },
+    sourceText: "",
+    pages: [{ pageNumber: 15, text: "The company expects $5M of future capacity. The operations team discussed credit discipline." }],
+    sourcePage: 15
+  });
+
+  assert.equal(located.evidenceStatus, "unresolved");
+});
+
+test("commitment material development requires local commitment or support language", () => {
+  const failed = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "capital support commitment",
+      summary: "Beaman Ventures committed to support an expansion of the line of credit to $5M.",
+      sourcePage: 15
+    },
+    sourceText: "",
+    pages: [{ pageNumber: 15, text: "Line of credit expansion to $5M. Beaman Ventures was listed on the page." }],
+    sourcePage: 15
+  });
+  const verified = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "capital support commitment",
+      summary: "Beaman Ventures committed to support an expansion of the line of credit to $5M.",
+      sourcePage: 15
+    },
+    sourceText: "",
+    pages: [{ pageNumber: 15, text: "Line of credit expansion to $5M. Beaman Ventures committed to support the expansion." }],
+    sourcePage: 15
+  });
+
+  assert.equal(failed.evidenceStatus, "unresolved");
+  assert.equal(verified.evidenceStatus, "verified");
+  assert.equal(verified.evidence, "Line of credit expansion to $5M. Beaman Ventures committed to support the expansion.");
+});
+
+test("personnel material developments verify against their respective personnel evidence", () => {
+  const pages = [
+    {
+      pageNumber: 8,
+      text: "HR Update\nWade Lawrence joined as VP of Operations.\nEmily Wilson hired as Clinical Lead."
+    }
+  ];
+  const wade = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "staffing",
+      summary: "Wade Lawrence joined as VP of Operations.",
+      sourcePage: 8
+    },
+    sourceText: "",
+    pages,
+    sourcePage: 8
+  });
+  const emily = _test.findMaterialDevelopmentEvidence({
+    item: {
+      category: "staffing",
+      summary: "Emily Wilson hired as Clinical Lead.",
+      sourcePage: 8
+    },
+    sourceText: "",
+    pages,
+    sourcePage: 8
+  });
+
+  assert.equal(wade.evidenceStatus, "verified");
+  assert.equal(wade.evidence, "Wade Lawrence joined as VP of Operations.");
+  assert.equal(emily.evidenceStatus, "verified");
+  assert.equal(emily.evidence, "Emily Wilson hired as Clinical Lead.");
+});
+
+test("failed material development is absent from What Changed and not actionable from page-wide overlap", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "healing-id", confidence: 96 },
+    entityMatch: { entityName: "Beaman Ventures", confidence: 100 },
+    extractedFacts: [],
+    materialDevelopments: [
+      {
+        category: "capital support commitment",
+        summary: "Beaman Ventures committed to support an expansion of the line of credit to $5M.",
+        sourceEvidence: "Line of credit expansion to $5M. Beaman Ventures was listed on the page.",
+        sourcePage: 15,
+        confidence: 96,
+        riskLevel: "high"
+      }
+    ],
+    whatChanged: ["Beaman Ventures committed to support an expansion of the line of credit to $5M."],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "PDF",
+      sourceText: "Page 15:\nLine of credit expansion to $5M. Beaman Ventures was listed on the page.",
+      pages: [{ pageNumber: 15, text: "Line of credit expansion to $5M. Beaman Ventures was listed on the page." }]
+    },
+    investments: healingInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.materialDevelopments.length, 0);
+  assert.equal(result.analysis.unverifiedClaims.some((claim) => claim.sourcePage === 15 && /line of credit/i.test(claim.value)), true);
+  assert.doesNotMatch(result.analysis.whatChanged.join(" "), /\$5M|line of credit|committed/i);
+  assert.match(result.analysis.warnings.join(" "), /Removed unsupported material development/);
 });
