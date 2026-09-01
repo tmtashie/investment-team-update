@@ -377,7 +377,7 @@ function writeMetadata(partial) {
   });
 }
 
-const { createBackupSnapshot, restoreFromBackupPayload } = createBackupService({
+const { createBackupSnapshot, createBackupExportPayload, restoreFromBackupPayload } = createBackupService({
   BACKUPS_DIR,
   DATA_FILE,
   TASKS_FILE,
@@ -5127,7 +5127,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    const { fileName, backup } = createBackupSnapshot("manual-export");
+    const { fileName, backup } = createBackupExportPayload("manual-export");
     response.writeHead(200, {
       "Content-Type": "application/json; charset=utf-8",
       "Content-Disposition": `attachment; filename="${fileName}"`
