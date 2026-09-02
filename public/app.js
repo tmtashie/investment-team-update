@@ -279,6 +279,8 @@ const tasksList = document.getElementById("tasksList");
 const companyTasks = document.getElementById("companyTasks");
 const aiUpdateInboxSummary = document.getElementById("aiUpdateInboxSummary");
 const aiUpdateInboxMessage = document.getElementById("aiUpdateInboxMessage");
+const checkAiEmailIntakeButton = document.getElementById("checkAiEmailIntakeButton");
+const aiEmailIntakeResult = document.getElementById("aiEmailIntakeResult");
 const aiUpdateInboxList = document.getElementById("aiUpdateInboxList");
 const aiUpdateProposalDetail = document.getElementById("aiUpdateProposalDetail");
 const openAiUpdateAnalyzerButton = document.getElementById("openAiUpdateAnalyzerButton");
@@ -317,6 +319,12 @@ let aiUpdateProposalCounts = {
   pending: 0,
   approved: 0,
   rejected: 0
+};
+let aiEmailIntakeConfig = {
+  enabled: false,
+  configured: false,
+  mailboxUser: "",
+  folderName: ""
 };
 let selectedAiUpdateProposalId = "";
 let latestAiUpdateAnalysis = null;
@@ -7346,10 +7354,65 @@ function buildProposalPayloadFromAnalysis() {
   };
 }
 
+function renderAiEmailIntakeResult(result) {
+  if (!aiEmailIntakeResult) {
+    return;
+  }
+  if (!result) {
+    aiEmailIntakeResult.classList.add("hidden");
+    aiEmailIntakeResult.innerHTML = "";
+    return;
+  }
+
+  const rows = Array.isArray(result.results) ? result.results.slice(0, 8) : [];
+  aiEmailIntakeResult.classList.remove("hidden");
+  aiEmailIntakeResult.innerHTML = `
+    <div class="update-head">
+      <div>
+        <p class="dashboard-label">Microsoft 365 intake</p>
+        <h3>${escapeHtml(String(result.proposalsCreated || 0))} proposal${Number(result.proposalsCreated || 0) === 1 ? "" : "s"} created</h3>
+        <p class="update-meta">
+          Checked ${escapeHtml(String(result.checked || 0))} • Processed ${escapeHtml(String(result.processed || 0))} • Skipped ${escapeHtml(String(result.skipped || 0))} • Failed ${escapeHtml(String(result.failed || 0))}
+        </p>
+      </div>
+      <span class="status-chip">${escapeHtml(result.folderName || aiEmailIntakeConfig.folderName || "Microsoft 365")}</span>
+    </div>
+    ${
+      rows.length
+        ? `<div class="digest-preview-list">${rows
+            .map(
+              (row) => `
+                <article class="digest-preview-item">
+                  <p class="highlight-value">${escapeHtml(row.subject || "No subject")}</p>
+                  <p class="update-meta">${escapeHtml([row.sender, row.status, row.reason].filter(Boolean).join(" • "))}</p>
+                </article>
+              `
+            )
+            .join("")}</div>`
+        : ""
+    }
+    ${result.error ? `<p class="update-meta">${escapeHtml(result.error)}</p>` : ""}
+  `;
+}
+
+function syncAiEmailIntakeControls() {
+  if (!checkAiEmailIntakeButton) {
+    return;
+  }
+  const available = canEditWorkspace() && aiEmailIntakeConfig.enabled && aiEmailIntakeConfig.configured;
+  checkAiEmailIntakeButton.disabled = !available;
+  checkAiEmailIntakeButton.title = available
+    ? `Check ${aiEmailIntakeConfig.mailboxUser || "configured mailbox"} / ${aiEmailIntakeConfig.folderName || "AI Investment Updates"}`
+    : aiEmailIntakeConfig.enabled
+      ? "Microsoft 365 email intake needs Graph mailbox configuration."
+      : "Microsoft 365 email intake is disabled.";
+}
+
 function renderAiUpdateInbox() {
   if (!aiUpdateInboxSummary || !aiUpdateInboxList || !aiUpdateProposalDetail) {
     return;
   }
+  syncAiEmailIntakeControls();
 
   aiUpdateInboxSummary.innerHTML = ["pending", "approved", "rejected"]
     .map(
@@ -8604,6 +8667,19 @@ async function loadConfig() {
     recipientStatus.textContent += ` • Last digest sent ${formatDisplayDate(digestStatus.lastDigestSentAt)}`;
   }
   configuredEntities = Array.isArray(config.entities) ? config.entities : [];
+  aiEmailIntakeConfig = config.aiEmailIntake && typeof config.aiEmailIntake === "object"
+    ? {
+        enabled: Boolean(config.aiEmailIntake.enabled),
+        configured: Boolean(config.aiEmailIntake.configured),
+        mailboxUser: String(config.aiEmailIntake.mailboxUser || "").trim(),
+        folderName: String(config.aiEmailIntake.folderName || "").trim()
+      }
+    : {
+        enabled: false,
+        configured: false,
+        mailboxUser: "",
+        folderName: ""
+      };
   renderConfiguredEntitySelects();
 
   loginCopy.textContent =
@@ -10990,6 +11066,53 @@ addListener(tasksList, "click", (event) => {
 
 addListener(openAiUpdateAnalyzerButton, "click", () => {
   openAiUpdateAnalyzer();
+});
+
+addListener(checkAiEmailIntakeButton, "click", async () => {
+  if (!checkAiEmailIntakeButton) {
+    return;
+  }
+  checkAiEmailIntakeButton.disabled = true;
+  if (aiUpdateInboxMessage) {
+    aiUpdateInboxMessage.textContent = "Checking Microsoft 365 for investment emails...";
+  }
+  renderAiEmailIntakeResult(null);
+
+  try {
+    const result = await fetchJson("/api/ai-email-intake/check", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
+    renderAiEmailIntakeResult(result);
+    await loadAiUpdateProposals();
+    if (Number(result.proposalsCreated || 0) > 0) {
+      await loadUpdates();
+    }
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = `Microsoft 365 check complete. Checked ${result.checked || 0} message${Number(result.checked || 0) === 1 ? "" : "s"} and created ${result.proposalsCreated || 0} proposal${Number(result.proposalsCreated || 0) === 1 ? "" : "s"}.`;
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      return;
+    }
+    renderAiEmailIntakeResult({
+      checked: 0,
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+      proposalsCreated: 0,
+      error: error.message,
+      results: []
+    });
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = error.message;
+    }
+  } finally {
+    syncAiEmailIntakeControls();
+  }
 });
 
 addListener(cancelAiUpdateAnalysisButton, "click", () => {

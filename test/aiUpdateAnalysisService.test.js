@@ -156,6 +156,49 @@ test("source explicitly says FINSYNC and portfolio contains FINSYNC", async () =
   assert.match(result.analysis.investmentMatch.reason, /Exact source body match for 'FINSYNC'/);
 });
 
+test("FINSYNC subject and sender domain deterministically match FINSYNC instead of Healing Innovations", async () => {
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "healing-id",
+      investmentName: "Healing Innovations",
+      confidence: 84,
+      reason: "Model guessed from strategic update language."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "Email",
+      subject: "HIGHLY CONFIDENTIAL: FINSYNC August Update",
+      sender: "tuckermathis@finsync.com",
+      sourceText: "August investor update covering customer growth, monthly recurring revenue, and sales pipeline."
+    },
+    investments: [
+      ...finsyncInvestments,
+      {
+        id: "healing-id",
+        company: "Healing Innovations",
+        entity: "Beaman Ventures",
+        assetType: "Private Investment",
+        status: "Active",
+        investmentAliases: ["Healing Innovations, Inc."]
+      }
+    ],
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.notEqual(result.analysis.investmentMatch.investmentId, "healing-id");
+  assert.equal(result.analysis.candidates.some((candidate) => candidate.investmentId === "finsync-id"), true);
+  assert.match(result.analysis.investmentMatch.reason, /Exact subject match for 'FINSYNC'/);
+});
+
 test("explicit FINSYNC source must not match Vanguard", async () => {
   const { service } = createService({
     investmentMatch: {
@@ -615,6 +658,137 @@ test("FINSYNC regression returns grounded evidence and specific what changed", a
   assert.equal(result.analysis.proposedChanges[1].evidenceStatus, "verified");
   assert.equal(result.analysis.proposedChanges[1].currentValue, "Not currently recorded");
   assert.equal(result.analysis.whatChanged[0], "No verified portfolio changes identified from this document.");
+});
+
+test("email body source-backed operating metrics survive when model misses them and unsupported revenue is removed", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", investmentName: "FINSYNC", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "21.7M",
+        sourceEvidence: "revenue was 21.7M",
+        confidence: 97
+      }
+    ],
+    materialDevelopments: [
+      {
+        category: "customer growth",
+        summary: "Customer base increased to 62,824.",
+        sourceEvidence: "Customer base increased to 62,824.",
+        confidence: 93
+      }
+    ],
+    proposedChanges: [
+      {
+        field: "revenue",
+        proposedValue: "21.7M",
+        sourceEvidence: "revenue was 21.7M",
+        confidence: 97,
+        riskLevel: "medium"
+      }
+    ],
+    whatChanged: [
+      "Revenue increased to 21.7M.",
+      "Customer base increased to 62,824."
+    ],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "Email",
+      subject: "HIGHLY CONFIDENTIAL: FINSYNC August Update",
+      sender: "tuckermathis@finsync.com",
+      sourceText: "FINSYNC update. Based on results through July, we are now at approximately 62,824 customers and $3.0 million in monthly recurring revenue."
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  const customerFact = result.analysis.extractedFacts.find((fact) => fact.field === "customerCount");
+  const mrrFact = result.analysis.extractedFacts.find((fact) => fact.field === "monthly recurring revenue");
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.equal(customerFact.evidenceStatus, "verified");
+  assert.equal(customerFact.value, "62,824");
+  assert.equal(customerFact.sourceEvidence, "Based on results through July, we are now at approximately 62,824 customers and $3.0 million in monthly recurring revenue.");
+  assert.equal(mrrFact.evidenceStatus, "verified");
+  assert.equal(mrrFact.value, "$3.0 million");
+  assert.equal(mrrFact.sourceEvidence, "Based on results through July, we are now at approximately 62,824 customers and $3.0 million in monthly recurring revenue.");
+  assert.equal(result.analysis.extractedFacts.some((fact) => fact.field === "monthly recurring revenue" && fact.value === "62,824"), false);
+  assert.equal(result.analysis.extractedFacts.some((fact) => fact.field === "revenue" && String(fact.value).includes("3.0")), false);
+  assert.equal(result.analysis.extractedFacts.some((fact) => fact.field === "revenue" && String(fact.value).includes("21.7")), false);
+  assert.equal(result.analysis.proposedChanges.length, 0);
+  assert.doesNotMatch(result.analysis.whatChanged.join(" "), /21\.7M|revenue increased/i);
+  assert.equal(result.analysis.unverifiedClaims.some((claim) => claim.field === "revenue" && claim.value === "21.7M"), true);
+});
+
+test("email operating-metric extraction keeps customer counts separate from monetary MRR", async () => {
+  const { service } = createService({
+    investmentMatch: { investmentId: "finsync-id", investmentName: "FINSYNC", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "$3.0 million",
+        sourceEvidence: "$3.0 million in monthly recurring revenue",
+        confidence: 97
+      },
+      {
+        category: "operating metrics",
+        field: "revenue",
+        value: "21.7M",
+        sourceEvidence: "revenue was 21.7M",
+        confidence: 97
+      }
+    ],
+    materialDevelopments: [],
+    proposedChanges: [
+      {
+        field: "revenue",
+        proposedValue: "21.7M",
+        sourceEvidence: "revenue was 21.7M",
+        confidence: 97,
+        riskLevel: "medium"
+      }
+    ],
+    whatChanged: ["Revenue increased to 21.7M."],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "Email",
+      subject: "HIGHLY CONFIDENTIAL: Operating Update",
+      sourceText: [
+        "By the end of April, we had grown to 58,626 customers and $2.83 million in monthly recurring revenue.",
+        "Based on results through July, we are now at approximately 62,824 customers and $3.0 million in monthly recurring revenue.",
+        "A different company claims to have five times our revenue and 200 times our revenue."
+      ].join(" ")
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  const factKeys = result.analysis.extractedFacts.map((fact) => `${fact.field}:${fact.value}`);
+
+  assert.equal(result.analysis.extractedFacts.filter((fact) => fact.field === "customerCount" && fact.value === "58,626").length, 1);
+  assert.equal(result.analysis.extractedFacts.filter((fact) => fact.field === "customerCount" && fact.value === "62,824").length, 1);
+  assert.equal(result.analysis.extractedFacts.filter((fact) => fact.field === "monthly recurring revenue" && fact.value === "$2.83 million").length, 1);
+  assert.equal(result.analysis.extractedFacts.filter((fact) => fact.field === "monthly recurring revenue" && fact.value === "$3.0 million").length, 1);
+  assert.equal(factKeys.includes("monthly recurring revenue:62,824"), false);
+  assert.equal(factKeys.includes("monthly recurring revenue:58,626"), false);
+  assert.equal(result.analysis.extractedFacts.some((fact) => fact.field === "revenue" && /\$?3\.0/i.test(String(fact.value))), false);
+  assert.equal(result.analysis.extractedFacts.some((fact) => fact.field === "revenue" && /21\.7/i.test(String(fact.value))), false);
+  assert.equal(result.analysis.proposedChanges.length, 0);
+  assert.doesNotMatch(JSON.stringify(result.analysis), /five times our revenue|200 times our revenue/);
+  assert.equal(new Set(factKeys).size, factKeys.length);
 });
 
 test("successful manual text analysis returns normalized result", async () => {

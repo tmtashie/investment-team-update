@@ -10,7 +10,10 @@ const { createAiUpdateProposalService } = require("./services/aiUpdateProposalSe
 const {
   applyApprovedAiUpdateProposalToInvestment
 } = require("./services/aiUpdateProposalApplyService");
+const { createAiEmailIntakeService } = require("./services/aiEmailIntakeService");
+const { createAiEmailIntakeStateService } = require("./services/aiEmailIntakeStateService");
 const { createAiUpdateAnalysisService } = require("./services/aiUpdateAnalysisService");
+const { createMicrosoftGraphMailService } = require("./services/microsoftGraphMailService");
 const { extractPdfTextFromUpload } = require("./services/pdfTextExtractionService");
 const {
   enforceProposalSafetyInvariant,
@@ -53,6 +56,7 @@ const DATA_DIR = process.env.DATA_DIR
 const DATA_FILE = path.join(DATA_DIR, "investments.json");
 const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
 const AI_UPDATE_PROPOSALS_FILE = path.join(DATA_DIR, "ai-update-proposals.json");
+const AI_EMAIL_INTAKE_STATE_FILE = path.join(DATA_DIR, "ai-email-intake-state.json");
 const COMPANY_DOCUMENTS_FILE = path.join(DATA_DIR, "company-documents.json");
 const METADATA_FILE = path.join(DATA_DIR, "metadata.json");
 const BACKUPS_DIR = path.join(DATA_DIR, "backups");
@@ -73,6 +77,9 @@ const DATA_SCHEMA_VERSION = 2;
 const NEXT_STEP_REMINDER_DAYS = Number(process.env.NEXT_STEP_REMINDER_DAYS || 14);
 const DIGEST_WINDOW_DAYS = 14;
 const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
+const AI_EMAIL_INTAKE_ENABLED = String(process.env.AI_EMAIL_INTAKE_ENABLED || "")
+  .trim()
+  .toLowerCase() === "true";
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
@@ -1279,6 +1286,55 @@ const {
   normalizeAiUpdateProposal,
   createBackupSnapshot,
   applyApprovedAiUpdateProposal
+});
+
+const microsoftGraphMailService = createMicrosoftGraphMailService({
+  tenantId: process.env.MICROSOFT_TENANT_ID,
+  clientId: process.env.MICROSOFT_CLIENT_ID,
+  clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+  mailboxUser: process.env.MICROSOFT_MAILBOX_USER,
+  folderName: process.env.MICROSOFT_MAIL_FOLDER_NAME || "AI Investment Updates",
+  maxMessagesPerRun: process.env.AI_EMAIL_MAX_MESSAGES_PER_RUN
+});
+
+const aiEmailIntakeStateService = createAiEmailIntakeStateService({
+  STATE_FILE: AI_EMAIL_INTAKE_STATE_FILE,
+  readJsonFile,
+  writeJsonFile
+});
+
+function saveAiEmailIntakeUpload({ filename, buffer, uploadedAt }) {
+  ensureDataFile();
+  const storedName = safeFilename(filename);
+  const filePath = path.join(UPLOADS_DIR, storedName);
+  fs.writeFileSync(filePath, buffer);
+  return {
+    id: makeId(),
+    name: filename,
+    storedName,
+    url: `/uploads/${storedName}`,
+    uploadedAt,
+    uploadedBy: "microsoft-365-email-intake",
+    source: "microsoft-365-email"
+  };
+}
+
+const aiEmailIntakeService = createAiEmailIntakeService({
+  graphMailService: microsoftGraphMailService,
+  stateService: aiEmailIntakeStateService,
+  analyzeInvestmentUpdate,
+  extractPdfTextFromUpload,
+  finalizeAnalysisForResponse,
+  enforceProposalSafetyInvariant,
+  saveAiUpdateProposal,
+  readInvestments,
+  filterInvestmentsForUser,
+  entities: INVESTMENT_ENTITIES,
+  canViewEntity,
+  makeId,
+  saveUpload: saveAiEmailIntakeUpload,
+  allowedSenders: process.env.AI_EMAIL_ALLOWED_SENDERS || "",
+  allowedDomains: process.env.AI_EMAIL_ALLOWED_DOMAINS || ""
 });
 
 function serializeAiUpdateProposal(proposal, investments) {
@@ -4598,6 +4654,21 @@ const server = http.createServer(async (request, response) => {
       updateRequestFromEmail: getUpdateRequestFromEmail(),
       updateRequestReplyToEmail: getUpdateRequestReplyToEmail(),
       aiConfigured: Boolean(process.env.OPENAI_API_KEY),
+      aiEmailIntake: {
+        enabled: AI_EMAIL_INTAKE_ENABLED,
+        configured: AI_EMAIL_INTAKE_ENABLED && microsoftGraphMailService.isConfigured(),
+        mailboxUser: AI_EMAIL_INTAKE_ENABLED
+          ? microsoftGraphMailService.getSafeConfigStatus().mailboxUser
+          : "",
+        folderName: AI_EMAIL_INTAKE_ENABLED
+          ? microsoftGraphMailService.getSafeConfigStatus().folderName
+          : "",
+        maxMessagesPerRun: AI_EMAIL_INTAKE_ENABLED
+          ? microsoftGraphMailService.getSafeConfigStatus().maxMessagesPerRun
+          : 0,
+        allowedSendersConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_SENDERS),
+        allowedDomainsConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_DOMAINS)
+      },
       entities: INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity)),
       familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
       authConfigured: Boolean(
@@ -4769,6 +4840,37 @@ const server = http.createServer(async (request, response) => {
       user
     });
     return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-email-intake/check") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+    if (!AI_EMAIL_INTAKE_ENABLED) {
+      sendJson(response, 400, {
+        error: "Microsoft 365 email intake is disabled. Set AI_EMAIL_INTAKE_ENABLED=true after configuring Microsoft Graph."
+      });
+      return;
+    }
+
+    try {
+      const result = await aiEmailIntakeService.checkForNewEmails({ user });
+      const status = result.configured === false ? 400 : 200;
+      sendJson(response, status, result);
+      return;
+    } catch (error) {
+      sendJson(response, error.statusCode || 500, {
+        checked: 0,
+        processed: 0,
+        skipped: 0,
+        failed: 1,
+        proposalsCreated: 0,
+        error: error.message || "Microsoft 365 email intake failed.",
+        results: []
+      });
+      return;
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/ai-update-proposals/analyze") {

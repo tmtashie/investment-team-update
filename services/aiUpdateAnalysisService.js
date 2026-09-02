@@ -217,6 +217,20 @@ function findNumericMatch(span, value) {
 
 function findContextMatch(span, field) {
   const normalizedSpan = normalizeMatchText(span);
+  if (compactMatchText(field) === "revenue") {
+    const recurringRevenueStripped = normalizedSpan
+      .replace(/\bmonthly recurring revenue\b/g, " ")
+      .replace(/\bannual recurring revenue\b/g, " ")
+      .replace(/\bsubscription revenue\b/g, " ")
+      .replace(/\bmrr\b/g, " ")
+      .replace(/\barr\b/g, " ");
+    if (!/\b(sales revenue|net revenue|gross revenue|quarterly revenue|revenue)\b/.test(recurringRevenueStripped)) {
+      return {
+        contextMatchFound: false,
+        matchedContextText: ""
+      };
+    }
+  }
   const matchedContextText = getFieldContextTerms(field).find((term) =>
     normalizedSpan.includes(normalizeMatchText(term))
   );
@@ -410,6 +424,106 @@ function findSupportingSourceSnippet({ sourceText, pages, field, value, alternat
       ? numericVerificationFailure(field, value, sourcePage || best.span.pageNumber)
       : ""
   };
+}
+
+function sourceSpanHasVerifiedFact(existingFacts, field, value) {
+  const normalizedField = compactMatchText(field);
+  return existingFacts.some((fact) => {
+    const factField = compactMatchText(fact && fact.field);
+    if (factField !== normalizedField) {
+      return false;
+    }
+    return numericValuesExactlyEquivalent(itemValueText(fact), value) || hasExplicitPhrase(itemValueText(fact), value);
+  });
+}
+
+function addDetectedSourceFact(facts, { category, field, value, unit = "", sourceEvidence, sourcePage, confidence = 88 }) {
+  if (!value || sourceSpanHasVerifiedFact(facts, field, value)) {
+    return;
+  }
+  facts.push({
+    category,
+    field,
+    value,
+    unit,
+    period: "",
+    date: "",
+    factType: "actual historical result",
+    sourceEvidence,
+    sourcePage,
+    evidenceStatus: "verified",
+    evidenceUnavailable: false,
+    confidence,
+    verification: buildVerificationResult({ text: sourceEvidence, pageNumber: sourcePage, parts: [sourceEvidence] }, field, value)
+  });
+}
+
+function inferSourceBackedOperatingFacts(sourceText, pages = [], existingFacts = []) {
+  const facts = existingFacts.slice();
+  buildSourceSpanWindows(sourceText, pages).forEach((span) => {
+    const text = span.text;
+    const normalized = normalizeMatchText(text);
+    if (!text || text.length > 500) {
+      return;
+    }
+
+    if (/(customer|customers|subscriber|subscribers)/.test(normalized)) {
+      const customerMatches = [
+        ...text.matchAll(/\b([0-9]+(?:,[0-9]{3})+|[0-9]{4,})\s+(?:customers|subscribers)\b/gi),
+        ...text.matchAll(/\b(?:customers?|subscribers?|customer\s+count|subscriber\s+count)[^0-9$]{0,80}([0-9]+(?:,[0-9]{3})+|[0-9]{4,})\b/gi)
+      ];
+      customerMatches.forEach((match) => {
+        const value = asString(match[1], 80);
+        const located = findSupportingSourceSnippet({
+          sourceText,
+          pages,
+          field: "customerCount",
+          value,
+          hint: text,
+          sourcePage: span.pageNumber
+        });
+        if (located.evidenceStatus === "verified") {
+          addDetectedSourceFact(facts, {
+            category: "operating metrics",
+            field: "customerCount",
+            value,
+            sourceEvidence: located.evidence,
+            sourcePage: located.sourcePage
+          });
+        }
+      });
+    }
+
+    if (/(monthly recurring revenue|\bmrr\b)/.test(normalized)) {
+      const monetaryAmountPattern = "(\\$\\s*[0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?\\s*(?:m|mm|b|bn|k|thousand|million|billion)?|[0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?\\s*(?:m|mm|b|bn|k|thousand|million|billion))";
+      const mrrMatches = [
+        ...text.matchAll(new RegExp(`${monetaryAmountPattern}\\s+(?:in\\s+)?(?:monthly\\s+recurring\\s+revenue|mrr)\\b`, "gi")),
+        ...text.matchAll(new RegExp(`\\b(?:monthly\\s+recurring\\s+revenue|mrr)[^0-9$]{0,80}${monetaryAmountPattern}`, "gi"))
+      ];
+      mrrMatches.forEach((match) => {
+        const value = asString(match[1], 80);
+        const located = findSupportingSourceSnippet({
+          sourceText,
+          pages,
+          field: "monthly recurring revenue",
+          value,
+          hint: text,
+          sourcePage: span.pageNumber
+        });
+        if (located.evidenceStatus === "verified") {
+          addDetectedSourceFact(facts, {
+            category: "operating metrics",
+            field: "monthly recurring revenue",
+            value,
+            unit: "USD",
+            sourceEvidence: located.evidence,
+            sourcePage: located.sourcePage
+          });
+        }
+      });
+    }
+  });
+  return facts;
 }
 
 function splitMaterialEvidenceSegments(text) {
@@ -1466,12 +1580,16 @@ function normalizeAnalysisResult({
     warnings.push("Entity match confidence is below 70%; confirm the entity before creating a proposal.");
   }
 
-  const extractedFacts = enforceSourceEvidence(
+  const extractedFacts = inferSourceBackedOperatingFacts(
+    sourceText,
+    sourcePages,
+    enforceSourceEvidence(
     asArray(raw.extractedFacts || raw.extracted_facts).map(normalizeFact),
     { sourceText, pages: sourcePages },
     unresolved,
     new Set(),
     "Extracted fact"
+    )
   );
   const unverifiedClaims = [];
   const materialDevelopments = enforceSourceEvidence(
