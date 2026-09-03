@@ -47,6 +47,7 @@ node server.js
 - `RESEND_API_KEY`: API key for Resend
 - `OPENAI_API_KEY`: API key for deck summarization and investment email analysis
 - `OPENAI_MODEL`: optional override for the summarization and analysis model
+- `EXECUTIVE_BRIEF_ENABLED`: opt-in switch for the narrow executive-brief MCP sender; defaults to disabled
 - `AI_EMAIL_INTAKE_ENABLED`: opt-in switch for Microsoft 365 investment email intake; defaults to disabled and must be set to `true` to enable the manual check
 - `MICROSOFT_TENANT_ID`: Microsoft Entra tenant identifier used for client-credentials authentication
 - `MICROSOFT_CLIENT_ID`: application client identifier used for Microsoft Graph authentication
@@ -70,6 +71,14 @@ Sender controls are optional. When `AI_EMAIL_ALLOWED_SENDERS` is populated, a me
 Processed messages are deduplicated using their Internet Message ID or Microsoft Graph message ID. PDF content is also deduplicated by a SHA-256 hash. Intake state and its analysis audit are stored in `ai-email-intake-state.json` under `DATA_DIR`, so later manual checks do not create duplicate proposals from previously processed sources.
 
 Automated intake must find explicit portfolio evidence before it creates a proposal, and the existing source-evidence safety checks still apply. Successful analysis creates a `pending` proposal only. It never approves or applies an investment update: an authorized human must review and approve or reject each proposal in the AI Update Inbox.
+
+## Executive brief delivery
+
+The server includes a disabled-by-default MCP endpoint with exactly one tool: `send_executive_brief`. It accepts a `morning` or `evening` brief, an exact type-and-date subject, restricted HTML, and matching plain text. The recipient is fixed in server code to `tyler@beamanventures.com`; recipient, CC, BCC, reply, forward, attachment, and arbitrary delivery fields are rejected.
+
+Delivery is limited to one morning and one evening brief per `America/Chicago` calendar day. A persistent reservation is written before the provider request, and the same server-derived key is sent to Resend as an idempotency key. Audit state contains delivery metadata and a content digest, never briefing or source-email contents.
+
+Setting `EXECUTIVE_BRIEF_ENABLED=true` is not sufficient to authorize delivery. The checked-in runtime authentication provider denies every request. A managed OAuth 2.1 token verifier must later be connected to the provider-neutral authentication interface with the dedicated `executive_brief:send` scope. Provider selection, live credentials, deployment, MCP app publication, and workspace-agent approval settings are intentionally outside this repository baseline.
 
 ## Deployment
 
