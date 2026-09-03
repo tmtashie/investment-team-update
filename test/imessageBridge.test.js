@@ -12,9 +12,12 @@ const { appleTimestampToCentral, createImessageBridgeService } = require("../ser
 const { TOOL_DEFINITIONS, createMcpRequestHandler } = require("../services/imessageBridgeMcp");
 const { openReadOnlyMessagesDatabase } = require("../services/imessageReadOnlyDatabase");
 
-const THREAD_ONE = "iMessage;-;synthetic-one";
-const THREAD_GROUP = "iMessage;+;synthetic-group";
-const THREAD_BLOCKED = "iMessage;-;synthetic-blocked";
+const THREAD_ONE = "approved_one";
+const THREAD_GROUP = "approved_group";
+const THREAD_BLOCKED = "blocked_thread";
+const THREAD_ONE_GUID = "iMessage;-;synthetic-one";
+const THREAD_GROUP_GUID = "iMessage;+;synthetic-group";
+const THREAD_BLOCKED_GUID = "iMessage;-;synthetic-blocked";
 
 function allowlist(overrides = {}) {
   return normalizeAllowlist({
@@ -22,12 +25,14 @@ function allowlist(overrides = {}) {
     selfDisplayName: "Local User",
     threads: [
       {
-        conversationId: THREAD_ONE,
+        threadId: THREAD_ONE,
+        chatGuid: THREAD_ONE_GUID,
         displayName: "Approved One-to-One",
         participants: [{ handle: "person-one@example.invalid", displayName: "Person One" }]
       },
       {
-        conversationId: THREAD_GROUP,
+        threadId: THREAD_GROUP,
+        chatGuid: THREAD_GROUP_GUID,
         displayName: "Approved Group",
         participants: [
           { handle: "person-one@example.invalid", displayName: "Person One" },
@@ -69,7 +74,7 @@ function buildFixture() {
   const insertMessage = database.prepare("INSERT INTO message (guid, handle_id, is_from_me, date, text) VALUES (?, ?, ?, ?, ?)");
   const joinMessage = database.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)");
 
-  const chats = [THREAD_ONE, THREAD_GROUP, THREAD_BLOCKED].map((guid) => Number(insertChat.run(guid).lastInsertRowid));
+  const chats = [THREAD_ONE_GUID, THREAD_GROUP_GUID, THREAD_BLOCKED_GUID].map((guid) => Number(insertChat.run(guid).lastInsertRowid));
   const handles = ["person-one@example.invalid", "+15555550102", "blocked@example.invalid"].map((id) => Number(insertHandle.run(id).lastInsertRowid));
   joinHandle.run(chats[0], handles[0]);
   joinHandle.run(chats[1], handles[0]);
@@ -107,10 +112,10 @@ function withService(t, options = {}) {
 
 test("an allowlisted conversation can be read with normalized output", (t) => {
   const { service } = withService(t);
-  const result = service.readRecentMessages({ conversationId: THREAD_ONE, limit: 10 });
+  const result = service.readRecentMessages({ threadId: THREAD_ONE, limit: 10 });
   assert.equal(result.messages.length, 2);
   assert.deepEqual(Object.keys(result.messages[0]), [
-    "conversationId", "conversationDisplayName", "participants", "messageId", "replyToMessageId", "sender", "direction", "timestamp", "text"
+    "threadId", "conversationDisplayName", "participants", "messageId", "replyToMessageId", "sender", "direction", "timestamp", "text"
   ]);
   assert.equal(result.messages[0].sender, "Person One");
   assert.equal(result.messages[0].direction, "received");
@@ -118,12 +123,13 @@ test("an allowlisted conversation can be read with normalized output", (t) => {
   assert.equal(result.messages[1].direction, "sent");
   assert.ok(result.messages[0].timestamp.endsWith("-05:00"));
   assert.ok(result.messages[0].timestamp < result.messages[1].timestamp);
+  assert.equal(JSON.stringify(result).includes(THREAD_ONE_GUID), false);
 });
 
 test("a non-allowlisted conversation is rejected before message access", (t) => {
   const { service } = withService(t);
   assert.throws(
-    () => service.readRecentMessages({ conversationId: THREAD_BLOCKED }),
+    () => service.readRecentMessages({ threadId: THREAD_BLOCKED }),
     (error) => error.code === "CONVERSATION_NOT_ALLOWED"
   );
 });
@@ -135,6 +141,8 @@ test("thread listing returns only configured aliases and no raw handles", (t) =>
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes("person-one@example.invalid"), false);
   assert.equal(serialized.includes("+15555550102"), false);
+  assert.equal(serialized.includes(THREAD_ONE_GUID), false);
+  assert.equal(serialized.includes(THREAD_GROUP_GUID), false);
 });
 
 test("arbitrary SQL and filesystem paths are rejected by every tool", async (t) => {
@@ -142,8 +150,8 @@ test("arbitrary SQL and filesystem paths are rejected by every tool", async (t) 
   const handle = createMcpRequestHandler(service);
   for (const [name, args] of [
     ["list_allowed_message_threads", { sql: "SELECT * FROM message" }],
-    ["read_recent_messages", { conversationId: THREAD_ONE, databasePath: "/tmp/other.db" }],
-    ["search_allowed_messages", { conversationId: THREAD_ONE, query: "Synthetic", path: "/etc/passwd" }]
+    ["read_recent_messages", { threadId: THREAD_ONE, databasePath: "/tmp/other.db" }],
+    ["search_allowed_messages", { threadId: THREAD_ONE, query: "Synthetic", path: "/etc/passwd" }]
   ]) {
     const response = await handle({ jsonrpc: "2.0", id: name, method: "tools/call", params: { name, arguments: args } });
     assert.equal(response.result.isError, true);
@@ -153,16 +161,16 @@ test("arbitrary SQL and filesystem paths are rejected by every tool", async (t) 
 
 test("search is parameterized and confined to the selected allowed conversation", (t) => {
   const { service } = withService(t);
-  assert.equal(service.searchAllowedMessages({ conversationId: THREAD_ONE, query: "Synthetic", limit: 10 }).messages.length, 2);
-  assert.equal(service.searchAllowedMessages({ conversationId: THREAD_ONE, query: "Never return", limit: 10 }).messages.length, 0);
-  assert.equal(service.searchAllowedMessages({ conversationId: THREAD_ONE, query: "%' OR 1=1 --", limit: 10 }).messages.length, 0);
+  assert.equal(service.searchAllowedMessages({ threadId: THREAD_ONE, query: "Synthetic", limit: 10 }).messages.length, 2);
+  assert.equal(service.searchAllowedMessages({ threadId: THREAD_ONE, query: "Never return", limit: 10 }).messages.length, 0);
+  assert.equal(service.searchAllowedMessages({ threadId: THREAD_ONE, query: "%' OR 1=1 --", limit: 10 }).messages.length, 0);
 });
 
 test("reactions, group events, and retracted messages are excluded", (t) => {
   const fixture = buildFixture();
   t.after(fixture.cleanup);
   const writer = new DatabaseSync(fixture.databasePath);
-  const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_ONE).rowid;
+  const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_ONE_GUID).rowid;
   const insert = writer.prepare(`
     INSERT INTO message (guid, handle_id, is_from_me, date, text, associated_message_type, item_type, date_retracted, is_empty, date_edited)
     VALUES (?, 1, 0, ?, ?, ?, ?, ?, ?, ?)
@@ -180,7 +188,7 @@ test("reactions, group events, and retracted messages are excluded", (t) => {
   const database = openReadOnlyMessagesDatabase(fixture.databasePath);
   t.after(() => database.close());
   const service = createImessageBridgeService({ database, allowlist: allowlist() });
-  const serialized = JSON.stringify(service.readRecentMessages({ conversationId: THREAD_ONE, limit: 50 }));
+  const serialized = JSON.stringify(service.readRecentMessages({ threadId: THREAD_ONE, limit: 50 }));
   assert.equal(serialized.includes("payload"), false);
 });
 
@@ -189,7 +197,7 @@ test("group conversations require an exact current participant match", (t) => {
     const fixture = buildFixture();
     t.after(fixture.cleanup);
     const writer = new DatabaseSync(fixture.databasePath);
-    const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_GROUP).rowid;
+    const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_GROUP_GUID).rowid;
     const newHandle = writer.prepare("INSERT INTO handle (id) VALUES (?)").run("unapproved@example.invalid").lastInsertRowid;
     writer.prepare("INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?, ?)").run(chatId, newHandle);
     writer.close();
@@ -199,7 +207,7 @@ test("group conversations require an exact current participant match", (t) => {
   })();
   assert.ok(databasePath);
   assert.throws(
-    () => service.readRecentMessages({ conversationId: THREAD_GROUP }),
+    () => service.readRecentMessages({ threadId: THREAD_GROUP }),
     (error) => error.code === "PARTICIPANTS_CHANGED"
   );
 });
@@ -208,7 +216,7 @@ test("malformed records fail safely without returning partial data", (t) => {
   const fixture = buildFixture();
   t.after(fixture.cleanup);
   const writer = new DatabaseSync(fixture.databasePath);
-  const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_ONE).rowid;
+  const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_ONE_GUID).rowid;
   const result = writer.prepare("INSERT INTO message (guid, handle_id, is_from_me, date, text) VALUES (NULL, 1, 0, 704779200, 'Sensitive malformed body')").run();
   writer.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)").run(chatId, result.lastInsertRowid);
   writer.close();
@@ -216,7 +224,7 @@ test("malformed records fail safely without returning partial data", (t) => {
   t.after(() => database.close());
   const service = createImessageBridgeService({ database, allowlist: allowlist() });
   assert.throws(
-    () => service.readRecentMessages({ conversationId: THREAD_ONE }),
+    () => service.readRecentMessages({ threadId: THREAD_ONE }),
     (error) => error.code === "MALFORMED_RECORD" && !error.message.includes("Sensitive")
   );
 });
@@ -225,8 +233,8 @@ test("message bodies and search text are never logged", (t) => {
   const entries = [];
   const logger = { info(...args) { entries.push(args); } };
   const { service } = withService(t, { logger });
-  service.readRecentMessages({ conversationId: THREAD_ONE });
-  service.searchAllowedMessages({ conversationId: THREAD_ONE, query: "Synthetic inbound" });
+  service.readRecentMessages({ threadId: THREAD_ONE });
+  service.searchAllowedMessages({ threadId: THREAD_ONE, query: "Synthetic inbound" });
   const serialized = JSON.stringify(entries);
   assert.equal(serialized.includes("Synthetic inbound"), false);
   assert.equal(serialized.includes("Synthetic outbound"), false);
@@ -256,6 +264,8 @@ test("the MCP handler completes the read-only handshake and ignores notification
   const handle = createMcpRequestHandler(service);
   const initialized = await handle({ jsonrpc: "2.0", method: "notifications/initialized" });
   assert.equal(initialized, null);
+  const discovered = await handle({ jsonrpc: "2.0", id: 0, method: "server/discover" });
+  assert.deepEqual(discovered.result.supportedVersions, ["2026-07-28", "2025-11-25"]);
   const listed = await handle({ jsonrpc: "2.0", id: 1, method: "tools/list" });
   assert.deepEqual(listed.result.tools, TOOL_DEFINITIONS);
   const ping = await handle({ jsonrpc: "2.0", id: 2, method: "ping" });
@@ -276,5 +286,5 @@ test("Apple epoch seconds and nanoseconds normalize across Central daylight time
 
 test("allowlist parsing rejects extra fields and empty participant sets", () => {
   assert.throws(() => normalizeAllowlist({ ...allowlist(), databasePath: "/tmp/chat.db" }), /allowlist is invalid/i);
-  assert.throws(() => normalizeAllowlist({ schemaVersion: 1, selfDisplayName: "Local User", threads: [{ conversationId: "x", displayName: "x", participants: [] }] }), /allowlist is invalid/i);
+  assert.throws(() => normalizeAllowlist({ schemaVersion: 1, selfDisplayName: "Local User", threads: [{ threadId: "x", chatGuid: "guid", displayName: "x", participants: [] }] }), /allowlist is invalid/i);
 });

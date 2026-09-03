@@ -33,15 +33,25 @@ function normalizeAllowlist(input) {
   }
 
   const selfDisplayName = requireCleanString(input.selfDisplayName, 100);
-  const conversationIds = new Set();
+  const threadIds = new Set();
+  const chatGuids = new Set();
   const threads = input.threads.map((thread) => {
-    assertOnlyKeys(thread, new Set(["conversationId", "displayName", "participants"]));
-    const conversationId = requireCleanString(thread.conversationId, 500);
+    assertOnlyKeys(thread, new Set(["threadId", "chatGuid", "displayName", "participants"]));
+    const threadId = requireCleanString(thread.threadId, 64);
+    const chatGuid = requireCleanString(thread.chatGuid, 500);
     const displayName = requireCleanString(thread.displayName, 200);
-    if (conversationIds.has(conversationId) || !Array.isArray(thread.participants) || thread.participants.length === 0 || thread.participants.length > 32) {
+    if (
+      !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(threadId) ||
+      threadIds.has(threadId) ||
+      chatGuids.has(chatGuid) ||
+      !Array.isArray(thread.participants) ||
+      thread.participants.length === 0 ||
+      thread.participants.length > 32
+    ) {
       throw configurationError();
     }
-    conversationIds.add(conversationId);
+    threadIds.add(threadId);
+    chatGuids.add(chatGuid);
 
     const handles = new Set();
     const participants = thread.participants.map((participant) => {
@@ -53,7 +63,7 @@ function normalizeAllowlist(input) {
       return Object.freeze({ handle, displayName: participantDisplayName });
     });
 
-    return Object.freeze({ conversationId, displayName, participants: Object.freeze(participants) });
+    return Object.freeze({ threadId, chatGuid, displayName, participants: Object.freeze(participants) });
   });
 
   return Object.freeze({ schemaVersion: 1, selfDisplayName, threads: Object.freeze(threads) });

@@ -3,7 +3,8 @@
   "selfDisplayName": "Local User",
   "threads": [
     {
-      "conversationId": "iMessage;-;synthetic-thread-identifier",
+      "threadId": "non_sensitive_test_thread",
+      "chatGuid": "iMessage;-;synthetic-thread-identifier",
       "displayName": "Approved test conversation",
       "participants": [
         {

@@ -20,8 +20,8 @@ function assertExactKeys(value, allowedKeys) {
   }
 }
 
-function requireConversationId(value) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 500 || value.trim() !== value) {
+function requireThreadId(value) {
+  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value)) {
     throw bridgeError("INVALID_REQUEST", "Invalid request.");
   }
   return value;
@@ -72,14 +72,14 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
   if (!database || !allowlist || !Array.isArray(allowlist.threads)) {
     throw bridgeError("INVALID_CONFIGURATION", "The iMessage bridge is not configured.");
   }
-  const allowedThreads = new Map(allowlist.threads.map((thread) => [thread.conversationId, thread]));
+  const allowedThreads = new Map(allowlist.threads.map((thread) => [thread.threadId, thread]));
 
   function log(event, metadata) {
     if (logger && typeof logger.info === "function") logger.info(event, metadata);
   }
 
-  function requireAllowedThread(conversationId) {
-    const thread = allowedThreads.get(requireConversationId(conversationId));
+  function requireAllowedThread(threadId) {
+    const thread = allowedThreads.get(requireThreadId(threadId));
     if (!thread) throw bridgeError("CONVERSATION_NOT_ALLOWED", "Conversation is not allowed.");
 
     let rows;
@@ -90,7 +90,7 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
         JOIN chat_handle_join AS chj ON chj.chat_id = c.ROWID
         JOIN handle AS h ON h.ROWID = chj.handle_id
         WHERE c.guid = ?
-      `).all(thread.conversationId);
+      `).all(thread.chatGuid);
     } catch {
       throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
     }
@@ -118,7 +118,7 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
       sender = participant.displayName;
     }
     return {
-      conversationId: thread.conversationId,
+      threadId: thread.threadId,
       conversationDisplayName: thread.displayName,
       participants: thread.participants.map((participant) => participant.displayName),
       messageId: row.message_id,
@@ -135,8 +135,8 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
   function selectMessages(thread, { limit, query = null }) {
     const searchClause = query === null ? "" : "AND instr(lower(m.text), lower(?)) > 0";
     const parameters = query === null
-      ? [thread.conversationId, limit]
-      : [thread.conversationId, query, limit];
+      ? [thread.chatGuid, limit]
+      : [thread.chatGuid, query, limit];
     let rows;
     try {
       rows = database.prepare(`
@@ -178,9 +178,9 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
     assertExactKeys(input, new Set());
     const threads = [];
     for (const configured of allowlist.threads) {
-      const thread = requireAllowedThread(configured.conversationId);
+      const thread = requireAllowedThread(configured.threadId);
       threads.push({
-        conversationId: thread.conversationId,
+        threadId: thread.threadId,
         displayName: thread.displayName,
         participants: thread.participants.map((participant) => participant.displayName)
       });
@@ -190,16 +190,16 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
   }
 
   function readRecentMessages(input) {
-    assertExactKeys(input, new Set(["conversationId", "limit"]));
-    const thread = requireAllowedThread(input.conversationId);
+    assertExactKeys(input, new Set(["threadId", "limit"]));
+    const thread = requireAllowedThread(input.threadId);
     const messages = selectMessages(thread, { limit: normalizeLimit(input.limit) });
     log("imessage_bridge_read_recent", { count: messages.length });
     return { messages };
   }
 
   function searchAllowedMessages(input) {
-    assertExactKeys(input, new Set(["conversationId", "query", "limit"]));
-    const thread = requireAllowedThread(input.conversationId);
+    assertExactKeys(input, new Set(["threadId", "query", "limit"]));
+    const thread = requireAllowedThread(input.threadId);
     const messages = selectMessages(thread, {
       limit: normalizeLimit(input.limit),
       query: normalizeSearchQuery(input.query)
