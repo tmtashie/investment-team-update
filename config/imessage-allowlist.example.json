@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "selfDisplayName": "Local User",
+  "threads": [
+    {
+      "conversationId": "iMessage;-;synthetic-thread-identifier",
+      "displayName": "Approved test conversation",
+      "participants": [
+        {
+          "handle": "synthetic-contact@example.invalid",
+          "displayName": "Approved Test Contact"
+        }
+      ]
+    }
+  ]
+}
