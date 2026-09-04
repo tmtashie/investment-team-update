@@ -192,6 +192,36 @@ test("reactions, group events, and retracted messages are excluded", (t) => {
   assert.equal(serialized.includes("payload"), false);
 });
 
+test("non-visible-only message text is omitted even when SQLite length is positive", (t) => {
+  const fixture = buildFixture();
+  t.after(fixture.cleanup);
+  const writer = new DatabaseSync(fixture.databasePath);
+  const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_ONE_GUID).rowid;
+  const insert = writer.prepare("INSERT INTO message (guid, handle_id, is_from_me, date, text) VALUES (?, 1, 0, ?, ?)");
+  const invisibleRows = [
+    ["whitespace-only", 704780010, "   \\t\\n"],
+    ["format-only", 704780011, "\\u200B\\u2060"],
+    ["object-replacement-only", 704780012, "\\uFFFC"],
+    ["marks-only", 704780013, "\\u0301\\uFE0F"]
+  ];
+  for (const values of invisibleRows) {
+    const result = insert.run(...values);
+    writer.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)").run(chatId, result.lastInsertRowid);
+  }
+  assert.equal(
+    writer.prepare("SELECT COUNT(*) AS count FROM message WHERE guid LIKE '%-only' AND length(text) > 0").get().count,
+    invisibleRows.length
+  );
+  writer.close();
+
+  const database = openReadOnlyMessagesDatabase(fixture.databasePath);
+  t.after(() => database.close());
+  const service = createImessageBridgeService({ database, allowlist: allowlist() });
+  const messages = service.readRecentMessages({ threadId: THREAD_ONE, limit: 50 }).messages;
+  assert.deepEqual(messages.map((message) => message.messageId), ["message-earlier", "message-later"]);
+  assert.equal(messages.every((message) => message.text.length > 0), true);
+});
+
 test("group conversations require an exact current participant match", (t) => {
   const { service, databasePath } = (() => {
     const fixture = buildFixture();
