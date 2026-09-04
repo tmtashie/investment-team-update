@@ -75,7 +75,7 @@ Messages contain only:
 - timestamp in ISO-like form with the applicable `America/Chicago` UTC offset
 - text
 
-The queries exclude reactions, system/group events, retracted messages, messages without plain `message.text`, and attachment data. The process does not log bodies, search text, handles, or conversation identifiers. Errors are replaced with fixed text and never include database values.
+The queries exclude reactions, system/group events, retracted messages, messages without plain `message.text`, non-visible-only text made up of whitespace, control, format, combining, or replacement code points, and attachment data. The process does not log bodies, search text, handles, or conversation identifiers. Errors are replaced with fixed text and never include database values.
 
 ## macOS and Messages limitations
 
