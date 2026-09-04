@@ -4,7 +4,7 @@ const MAX_MESSAGES = 50;
 const MAX_QUERY_LENGTH = 200;
 const MAX_MESSAGE_TEXT_LENGTH = 50000;
 const TIME_ZONE = "America/Chicago";
-const READABLE_MESSAGE_TEXT = /[^\\p{Cc}\\p{Cf}\\p{M}\\p{Z}\\uFFFC\\uFFFD]/u;
+const READABLE_MESSAGE_TEXT = /[^\p{Cc}\p{Cf}\p{M}\p{Z}\uFFFC\uFFFD]/u;
 
 function hasReadableMessageText(value) {
   return typeof value === "string" && READABLE_MESSAGE_TEXT.test(value);
