@@ -265,7 +265,7 @@ test("the MCP handler completes the read-only handshake and ignores notification
   const initialized = await handle({ jsonrpc: "2.0", method: "notifications/initialized" });
   assert.equal(initialized, null);
   const discovered = await handle({ jsonrpc: "2.0", id: 0, method: "server/discover" });
-  assert.deepEqual(discovered.result.supportedVersions, ["2026-07-28", "2025-11-25"]);
+  assert.deepEqual(discovered.result.supportedVersions, ["2025-11-25"]);
   const listed = await handle({ jsonrpc: "2.0", id: 1, method: "tools/list" });
   assert.deepEqual(listed.result.tools, TOOL_DEFINITIONS);
   const ping = await handle({ jsonrpc: "2.0", id: 2, method: "ping" });
