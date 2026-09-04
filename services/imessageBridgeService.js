@@ -4,6 +4,11 @@ const MAX_MESSAGES = 50;
 const MAX_QUERY_LENGTH = 200;
 const MAX_MESSAGE_TEXT_LENGTH = 50000;
 const TIME_ZONE = "America/Chicago";
+const READABLE_MESSAGE_TEXT = /[^\\p{Cc}\\p{Cf}\\p{M}\\p{Z}\\uFFFC\\uFFFD]/u;
+
+function hasReadableMessageText(value) {
+  return typeof value === "string" && READABLE_MESSAGE_TEXT.test(value);
+}
 
 function bridgeError(code, message) {
   const error = new Error(message);
@@ -105,7 +110,7 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
   function normalizeMessage(row, thread) {
     if (
       typeof row.message_id !== "string" || row.message_id.length === 0 || row.message_id.length > 500 ||
-      typeof row.text !== "string" || row.text.length > MAX_MESSAGE_TEXT_LENGTH ||
+      typeof row.text !== "string" || row.text.length > MAX_MESSAGE_TEXT_LENGTH || !hasReadableMessageText(row.text) ||
       (row.is_from_me !== 0 && row.is_from_me !== 1)
     ) {
       throw bridgeError("MALFORMED_RECORD", "An allowed message record is malformed.");
@@ -171,7 +176,9 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
     } catch {
       throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
     }
-    return rows.map((row) => normalizeMessage(row, thread));
+    return rows
+      .filter((row) => typeof row.text !== "string" || hasReadableMessageText(row.text))
+      .map((row) => normalizeMessage(row, thread));
   }
 
   function listAllowedMessageThreads(input = {}) {
