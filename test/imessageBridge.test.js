@@ -199,10 +199,10 @@ test("non-visible-only message text is omitted even when SQLite length is positi
   const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_ONE_GUID).rowid;
   const insert = writer.prepare("INSERT INTO message (guid, handle_id, is_from_me, date, text) VALUES (?, 1, 0, ?, ?)");
   const invisibleRows = [
-    ["whitespace-only", 704780010, "   \\t\\n"],
-    ["format-only", 704780011, "\\u200B\\u2060"],
-    ["object-replacement-only", 704780012, "\\uFFFC"],
-    ["marks-only", 704780013, "\\u0301\\uFE0F"]
+    ["whitespace-only", 704780010, "   \t\n"],
+    ["format-only", 704780011, "\u200B\u2060"],
+    ["object-replacement-only", 704780012, "\uFFFC"],
+    ["marks-only", 704780013, "\u0301\uFE0F"]
   ];
   for (const values of invisibleRows) {
     const result = insert.run(...values);
