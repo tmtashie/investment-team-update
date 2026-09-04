@@ -828,6 +828,19 @@ function generateInvestmentMatchCandidates({ source, investments }) {
       if (domainEvidence) {
         evidence.push(domainEvidence.reason);
       }
+      const evidenceTypes = [];
+      if (aliasMatch) {
+        evidenceTypes.push(
+          aliasMatch.location === "source body"
+            ? "sourceBody"
+            : aliasMatch.location === "subject"
+              ? "subject"
+              : "attachmentFilename"
+        );
+      }
+      if (domainEvidence) {
+        evidenceTypes.push("senderDomain");
+      }
       return {
         investment,
         investmentId: investment.id,
@@ -836,6 +849,7 @@ function generateInvestmentMatchCandidates({ source, investments }) {
         score,
         hasExplicitNameEvidence: Boolean(aliasMatch),
         hasDomainEvidence: Boolean(domainEvidence),
+        evidenceTypes,
         matchedAlias: aliasMatch ? aliasMatch.alias : "",
         reason: evidence.join(" ")
       };
@@ -1638,6 +1652,9 @@ function normalizeAnalysisResult({
   const whatChanged = shouldEnforceEvidenceGate
     ? enrichSafeWhatChangedSummary([], proposedChanges, materialDevelopments)
     : enrichWhatChangedSummary(raw.whatChanged || raw.what_changed, proposedChanges);
+  const matchedDeterministicCandidate = matchedInvestment
+    ? deterministicCandidates.find((candidate) => candidate.investmentId === matchedInvestment.id)
+    : null;
 
   const normalizedAnalysis = {
     investmentMatch: {
@@ -1651,6 +1668,12 @@ function normalizeAnalysisResult({
         : deterministicBest && matchedInvestment && matchedInvestment.id === deterministicBest.investmentId
           ? deterministicReason
           : asString(modelInvestmentMatch.reason || modelInvestmentMatch.matchReason, 600)
+    },
+    deterministicEvidence: {
+      investmentId: matchedDeterministicCandidate ? matchedDeterministicCandidate.investmentId : "",
+      types: matchedDeterministicCandidate && Array.isArray(matchedDeterministicCandidate.evidenceTypes)
+        ? matchedDeterministicCandidate.evidenceTypes.slice()
+        : []
     },
     entityMatch: {
       entityId: entityName,
