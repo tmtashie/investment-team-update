@@ -76,7 +76,7 @@ function createMcpRequestHandler(service) {
         id: request.id,
         result: {
           resultType: "complete",
-          supportedVersions: ["2026-07-28", "2025-11-25"],
+          supportedVersions: ["2025-11-25"],
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "beaman-imessage-readonly", version: "0.1.0" }
         }
