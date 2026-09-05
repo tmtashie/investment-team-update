@@ -15,6 +15,11 @@ const { createAiEmailIntakeStateService } = require("./services/aiEmailIntakeSta
 const { createAiUpdateAnalysisService } = require("./services/aiUpdateAnalysisService");
 const { createMicrosoftGraphMailService } = require("./services/microsoftGraphMailService");
 const { extractPdfTextFromUpload } = require("./services/pdfTextExtractionService");
+const { createExecutiveBriefDeliveryService } = require("./services/executiveBriefDeliveryService");
+const { createExecutiveBriefDeliveryStateService } = require("./services/executiveBriefDeliveryStateService");
+const { createResendExecutiveBriefTransport } = require("./services/resendExecutiveBriefTransport");
+const { createUnconfiguredExecutiveBriefAuthService } = require("./services/executiveBriefAuthService");
+const { createExecutiveBriefMcpServer } = require("./mcp/executiveBriefMcpServer");
 const {
   enforceProposalSafetyInvariant,
   finalizeAnalysisForResponse
@@ -57,6 +62,7 @@ const DATA_FILE = path.join(DATA_DIR, "investments.json");
 const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
 const AI_UPDATE_PROPOSALS_FILE = path.join(DATA_DIR, "ai-update-proposals.json");
 const AI_EMAIL_INTAKE_STATE_FILE = path.join(DATA_DIR, "ai-email-intake-state.json");
+const EXECUTIVE_BRIEF_DELIVERY_STATE_FILE = path.join(DATA_DIR, "executive-brief-deliveries.json");
 const COMPANY_DOCUMENTS_FILE = path.join(DATA_DIR, "company-documents.json");
 const METADATA_FILE = path.join(DATA_DIR, "metadata.json");
 const BACKUPS_DIR = path.join(DATA_DIR, "backups");
@@ -78,6 +84,9 @@ const NEXT_STEP_REMINDER_DAYS = Number(process.env.NEXT_STEP_REMINDER_DAYS || 14
 const DIGEST_WINDOW_DAYS = 14;
 const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
 const AI_EMAIL_INTAKE_ENABLED = String(process.env.AI_EMAIL_INTAKE_ENABLED || "")
+  .trim()
+  .toLowerCase() === "true";
+const EXECUTIVE_BRIEF_ENABLED = String(process.env.EXECUTIVE_BRIEF_ENABLED || "")
   .trim()
   .toLowerCase() === "true";
 const INVESTMENT_ENTITIES = [
@@ -333,6 +342,26 @@ const { ensureDataFile, readJsonFile, writeJsonFile } = createJsonStore({
   BACKUPS_DIR,
   UPLOADS_DIR,
   DATA_SCHEMA_VERSION
+});
+
+const executiveBriefDeliveryStateService = createExecutiveBriefDeliveryStateService({
+  STATE_FILE: EXECUTIVE_BRIEF_DELIVERY_STATE_FILE,
+  readJsonFile,
+  writeJsonFile
+});
+const executiveBriefDeliveryService = createExecutiveBriefDeliveryService({
+  enabled: EXECUTIVE_BRIEF_ENABLED,
+  stateService: executiveBriefDeliveryStateService,
+  transport: createResendExecutiveBriefTransport({
+    apiKey: process.env.RESEND_API_KEY,
+    fromEmail: process.env.FROM_EMAIL
+  }),
+  makeId,
+  audit: (event) => console.info("[executive-brief-audit]", JSON.stringify(event))
+});
+const executiveBriefMcpServer = createExecutiveBriefMcpServer({
+  authService: createUnconfiguredExecutiveBriefAuthService(),
+  deliveryService: executiveBriefDeliveryService
 });
 
 function makeId() {
@@ -4626,6 +4655,34 @@ const server = http.createServer(async (request, response) => {
   console.log(`[request] ${request.method} ${rawPath}`);
 
   const url = new URL(rawPath, `http://${request.headers.host || "localhost"}`);
+
+  if (url.pathname === "/mcp") {
+    if (request.method !== "POST") {
+      sendJson(response, 405, {
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32600, message: "MCP requires POST." }
+      });
+      return;
+    }
+    try {
+      const payload = await parseRequestBody(request);
+      const result = await executiveBriefMcpServer.handle({ body: payload, headers: request.headers });
+      if (result.body === null) {
+        response.writeHead(result.statusCode, result.headers || {});
+        response.end();
+      } else {
+        sendJson(response, result.statusCode, result.body, result.headers || {});
+      }
+    } catch (error) {
+      sendJson(response, 400, {
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32700, message: "Parse error" }
+      });
+    }
+    return;
+  }
 
   if (request.method === "GET" && url.pathname === "/api/health") {
     sendJson(response, 200, { ok: true });
