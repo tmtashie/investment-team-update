@@ -128,7 +128,9 @@ test("host revocation stops the child and a tunnel exit is never restarted", (t)
   const credential = path.join(directory, "runtime-key");
   fs.writeFileSync(credential, "synthetic-not-a-real-key", { mode: 0o600 });
   const children = [];
-  function fakeSpawn() {
+  function fakeSpawn(executable, args, options) {
+    assert.equal(options.shell, false);
+    assert.deepEqual(options.stdio, ["ignore", "ignore", "ignore"]);
     const child = new EventEmitter();
     child.kill = (signal) => { child.killedWith = signal; child.emit("exit", 0, signal); };
     children.push(child);

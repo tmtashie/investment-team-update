@@ -75,7 +75,7 @@ function createPhase1bHost({
     const args = buildTunnelArguments({ tunnelId, credentialPath, mcpCommand: syntheticMcpCommand });
     child = spawnProcess(tunnelClientPath, args, {
       shell: false,
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: ["ignore", "ignore", "ignore"],
       env: Object.freeze({
         HOME: process.env.HOME || "",
         PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
