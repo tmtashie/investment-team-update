@@ -93,7 +93,7 @@ function createPhase1bHost({
 
   function stop(reason = "operator") {
     if (child) child.kill("SIGTERM");
-    log("imessage_phase1b_tunnel_stop_requested", { reason });
+    log("imessage_phase1b_tunnel_stop_requested", { reason: reason === "revoked" ? "revoked" : "operator" });
   }
 
   return Object.freeze({

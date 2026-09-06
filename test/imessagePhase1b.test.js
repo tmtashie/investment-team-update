@@ -10,7 +10,7 @@ const test = require("node:test");
 const { createImessageBridgeService } = require("../services/imessageBridgeService");
 const { TOOL_DEFINITIONS, createMcpRequestHandler } = require("../services/imessageBridgeMcp");
 const { buildTunnelArguments, createPhase1bHost, validateCredentialFile } = require("../services/imessagePhase1bHost");
-const { createPhase1bGuard, unavailableStdioCallerIdentity } = require("../services/imessagePhase1bPolicy");
+const { MAX_REPLAY_IDS, createPhase1bGuard, unavailableStdioCallerIdentity } = require("../services/imessagePhase1bPolicy");
 const { openReadOnlyMessagesDatabase } = require("../services/imessageReadOnlyDatabase");
 const { SYNTHETIC_THREAD_ID, createSyntheticMessagesFixture } = require("../services/imessageSyntheticFixture");
 
@@ -58,6 +58,26 @@ test("verified synthetic authorization is memory-only and rejects a replay", asy
   assert.equal((await guard.handle(request)).error.code, -32002);
   guard.revoke();
   assert.equal((await guard.handle({ ...request, id: 3 })).error.code, -32003);
+});
+
+test("synthetic replay tracking is bounded and fails closed at capacity", async () => {
+  let sequence = 0;
+  const guard = createPhase1bGuard({
+    handler: async (request) => ({ jsonrpc: "2.0", id: request.id, result: {} }),
+    authorize: async () => ({
+      verified: true,
+      principal: "synthetic-alice",
+      requestId: `synthetic-bounded-${String(sequence++).padStart(8, "0")}`
+    })
+  });
+  const request = {
+    jsonrpc: "2.0", id: 20, method: "tools/call",
+    params: { name: "list_allowed_message_threads", arguments: {} }
+  };
+  for (let index = 0; index < MAX_REPLAY_IDS; index += 1) {
+    assert.deepEqual((await guard.handle(request)).result, {});
+  }
+  assert.equal((await guard.handle(request)).error.code, -32002);
 });
 
 test("adversarial message text remains inert and no downstream capability exists", async (t) => {
@@ -151,6 +171,31 @@ test("host revocation stops the child and a tunnel exit is never restarted", (t)
   host.revoke();
   assert.equal(children[1].killedWith, "SIGTERM");
   assert.throws(() => host.start(), (error) => error.code === "HOST_REVOKED");
+});
+
+test("host logging cannot include an arbitrary stop reason", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "phase1b-log-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const credential = path.join(directory, "runtime-key");
+  fs.writeFileSync(credential, "synthetic-not-a-real-key", { mode: 0o600 });
+  const entries = [];
+  const host = createPhase1bHost({
+    tunnelClientPath: "/Applications/SyntheticHost.app/Contents/Resources/tunnel-client",
+    syntheticMcpCommand: "/Applications/SyntheticHost.app/Contents/MacOS/synthetic-mcp",
+    credentialPath: credential,
+    tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
+    spawnProcess() {
+      const child = new EventEmitter();
+      child.kill = () => child.emit("exit", 0, "SIGTERM");
+      return child;
+    },
+    logger: { info(event, metadata) { entries.push({ event, metadata }); } }
+  });
+  host.start();
+  host.stop("private-message-body");
+  const serialized = JSON.stringify(entries);
+  assert.equal(serialized.includes("private-message-body"), false);
+  assert.match(serialized, /operator/);
 });
 
 test("workspace-app revocation prevents delivery in the synthetic control plane", async (t) => {

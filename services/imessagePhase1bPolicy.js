@@ -5,6 +5,7 @@ const READ_TOOLS = new Set([
   "read_recent_messages",
   "search_allowed_messages"
 ]);
+const MAX_REPLAY_IDS = 1024;
 
 function policyError(id, code, message) {
   return { jsonrpc: "2.0", id, error: { code, message } };
@@ -45,6 +46,10 @@ function createPhase1bGuard({ handler, authorize = unavailableStdioCallerIdentit
       log("imessage_phase1b_denied", { reason: "replay" });
       return policyError(request.id ?? null, -32002, "Replayed request rejected.");
     }
+    if (completedRequestIds.size >= MAX_REPLAY_IDS) {
+      log("imessage_phase1b_denied", { reason: "replay_guard_full" });
+      return policyError(request.id ?? null, -32002, "Request freshness guard is unavailable.");
+    }
     completedRequestIds.add(decision.requestId);
     const response = await handler(request);
     log("imessage_phase1b_completed", { outcome: response && response.error ? "error" : "success" });
@@ -63,6 +68,7 @@ function createPhase1bGuard({ handler, authorize = unavailableStdioCallerIdentit
 }
 
 module.exports = {
+  MAX_REPLAY_IDS,
   READ_TOOLS,
   createPhase1bGuard,
   unavailableStdioCallerIdentity
