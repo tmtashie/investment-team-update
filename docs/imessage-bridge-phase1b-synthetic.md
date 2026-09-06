@@ -32,6 +32,21 @@ Therefore the local stdio host cannot independently verify that a request came f
 
 This is a live-integration blocker, not an implementation detail to guess around. Resolving it requires separate approval to use a loopback/Unix-socket Streamable HTTP MCP boundary with OAuth or a signed freshness envelope supplied by a trustworthy upstream component. The three MCP tools and per-thread allowlist can remain unchanged in either design.
 
+## Synthetic HTTP/OAuth iteration
+
+The approved follow-up adds a local Streamable HTTP resource server over a mode-`0600` Unix-domain socket. The tunnel client uses a logical `http://localhost/mcp` URL while dialing that socket directly. No TCP MCP listener exists.
+
+The exact identity primitive available on this path is the OAuth bearer access token issued by the configured authorization server after ChatGPT completes authorization code with PKCE. The tunnel forwards that `Authorization` header to the HTTP MCP server. It is not an OpenAI-signed Alice identity token. The authorization server determines the token subject.
+
+The synthetic resource server validates an Ed25519-signed JWT access token with an exact issuer, exact audience/resource, allowlisted subject, `messages.read` scope, `iat`, `nbf`, `exp`, bounded lifetime, short maximum age, key ID, and signature. It rejects exact request replay using a bounded in-memory fingerprint cache and rejects tokens minted before the current host epoch.
+
+This establishes the local validation design but leaves one platform compatibility assumption: standard OAuth bearer tokens are normally reused for multiple requests, and OpenAI does not document a per-request signed freshness proof. A short token age plus request fingerprint rejects stale and exact repeated work, but cannot prove that a first delivery was never briefly queued by the tunnel. A true no-queue assertion would require OpenAI to forward trustworthy enqueue/deadline metadata to the MCP server or support a per-request proof such as DPoP. Live access remains blocked until that behavior is manually validated or the requirement is revised.
+
+### Unix socket versus loopback TCP
+
+- Unix socket: recommended for macOS packaging. Filesystem ownership and mode protect connection access, no port is allocated, and the tunnel client documents direct Unix-socket dialing for a logical HTTP MCP URL.
+- Loopback TCP: supported by the server only when explicitly bound to `127.0.0.1`. It is easier to inspect, but any local process can attempt the port and port-selection/state management adds avoidable surface. OAuth validation is still required in either design.
+
 ## Revocation and availability
 
 - Host: the operator can stop or revoke the supervisor, which sends `SIGTERM` to the tunnel client and permanently disables restart for that process.
