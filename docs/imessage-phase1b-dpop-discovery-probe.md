@@ -8,6 +8,8 @@ The probe exposes OAuth protected-resource and authorization-server metadata, a 
 
 The authorization page offers exactly two fake principals: Synthetic Alice and Synthetic Tyler. These are test labels, not real OpenAI or workspace identities.
 
+Secure MCP Tunnel forwards OAuth discovery and MCP authorization traffic to the private MCP resource server, but it does not tunnel the authorization server itself. The authorization-server endpoints in this process are therefore a local conformance harness only. A real ChatGPT platform run requires a separately approved disposable authorization server that is reachable by ChatGPT's OAuth flow and issues the same constrained synthetic tokens. This branch does not deploy or expose that server.
+
 ## Security model
 
 - The authorization server signs short-lived JWT access tokens with an ephemeral Ed25519 key.
@@ -23,7 +25,7 @@ The authorization page offers exactly two fake principals: Synthetic Alice and S
 
 ## Local start
 
-The issuer and resource values must be the exact externally visible HTTPS identifiers that ChatGPT uses. Do not guess them or substitute the local Unix-socket URL.
+The issuer and resource values must be the exact externally visible HTTPS identifiers that ChatGPT uses. Do not guess them or substitute the local Unix-socket URL. Running these endpoints on a Unix socket validates local behavior but does not make the authorization server reachable by ChatGPT.
 
 ```bash
 export PHASE1B_SYNTHETIC_ONLY=1
@@ -38,7 +40,7 @@ node bin/phase1b-dpop-discovery-probe.js
 
 The process prints only categorical JSON events to stderr. Expected startup metadata is `probe_started`, `transport: unix_socket`, and `tools: 0`.
 
-The tunnel must use its documented Unix-socket HTTP configuration and a separate synthetic tunnel/draft. Do not reuse, edit, enable, or publish either Messages draft. Do not expose this probe directly as a public listener.
+The tunnel must use its documented Unix-socket HTTP configuration and a separate synthetic tunnel/draft. Do not reuse, edit, enable, or publish either Messages draft. Do not expose this probe directly as a public listener. The external disposable authorization server is a separate prerequisite and must not be improvised from the local MCP socket.
 
 ## Discovery-only platform procedure
 
