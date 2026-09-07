@@ -154,6 +154,10 @@ test("source explicitly says FINSYNC and portfolio contains FINSYNC", async () =
   assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
   assert.equal(result.analysis.investmentMatch.confidence, 98);
   assert.match(result.analysis.investmentMatch.reason, /Exact source body match for 'FINSYNC'/);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "finsync-id",
+    types: ["sourceBody", "senderDomain"]
+  });
 });
 
 test("FINSYNC subject and sender domain deterministically match FINSYNC instead of Healing Innovations", async () => {
@@ -260,6 +264,10 @@ test("semantic-only match produces lower confidence and warning", async () => {
       reason: "Financial update sounded similar."
     },
     entityMatch: {},
+    deterministicEvidence: {
+      investmentId: "vanguard-id",
+      types: ["sourceBody"]
+    },
     extractedFacts: [],
     whatChanged: [],
     proposedChanges: [],
@@ -278,6 +286,10 @@ test("semantic-only match produces lower confidence and warning", async () => {
 
   assert.equal(result.analysis.investmentMatch.investmentId, "vanguard-id");
   assert.equal(result.analysis.investmentMatch.confidence, 84);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "",
+    types: []
+  });
   assert.match(result.analysis.warnings.join(" "), /lacks explicit/);
 });
 
