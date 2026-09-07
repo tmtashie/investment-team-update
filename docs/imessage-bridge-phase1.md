@@ -26,7 +26,7 @@ Each entry binds an opaque operator-chosen `threadId` alias to an exact private 
 
 ## MCP tools
 
-All tools declare `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`. Every schema has `additionalProperties: false`. The stdio handler provides a `server/discover` compatibility probe that advertises only the fully implemented MCP 2025-11-25 initialization handshake.
+All tools declare `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`. Every schema has `additionalProperties: false`. The handler implements the legacy MCP 2025-11-25 `initialize` handshake. It returns JSON-RPC `-32601 Method not found` for the MCP 2026-07-28 `server/discover` method so modern clients can fall back cleanly; it does not claim to implement the 2026-07-28 lifecycle.
 
 ### `list_allowed_message_threads`
 

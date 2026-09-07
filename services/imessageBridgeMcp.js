@@ -70,18 +70,6 @@ function createMcpRequestHandler(service) {
       return { jsonrpc: "2.0", id: request && request.id !== undefined ? request.id : null, error: { code: -32600, message: "Invalid Request" } };
     }
     if (!("id" in request)) return null;
-    if (request.method === "server/discover") {
-      return {
-        jsonrpc: "2.0",
-        id: request.id,
-        result: {
-          resultType: "complete",
-          supportedVersions: ["2025-11-25"],
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "beaman-imessage-readonly", version: "0.1.0" }
-        }
-      };
-    }
     if (request.method === "initialize") {
       return {
         jsonrpc: "2.0",
