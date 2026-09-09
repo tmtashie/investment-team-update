@@ -324,6 +324,10 @@ test("competing candidates lower confidence", async () => {
 
   assert.ok(result.analysis.investmentMatch.confidence <= 88);
   assert.match(result.analysis.warnings.join(" "), /Multiple plausible/);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "",
+    types: []
+  });
 });
 
 test("$3,000,000 source text verifies normalized 3.0M revenue evidence", async () => {

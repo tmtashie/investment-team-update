@@ -1652,7 +1652,7 @@ function normalizeAnalysisResult({
   const whatChanged = shouldEnforceEvidenceGate
     ? enrichSafeWhatChangedSummary([], proposedChanges, materialDevelopments)
     : enrichWhatChangedSummary(raw.whatChanged || raw.what_changed, proposedChanges);
-  const matchedDeterministicCandidate = matchedInvestment
+  const matchedDeterministicCandidate = matchedInvestment && !hasCompetingCandidate
     ? deterministicCandidates.find((candidate) => candidate.investmentId === matchedInvestment.id)
     : null;
 
