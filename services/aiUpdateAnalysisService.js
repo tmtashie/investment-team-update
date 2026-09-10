@@ -770,7 +770,20 @@ function hasExplicitPhrase(sourceText, phrase) {
     return true;
   }
   const compactPhrase = compactMatchText(phrase);
-  return compactPhrase.length >= 6 && compactMatchText(sourceText).includes(compactPhrase);
+  if (compactPhrase.length < 6) {
+    return false;
+  }
+  const sourceTokens = normalizeMatchText(sourceText).split(" ").filter(Boolean);
+  for (let start = 0; start < sourceTokens.length; start += 1) {
+    let compactSpan = "";
+    for (let end = start; end < sourceTokens.length && compactSpan.length < compactPhrase.length; end += 1) {
+      compactSpan += compactMatchText(sourceTokens[end]);
+      if (compactSpan === compactPhrase) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function findMatchedAlias(sourceParts, aliases) {
