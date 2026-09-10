@@ -183,42 +183,17 @@ function hasAutomatedExplicitInvestmentMatch(analysis) {
     return false;
   }
 
-  const reason = cleanString(investmentMatch.reason, 1000).toLowerCase();
-  if (/exact .+ match for|sender domain .+ supports/.test(reason)) {
-    return true;
-  }
-
-  return (Array.isArray(analysis.candidates) ? analysis.candidates : []).some((candidate) =>
-    candidate &&
-    candidate.investmentId === investmentMatch.investmentId &&
-    /exact .+ match for|sender domain .+ supports/i.test(cleanString(candidate.reason, 1000))
-  );
+  return getDeterministicEvidenceTypes(analysis).length > 0;
 }
 
 function getDeterministicEvidenceTypes(analysis) {
   const investmentId = analysis && analysis.investmentMatch && analysis.investmentMatch.investmentId;
-  const reasons = [analysis && analysis.investmentMatch && analysis.investmentMatch.reason]
-    .concat(
-      (Array.isArray(analysis && analysis.candidates) ? analysis.candidates : [])
-        .filter((candidate) => !investmentId || candidate.investmentId === investmentId)
-        .map((candidate) => candidate.reason)
-    )
-    .map((reason) => cleanString(reason, 1000).toLowerCase())
-    .filter(Boolean);
-  const types = [];
-  if (reasons.some((reason) => reason.includes("exact subject match"))) {
-    types.push("subject");
+  const evidence = analysis && analysis.deterministicEvidence;
+  if (!investmentId || !evidence || evidence.investmentId !== investmentId || !Array.isArray(evidence.types)) {
+    return [];
   }
-  if (reasons.some((reason) => reason.includes("sender domain"))) {
-    types.push("senderDomain");
-  }
-  if (reasons.some((reason) => reason.includes("exact source body match"))) {
-    types.push("sourceBody");
-  }
-  if (reasons.some((reason) => reason.includes("exact filename match"))) {
-    types.push("attachmentFilename");
-  }
-  return types;
+  const allowedTypes = new Set(["subject", "senderDomain", "sourceBody", "attachmentFilename"]);
+  return Array.from(new Set(evidence.types.filter((type) => allowedTypes.has(type))));
 }
 
 function countItems(value) {
