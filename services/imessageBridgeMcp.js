@@ -108,7 +108,10 @@ function createMcpRequestHandler(service) {
     }
     const operation = operations[name];
     try {
-      const output = await operation(request.params.arguments || {});
+      const input = request.params && Object.hasOwn(request.params, "arguments")
+        ? request.params.arguments
+        : {};
+      const output = await operation(input);
       return {
         jsonrpc: "2.0",
         id: request.id,

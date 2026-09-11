@@ -310,6 +310,30 @@ test("undeclared inherited property names cannot be invoked as MCP tools", async
   assert.deepEqual(calls, []);
 });
 
+test("malformed falsy MCP tool arguments are rejected instead of treated as an empty object", async (t) => {
+  const { service } = withService(t);
+  const handle = createMcpRequestHandler(service);
+
+  for (const value of [null, false, 0, ""]) {
+    const response = await handle({
+      jsonrpc: "2.0",
+      id: String(value),
+      method: "tools/call",
+      params: { name: "list_allowed_message_threads", arguments: value }
+    });
+    assert.equal(response.result.isError, true);
+    assert.equal(response.result.structuredContent.code, "INVALID_REQUEST");
+  }
+
+  const omitted = await handle({
+    jsonrpc: "2.0",
+    id: "omitted",
+    method: "tools/call",
+    params: { name: "list_allowed_message_threads" }
+  });
+  assert.equal(omitted.result.isError, false);
+});
+
 test("the MCP handler completes the read-only handshake and ignores notifications", async (t) => {
   const { service } = withService(t);
   const handle = createMcpRequestHandler(service);
