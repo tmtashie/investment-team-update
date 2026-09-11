@@ -289,6 +289,27 @@ test("the MCP surface contains only three annotated read-only tools", () => {
   assert.equal(TOOL_DEFINITIONS.some((tool) => /send|reply|react|edit|delete|attachment|mark/i.test(tool.name)), false);
 });
 
+test("undeclared inherited property names cannot be invoked as MCP tools", async () => {
+  const calls = [];
+  const service = {
+    listAllowedMessageThreads(input) { calls.push(["list", input]); },
+    readRecentMessages(input) { calls.push(["read", input]); },
+    searchAllowedMessages(input) { calls.push(["search", input]); }
+  };
+  const handle = createMcpRequestHandler(service);
+
+  for (const name of ["constructor", "toString", "__proto__"]) {
+    const response = await handle({
+      jsonrpc: "2.0",
+      id: name,
+      method: "tools/call",
+      params: { name, arguments: { databasePath: "/tmp/other.db", sql: "SELECT * FROM message" } }
+    });
+    assert.deepEqual(response.error, { code: -32601, message: "Tool not found" });
+  }
+  assert.deepEqual(calls, []);
+});
+
 test("the MCP handler completes the read-only handshake and ignores notifications", async (t) => {
   const { service } = withService(t);
   const handle = createMcpRequestHandler(service);
