@@ -359,7 +359,7 @@ test("compact alias matching still accepts complete punctuation-normalized token
     types: ["sourceBody"]
   });
 });
- 
+
 test("sender domain substrings are not deterministic portfolio evidence", async () => {
   const beamInvestments = [
     {
