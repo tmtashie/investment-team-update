@@ -808,7 +808,7 @@ function scoreDomainEvidence(sender, aliases) {
   }
   const matchedAlias = aliases.find((alias) => {
     const compactAlias = compactMatchText(alias);
-    return compactAlias.length >= 4 && (compactAlias.includes(rootDomain) || rootDomain.includes(compactAlias));
+    return compactAlias.length >= 4 && compactAlias === compactMatchText(rootDomain);
   });
   return matchedAlias
     ? {

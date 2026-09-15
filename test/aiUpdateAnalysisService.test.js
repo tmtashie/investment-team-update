@@ -359,6 +359,49 @@ test("compact alias matching still accepts complete punctuation-normalized token
     types: ["sourceBody"]
   });
 });
+ 
+test("sender domain substrings are not deterministic portfolio evidence", async () => {
+  const beamInvestments = [
+    {
+      id: "beam-id",
+      company: "Beam",
+      entity: "Beaman Ventures",
+      assetType: "Private Investment",
+      status: "Active"
+    }
+  ];
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "beam-id",
+      investmentName: "Beam",
+      confidence: 96,
+      reason: "The sender domain appeared related to Beam."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sender: "updates@sunbeam.com",
+      sourceText: "Monthly investor report with no named portfolio company."
+    },
+    investments: beamInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "beam-id");
+  assert.equal(result.analysis.investmentMatch.confidence, 84);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "",
+    types: []
+  });
+  assert.match(result.analysis.warnings.join(" "), /lacks explicit/);
+});
 
 test("competing candidates lower confidence", async () => {
   const investmentsWithCompetition = finsyncInvestments.concat({
