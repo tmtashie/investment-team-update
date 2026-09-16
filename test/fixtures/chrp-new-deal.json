@@ -1,0 +1,115 @@
+{
+  "source": {
+    "sender": "founder@sanitized-health.example",
+    "senderName": "Sanitized Founder",
+    "subject": "Sanitized health platform SAFE round",
+    "sourceDate": "2026-09-16T12:00:00Z",
+    "sourceText": "Sanitized Health builds a care coordination platform for specialty clinics. The company sells annual software subscriptions plus paid deployment services. We are raising a $3M SAFE at a $25M valuation cap. Northstar Ventures is leading with a $1M investment. We have $2.35M committed and $650K remaining to close by year end. No Beaman Ventures check size has been proposed. Attachment Sanitized Health Deck.pdf: Page 4: Annual recurring revenue reached $1.4M, up 75% year over year. Page 7: The platform is deployed across 18 clinics under multi-year contracts. Page 10: Proceeds will fund product integrations and enterprise sales hiring."
+  },
+  "modelResponse": {
+    "isPotentialNewDeal": true,
+    "classificationReason": "Inbound financing opportunity for a company not present in the portfolio.",
+    "companyName": {
+      "value": "Sanitized Health",
+      "sourceEvidence": "Sanitized Health builds a care coordination platform for specialty clinics.",
+      "sourceLocation": "Email body"
+    },
+    "dealSummary": {
+      "value": "Sanitized Health sells care coordination software and deployment services to specialty clinics. It reports $1.4M ARR, 75% year-over-year growth, and 18 clinic deployments while raising a capped SAFE with $650K remaining.",
+      "sourceEvidence": "Annual recurring revenue reached $1.4M, up 75% year over year.",
+      "sourceLocation": "Attached deck, page 4"
+    },
+    "whatCompanyDoes": {
+      "value": "Care coordination platform for specialty clinics",
+      "sourceEvidence": "builds a care coordination platform for specialty clinics",
+      "sourceLocation": "Email body"
+    },
+    "businessModel": {
+      "value": "Annual software subscriptions plus paid deployment services",
+      "sourceEvidence": "annual software subscriptions plus paid deployment services",
+      "sourceLocation": "Email body"
+    },
+    "stage": {
+      "value": "Early stage",
+      "sourceEvidence": "raising a $3M SAFE",
+      "sourceLocation": "Email body"
+    },
+    "tractionRevenue": {
+      "value": "$1.4M ARR, up 75% year over year",
+      "sourceEvidence": "Annual recurring revenue reached $1.4M, up 75% year over year.",
+      "sourceLocation": "Attached deck, page 4"
+    },
+    "customersContractsDeployments": {
+      "value": "Deployed across 18 clinics under multi-year contracts",
+      "sourceEvidence": "deployed across 18 clinics under multi-year contracts",
+      "sourceLocation": "Attached deck, page 7"
+    },
+    "roundType": {
+      "value": "SAFE",
+      "sourceEvidence": "raising a $3M SAFE",
+      "sourceLocation": "Email body"
+    },
+    "amountBeingRaised": {
+      "value": "$3M",
+      "sourceEvidence": "raising a $3M SAFE",
+      "sourceLocation": "Email body"
+    },
+    "amountCommitted": {
+      "value": "$2.35M",
+      "sourceEvidence": "$2.35M committed",
+      "sourceLocation": "Email body"
+    },
+    "amountRemaining": {
+      "value": "$650K",
+      "sourceEvidence": "$650K remaining",
+      "sourceLocation": "Email body"
+    },
+    "proposedCheckSize": {
+      "value": "$1M",
+      "sourceEvidence": "Northstar Ventures is leading with a $1M investment.",
+      "sourceLocation": "Email body"
+    },
+    "valuationCap": {
+      "value": "$25M",
+      "sourceEvidence": "$25M valuation cap",
+      "sourceLocation": "Email body"
+    },
+    "securityType": {
+      "value": "SAFE",
+      "sourceEvidence": "$3M SAFE",
+      "sourceLocation": "Email body"
+    },
+    "financingTerms": {
+      "value": "$3M SAFE at a $25M valuation cap",
+      "sourceEvidence": "raising a $3M SAFE at a $25M valuation cap",
+      "sourceLocation": "Email body"
+    },
+    "leadInvestor": {
+      "value": "Northstar Ventures",
+      "sourceEvidence": "Northstar Ventures is leading",
+      "sourceLocation": "Email body"
+    },
+    "useOfProceeds": {
+      "value": "Product integrations and enterprise sales hiring",
+      "sourceEvidence": "Proceeds will fund product integrations and enterprise sales hiring.",
+      "sourceLocation": "Attached deck, page 10"
+    },
+    "keyInvestmentPoints": [
+      {
+        "value": "75% year-over-year ARR growth",
+        "sourceEvidence": "up 75% year over year",
+        "sourceLocation": "Attached deck, page 4"
+      }
+    ],
+    "keyRisks": [],
+    "nextSteps": [],
+    "deadlines": [
+      {
+        "value": "Fundraise: $650K remaining to close by year end",
+        "sourceEvidence": "$650K remaining to close by year end",
+        "sourceLocation": "Email body"
+      }
+    ],
+    "relevantUrls": []
+  }
+}

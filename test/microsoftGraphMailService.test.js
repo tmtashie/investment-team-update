@@ -1,6 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createMicrosoftGraphMailService } = require("../services/microsoftGraphMailService");
+const {
+  MAX_ATTACHMENT_MESSAGE_BYTES,
+  MAX_ATTACHMENT_PDF_BYTES,
+  MAX_ATTACHMENT_RUN_BYTES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  createMicrosoftGraphMailService
+} = require("../services/microsoftGraphMailService");
 
 function graphResponse(payload, status = 200, headers = {}) {
   return {
@@ -226,6 +232,42 @@ test("Microsoft Graph throttling returns a safe retry message", async () => {
   );
 });
 
+test("PDF attachment limits accept 25 MB while keeping conservative message, run, and count caps", async () => {
+  const pdfBytes = Buffer.concat([
+    Buffer.from("%PDF-", "latin1"),
+    Buffer.alloc(MAX_ATTACHMENT_PDF_BYTES - 5)
+  ]);
+  const fetchImpl = createFetchMock([
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({ value: [{
+      id: "message-1", internetMessageId: "<message-1@example.test>", subject: "Opportunity",
+      from: { emailAddress: { address: "sender@example.test" } }, receivedDateTime: "2026-09-16T12:00:00Z",
+      hasAttachments: true, body: { contentType: "text", content: "Opportunity" }
+    }] }),
+    graphResponse({ value: [
+      { id: "deck", name: "InvestorDeck.pdf", contentType: "application/pdf", size: MAX_ATTACHMENT_PDF_BYTES, isInline: false }
+    ] }),
+    graphResponse({
+      id: "deck", name: "InvestorDeck.pdf", contentType: "application/pdf",
+      size: MAX_ATTACHMENT_PDF_BYTES, isInline: false, contentBytes: pdfBytes.toString("base64")
+    })
+  ]);
+  const service = createMicrosoftGraphMailService({
+    tenantId: "tenant", clientId: "client", clientSecret: "secret", mailboxUser: "updates@example.test",
+    fetchImpl, graphBaseUrl: "https://graph.test/v1.0", tokenBaseUrl: "https://login.test"
+  });
+
+  const result = await service.fetchIntakeMessages();
+
+  assert.equal(result.messages[0].pdfAttachments.length, 1);
+  assert.equal(result.messages[0].pdfAttachments[0].size, MAX_ATTACHMENT_PDF_BYTES);
+  assert.equal(result.messages[0].unresolvedAttachments.length, 0);
+  assert.equal(MAX_ATTACHMENT_MESSAGE_BYTES, 30 * 1024 * 1024);
+  assert.equal(MAX_ATTACHMENT_RUN_BYTES, 50 * 1024 * 1024);
+  assert.equal(MAX_ATTACHMENTS_PER_MESSAGE, 20);
+});
+
 test("oversized and unsupported attachments are visible as unresolved without download", async () => {
   const fetchImpl = createFetchMock([
     graphResponse({ access_token: "token-value" }),
@@ -236,7 +278,7 @@ test("oversized and unsupported attachments are visible as unresolved without do
       hasAttachments: true, body: { contentType: "text", content: "Opportunity" }
     }] }),
     graphResponse({ value: [
-      { id: "large", name: "LargeDeck.pdf", contentType: "application/pdf", size: 11 * 1024 * 1024, isInline: false },
+      { id: "large", name: "LargeDeck.pdf", contentType: "application/pdf", size: 26 * 1024 * 1024, isInline: false },
       { id: "unsafe", name: "script.exe", contentType: "application/octet-stream", size: 100, isInline: false }
     ] })
   ]);
@@ -247,7 +289,7 @@ test("oversized and unsupported attachments are visible as unresolved without do
   const result = await service.fetchIntakeMessages();
   assert.equal(result.messages[0].attachments.length, 0);
   assert.equal(result.messages[0].unresolvedAttachments.length, 2);
-  assert.match(result.messages[0].unresolvedAttachments[0].reason, /10 MB/);
+  assert.match(result.messages[0].unresolvedAttachments[0].reason, /25 MB/);
   assert.match(result.messages[0].unresolvedAttachments[1].reason, /Unsupported/);
   assert.equal(fetchImpl.calls.length, 4);
 });

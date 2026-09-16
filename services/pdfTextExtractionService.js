@@ -1,6 +1,6 @@
 const path = require("path");
 
-const MAX_PDF_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_PDF_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_LENGTH = 60000;
 const VERY_SHORT_PAGE_TEXT_LENGTH = 80;
 
@@ -81,7 +81,7 @@ function validatePdfUpload({ filename, mimeType, fileData }) {
     throw new Error("PDF file data is required.");
   }
   if (buffer.length > MAX_PDF_UPLOAD_BYTES) {
-    throw new Error("PDF uploads are limited to 10 MB.");
+    throw new Error("PDF uploads are limited to 25 MB.");
   }
   if (buffer.subarray(0, 5).toString("latin1") !== "%PDF-") {
     throw new Error("The uploaded file is not a valid PDF.");
