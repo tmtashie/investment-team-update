@@ -56,8 +56,9 @@ function createNewDealProposalApplyService({
     if (!proposal.entityConfirmed || !cleanString(proposal.proposedEntity, 120)) {
       throw Object.assign(new Error("Confirm an investment entity before approval."), { statusCode: 409 });
     }
-    if (proposal.matchResult && proposal.matchResult.status === "ambiguous" && !proposal.noExistingMatchConfirmed) {
-      throw Object.assign(new Error("Resolve the ambiguous existing-investment match before approval."), { statusCode: 409 });
+    const matchStatus = cleanString(proposal.matchResult && proposal.matchResult.status, 80) || "no-match";
+    if (matchStatus !== "no-match" && !proposal.noExistingMatchConfirmed) {
+      throw Object.assign(new Error("Resolve the existing-investment match before approval."), { statusCode: 409 });
     }
     const companyName = claimValue(proposal.dealData && proposal.dealData.companyName);
     if (!companyName) throw Object.assign(new Error("Confirm a company or deal name before approval."), { statusCode: 409 });

@@ -6780,6 +6780,15 @@ function getAiProposalEntity(proposal) {
   );
 }
 
+function getAiProposalTypeLabel(proposal) {
+  if (!proposal || proposal.proposalType !== "new-deal") {
+    return "Existing Investment Update";
+  }
+  return proposal.matchResult && proposal.matchResult.status === "ambiguous"
+    ? "Ambiguous Review"
+    : "Potential New Deal";
+}
+
 function dealClaimValue(proposal, field) {
   const claim = proposal && proposal.dealData && proposal.dealData[field];
   return claim && typeof claim === "object" ? String(claim.value || "") : "";
@@ -6815,7 +6824,7 @@ function renderNewDealProposalDetail(proposal) {
   ).join("");
   return `
     <div class="panel-header">
-      <div><p class="feature-kicker">Potential New Deal</p><h3>${escapeHtml(getAiProposalInvestmentName(proposal))}</h3><p class="section-copy">Review source evidence before creating a pipeline record.</p></div>
+      <div><p class="feature-kicker">${escapeHtml(getAiProposalTypeLabel(proposal))}</p><h3>${escapeHtml(getAiProposalInvestmentName(proposal))}</h3><p class="section-copy">Review source evidence before creating a pipeline record.</p></div>
       <button class="secondary-button" type="button" data-action="close-ai-proposal">Close</button>
     </div>
     <section class="ai-detail-section">
@@ -7515,7 +7524,7 @@ function renderAiUpdateInbox() {
         .map(
           (proposal) => `
             <article class="update-card ai-update-card ${proposal.id === selectedAiUpdateProposalId ? "is-selected" : ""}">
-              ${proposal.proposalType === "new-deal" ? '<p class="feature-kicker">Potential New Deal</p>' : ""}
+              <p class="feature-kicker">${escapeHtml(getAiProposalTypeLabel(proposal))}</p>
               <div class="update-head">
                 <button class="link-button company-link" type="button" data-action="view-ai-proposal" data-id="${escapeHtml(proposal.id)}">
                   ${escapeHtml(getAiProposalInvestmentName(proposal))}
@@ -7559,6 +7568,7 @@ function renderAiUpdateProposalDetail() {
   aiUpdateProposalDetail.innerHTML = `
     <div class="panel-header">
       <div>
+        <p class="feature-kicker">Existing Investment Update</p>
         <h3>${escapeHtml(getAiProposalInvestmentName(proposal))}</h3>
         <p class="section-copy">Proposed update staged ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
       </div>

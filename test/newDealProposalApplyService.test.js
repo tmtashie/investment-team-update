@@ -103,8 +103,19 @@ test("ambiguous proposal cannot be approved without explicit no-match confirmati
   harness.getProposals()[0].noExistingMatchConfirmed = false;
   await assert.rejects(
     () => harness.service.approveNewDealProposal("proposal-1", "tyler@example.test"),
-    /Resolve the ambiguous/i
+    /Resolve the existing-investment match/i
   );
+});
+
+test("possible existing-investment evidence also requires explicit no-match confirmation", async () => {
+  const harness = createHarness();
+  harness.getProposals()[0].matchResult.status = "existing-possible";
+  harness.getProposals()[0].noExistingMatchConfirmed = false;
+  await assert.rejects(
+    () => harness.service.approveNewDealProposal("proposal-1", "tyler@example.test"),
+    /Resolve the existing-investment match/i
+  );
+  assert.equal(harness.getInvestments().length, 0);
 });
 
 test("round size never becomes pipeline amount when check size is unresolved", async () => {

@@ -93,9 +93,17 @@ function loadPerformanceHelpers() {
   vm.runInContext(appSource, context, { filename: "public/app.js" });
 
   return {
-    buildPerformanceInputs: context.buildPerformanceInputs
+    buildPerformanceInputs: context.buildPerformanceInputs,
+    getAiProposalTypeLabel: context.getAiProposalTypeLabel
   };
 }
+
+test("proposal labels distinguish existing updates, ambiguous review, and potential new deals", () => {
+  const { getAiProposalTypeLabel } = loadPerformanceHelpers();
+  assert.equal(getAiProposalTypeLabel({ proposalType: "investment-update" }), "Existing Investment Update");
+  assert.equal(getAiProposalTypeLabel({ proposalType: "new-deal", matchResult: { status: "ambiguous" } }), "Ambiguous Review");
+  assert.equal(getAiProposalTypeLabel({ proposalType: "new-deal", matchResult: { status: "no-match" } }), "Potential New Deal");
+});
 
 test("pipeline contributions are excluded from performance inputs", () => {
   const { buildPerformanceInputs } = loadPerformanceHelpers();
