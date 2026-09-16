@@ -4,9 +4,11 @@
   "description": "Mobile-friendly investment update app that emails team summaries.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
+    "pdf-parse": "^1.1.1",
     "xlsx": "^0.18.5"
   },
   "engines": {

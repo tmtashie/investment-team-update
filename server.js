@@ -2,6 +2,23 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { createJsonStore } = require("./storage/jsonStore");
+const { createBackupService } = require("./services/backupService");
+const { createInvestmentService } = require("./services/investmentService");
+const { createTaskService } = require("./services/taskService");
+const { createAiUpdateProposalService } = require("./services/aiUpdateProposalService");
+const {
+  applyApprovedAiUpdateProposalToInvestment
+} = require("./services/aiUpdateProposalApplyService");
+const { createAiEmailIntakeService } = require("./services/aiEmailIntakeService");
+const { createAiEmailIntakeStateService } = require("./services/aiEmailIntakeStateService");
+const { createAiUpdateAnalysisService } = require("./services/aiUpdateAnalysisService");
+const { createMicrosoftGraphMailService } = require("./services/microsoftGraphMailService");
+const { extractPdfTextFromUpload } = require("./services/pdfTextExtractionService");
+const {
+  enforceProposalSafetyInvariant,
+  finalizeAnalysisForResponse
+} = require("./services/aiUpdateSafetyBoundary");
 
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -38,6 +55,8 @@ const DATA_DIR = process.env.DATA_DIR
   : path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "investments.json");
 const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
+const AI_UPDATE_PROPOSALS_FILE = path.join(DATA_DIR, "ai-update-proposals.json");
+const AI_EMAIL_INTAKE_STATE_FILE = path.join(DATA_DIR, "ai-email-intake-state.json");
 const COMPANY_DOCUMENTS_FILE = path.join(DATA_DIR, "company-documents.json");
 const METADATA_FILE = path.join(DATA_DIR, "metadata.json");
 const BACKUPS_DIR = path.join(DATA_DIR, "backups");
@@ -57,15 +76,26 @@ const AI_ANALYST_SYSTEM_PROMPT =
 const DATA_SCHEMA_VERSION = 2;
 const NEXT_STEP_REMINDER_DAYS = Number(process.env.NEXT_STEP_REMINDER_DAYS || 14);
 const DIGEST_WINDOW_DAYS = 14;
+const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
+const AI_EMAIL_INTAKE_ENABLED = String(process.env.AI_EMAIL_INTAKE_ENABLED || "")
+  .trim()
+  .toLowerCase() === "true";
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
+  "Lee Beaman IRA",
   "Katherine Trust",
   "Natalie Trust"
 ];
 const ENTITY_ALIASES = {
   "Beaman Ventures": "Beaman Ventures",
   "Lee Beaman": "Lee Beaman",
+  "Lee Beaman IRA": "Lee Beaman IRA",
+  "Lee Beaman Ira": "Lee Beaman IRA",
+  "Lee's IRA": "Lee Beaman IRA",
+  "Lees IRA": "Lee Beaman IRA",
+  "Lee IRA": "Lee Beaman IRA",
+  "Lee Beaman Individual Retirement Account": "Lee Beaman IRA",
   "Kat Trust": "Katherine Trust",
   "Nat Trust": "Natalie Trust",
   "Katherine Trust": "Katherine Trust",
@@ -73,6 +103,7 @@ const ENTITY_ALIASES = {
 };
 
 const DEFAULT_RECIPIENTS = splitCsv(process.env.TEAM_EMAILS || "");
+const DEFAULT_UPDATE_REQUEST_EMAIL = "Tyler@Beamanventures.com";
 
 function splitCsv(value) {
   return String(value)
@@ -83,7 +114,161 @@ function splitCsv(value) {
 
 function normalizeEntityName(value) {
   const raw = String(value || "").trim();
-  return ENTITY_ALIASES[raw] || raw;
+  const aliasKey = Object.keys(ENTITY_ALIASES).find(
+    (key) => key.toLowerCase() === raw.toLowerCase()
+  );
+  return ENTITY_ALIASES[raw] || (aliasKey ? ENTITY_ALIASES[aliasKey] : raw);
+}
+
+const ROLE_LABELS = {
+  "master-editor": "Master Editor",
+  editor: "Editor",
+  "dashboard-viewer": "Lee Dashboard"
+};
+
+function normalizeUserRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (["master-editor", "master", "admin", "administrator"].includes(normalized)) {
+    return "master-editor";
+  }
+  if (["dashboard-viewer", "dashboard", "lee-dashboard", "lee"].includes(normalized)) {
+    return "dashboard-viewer";
+  }
+  return "editor";
+}
+
+function getRoleLabel(role) {
+  return ROLE_LABELS[normalizeUserRole(role)] || ROLE_LABELS.editor;
+}
+
+function isMasterEditor(user) {
+  return Boolean(user && normalizeUserRole(user.role) === "master-editor");
+}
+
+function isDashboardViewerRole(user) {
+  return Boolean(user && normalizeUserRole(user.role) === "dashboard-viewer");
+}
+
+function isRestrictedEditorInvestment(investment) {
+  const entity = normalizeEntityName(investment && investment.entity);
+  const assetType = String((investment && investment.assetType) || "").trim();
+  return (
+    entity === "Lee Beaman IRA" ||
+    (entity === "Lee Beaman" && ["Public Stock", "Bond / Fixed Income"].includes(assetType))
+  );
+}
+
+function canViewInvestment(user, investment) {
+  if (!user) {
+    return false;
+  }
+  if (isMasterEditor(user) || isDashboardViewerRole(user)) {
+    return true;
+  }
+  return !isRestrictedEditorInvestment(investment);
+}
+
+function canEditInvestment(user, investment) {
+  if (!user || isDashboardViewerRole(user)) {
+    return false;
+  }
+  if (isMasterEditor(user)) {
+    return true;
+  }
+  return !isRestrictedEditorInvestment(investment);
+}
+
+function canViewEntity(user, entity) {
+  if (!user) {
+    return false;
+  }
+  if (isMasterEditor(user) || isDashboardViewerRole(user)) {
+    return true;
+  }
+  return normalizeEntityName(entity) !== "Lee Beaman IRA";
+}
+
+function canUseAdminFeature(user) {
+  return isMasterEditor(user);
+}
+
+function filterInvestmentsForUser(investments, user) {
+  return investments.filter((investment) => canViewInvestment(user, investment));
+}
+
+function canViewTask(user, task, investments = []) {
+  if (!user) {
+    return false;
+  }
+  if (isMasterEditor(user) || isDashboardViewerRole(user)) {
+    return true;
+  }
+  const sourceInvestmentId = String(task && task.sourceInvestmentId || "").trim();
+  if (sourceInvestmentId) {
+    const sourceInvestment = investments.find((investment) => investment.id === sourceInvestmentId);
+    if (sourceInvestment) {
+      return canViewInvestment(user, sourceInvestment);
+    }
+  }
+  return canViewEntity(user, task && task.entity);
+}
+
+function filterTasksForUser(tasks, user, investments = []) {
+  return tasks.filter((task) => canViewTask(user, task, investments));
+}
+
+function canViewCompanyDocument(user, document, investments = []) {
+  if (!user) {
+    return false;
+  }
+  if (isMasterEditor(user) || isDashboardViewerRole(user)) {
+    return true;
+  }
+  const documentEntity = normalizeEntityName(document && document.entity);
+  if (documentEntity === "Lee Beaman IRA") {
+    return false;
+  }
+  const company = normalizeCompanyKey(document && document.company);
+  const entity = normalizeEntityName(document && document.entity);
+  if (!company) {
+    return true;
+  }
+  const matchingInvestments = investments.filter(
+    (investment) =>
+      normalizeCompanyKey(investment.company) === company &&
+      (!entity || normalizeEntityName(investment.entity) === entity)
+  );
+  return !matchingInvestments.length || matchingInvestments.some((investment) => canViewInvestment(user, investment));
+}
+
+function filterCompanyDocumentsForUser(companyDocuments, user, investments = []) {
+  return companyDocuments.filter((document) => canViewCompanyDocument(user, document, investments));
+}
+
+function canViewAiUpdateProposal(user, proposal, investments = []) {
+  if (!user) {
+    return false;
+  }
+  const investment = investments.find((item) => item.id === proposal.investmentId);
+  if (investment) {
+    return canViewInvestment(user, investment);
+  }
+  return canViewEntity(user, proposal && proposal.entityId);
+}
+
+function canReviewAiUpdateProposal(user, proposal, investments = []) {
+  if (!user || isDashboardViewerRole(user)) {
+    return false;
+  }
+  const investment = investments.find((item) => item.id === proposal.investmentId);
+  if (investment) {
+    return canEditInvestment(user, investment);
+  }
+  return canViewEntity(user, proposal && proposal.entityId);
+}
+
+function filterAiUpdateProposalsForUser(proposals, user, investments = []) {
+  return proposals.filter((proposal) => canViewAiUpdateProposal(user, proposal, investments));
 }
 
 function entityKey(value) {
@@ -114,9 +299,7 @@ function parseTeamUsers(value) {
     const [emailRaw, passwordRaw, roleRaw] = parts;
     const email = emailRaw.toLowerCase();
     const password = passwordRaw;
-    const role = ["viewer", "dashboard-viewer"].includes(roleRaw)
-      ? roleRaw
-      : "editor";
+    const role = normalizeUserRole(roleRaw || "editor");
 
     if (!email || !password) {
       return users;
@@ -140,69 +323,37 @@ const ALLOWED_EMAILS = Array.from(
   )
 );
 
-function ensureDataFile() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(BACKUPS_DIR)) {
-    fs.mkdirSync(BACKUPS_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, "[]\n", "utf8");
-  }
-
-  if (!fs.existsSync(TASKS_FILE)) {
-    fs.writeFileSync(TASKS_FILE, "[]\n", "utf8");
-  }
-
-  if (!fs.existsSync(COMPANY_DOCUMENTS_FILE)) {
-    fs.writeFileSync(COMPANY_DOCUMENTS_FILE, "[]\n", "utf8");
-  }
-
-  if (!fs.existsSync(METADATA_FILE)) {
-    fs.writeFileSync(
-      METADATA_FILE,
-      JSON.stringify(
-        {
-          schemaVersion: DATA_SCHEMA_VERSION,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        },
-        null,
-        2
-      ) + "\n",
-      "utf8"
-    );
-  }
-}
+const { ensureDataFile, readJsonFile, writeJsonFile } = createJsonStore({
+  DATA_DIR,
+  DATA_FILE,
+  TASKS_FILE,
+  AI_UPDATE_PROPOSALS_FILE,
+  COMPANY_DOCUMENTS_FILE,
+  METADATA_FILE,
+  BACKUPS_DIR,
+  UPLOADS_DIR,
+  DATA_SCHEMA_VERSION
+});
 
 function makeId() {
   return crypto.randomUUID();
 }
 
-function readJsonFile(filePath, fallback) {
-  ensureDataFile();
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(raw);
-  } catch (error) {
-    return fallback;
-  }
-}
-
-function writeJsonFile(filePath, value) {
-  ensureDataFile();
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + "\n", "utf8");
-}
-
 function readMetadata() {
   const metadata = readJsonFile(METADATA_FILE, {});
+  const dismissedDataAlerts = Object.entries(metadata.dismissedDataAlerts || {}).reduce(
+    (entries, [alertKey, dismissedUntil]) => {
+      const key = String(alertKey || "").trim();
+      const parsedDismissedUntil = parseDateValue(dismissedUntil);
+      if (!key || !parsedDismissedUntil) {
+        return entries;
+      }
+
+      entries[key] = parsedDismissedUntil.toISOString();
+      return entries;
+    },
+    {}
+  );
   return {
     schemaVersion:
       Number.isFinite(Number(metadata.schemaVersion)) && Number(metadata.schemaVersion) > 0
@@ -218,7 +369,8 @@ function readMetadata() {
     lastDigestChangeCount:
       Number.isFinite(Number(metadata.lastDigestChangeCount)) && Number(metadata.lastDigestChangeCount) >= 0
         ? Number(metadata.lastDigestChangeCount)
-        : 0
+        : 0,
+    dismissedDataAlerts
   };
 }
 
@@ -232,44 +384,19 @@ function writeMetadata(partial) {
   });
 }
 
-function createBackupSnapshot(reason = "manual") {
-  ensureDataFile();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backup = {
-    schemaVersion: DATA_SCHEMA_VERSION,
-    reason,
-    createdAt: new Date().toISOString(),
-    metadata: readMetadata(),
-    investments: readJsonFile(DATA_FILE, []),
-    tasks: readJsonFile(TASKS_FILE, []),
-    companyDocuments: readJsonFile(COMPANY_DOCUMENTS_FILE, [])
-  };
-  const fileName = `bvb-backup-${timestamp}-${String(reason)
-    .replace(/[^a-z0-9_-]+/gi, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40) || "snapshot"}.json`;
-  const filePath = path.join(BACKUPS_DIR, fileName);
-  fs.writeFileSync(filePath, JSON.stringify(backup, null, 2) + "\n", "utf8");
-  writeMetadata({
-    lastBackupAt: backup.createdAt,
-    lastBackupReason: reason
-  });
-  return { fileName, filePath, backup };
-}
-
-function restoreFromBackupPayload(payload) {
-  const investments = Array.isArray(payload.investments) ? payload.investments : [];
-  const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
-  const companyDocuments = Array.isArray(payload.companyDocuments) ? payload.companyDocuments : [];
-  writeJsonFile(DATA_FILE, investments);
-  writeJsonFile(TASKS_FILE, tasks);
-  writeJsonFile(COMPANY_DOCUMENTS_FILE, companyDocuments);
-  writeMetadata({
-    schemaVersion: DATA_SCHEMA_VERSION,
-    lastMigrationAt: new Date().toISOString()
-  });
-}
+const { createBackupSnapshot, createBackupExportPayload, restoreFromBackupPayload } = createBackupService({
+  BACKUPS_DIR,
+  DATA_FILE,
+  TASKS_FILE,
+  AI_UPDATE_PROPOSALS_FILE,
+  COMPANY_DOCUMENTS_FILE,
+  DATA_SCHEMA_VERSION,
+  ensureDataFile,
+  readJsonFile,
+  writeJsonFile,
+  readMetadata,
+  writeMetadata
+});
 
 function normalizeCompanyKey(value) {
   return String(value || "")
@@ -292,6 +419,16 @@ function normalizeDocuments(value) {
       uploadedAt: String((document && document.uploadedAt) || new Date().toISOString()).trim()
     }))
     .filter((document) => document.name && document.url);
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function normalizeCompanyDocument(entry) {
@@ -366,6 +503,8 @@ function normalizeStructuredRow(row, fallback = {}) {
     date: String(row.date || fallback.date || "").trim(),
     type: String(row.type || fallback.type || "").trim(),
     title: String(row.title || fallback.title || "").trim(),
+    reportPeriod: String(row.reportPeriod || fallback.reportPeriod || "").trim(),
+    sourceType: String(row.sourceType || fallback.sourceType || "").trim(),
     amount: String(row.amount || fallback.amount || "").trim(),
     officialValue: String(row.officialValue || fallback.officialValue || "").trim(),
     internalValue: String(row.internalValue || fallback.internalValue || "").trim(),
@@ -374,20 +513,218 @@ function normalizeStructuredRow(row, fallback = {}) {
     entityPercent: String(row.entityPercent || fallback.entityPercent || "").trim(),
     notes: String(row.notes || fallback.notes || "").trim(),
     summary: String(row.summary || fallback.summary || "").trim(),
-    sourceUpdateId: String(row.sourceUpdateId || fallback.sourceUpdateId || "").trim()
+    originalNotes: String(row.originalNotes || fallback.originalNotes || "").trim(),
+    aiSummary: String(row.aiSummary || fallback.aiSummary || "").trim(),
+    keyWins: String(row.keyWins || fallback.keyWins || "").trim(),
+    keyRisks: String(row.keyRisks || fallback.keyRisks || "").trim(),
+    keyMetrics: String(row.keyMetrics || fallback.keyMetrics || "").trim(),
+    actionItems: String(row.actionItems || fallback.actionItems || "").trim(),
+    attachmentLink: String(row.attachmentLink || fallback.attachmentLink || "").trim(),
+    contactEmailed: String(row.contactEmailed || fallback.contactEmailed || "").trim(),
+    subjectLine: String(row.subjectLine || fallback.subjectLine || "").trim(),
+    responseStatus: String(row.responseStatus || fallback.responseStatus || "").trim(),
+    materialsRequested: Array.isArray(row.materialsRequested)
+      ? row.materialsRequested.map((item) => String(item).trim()).filter(Boolean)
+      : Array.isArray(fallback.materialsRequested)
+        ? fallback.materialsRequested.map((item) => String(item).trim()).filter(Boolean)
+        : [],
+    sourceUpdateId: String(row.sourceUpdateId || fallback.sourceUpdateId || "").trim(),
+    aiProposalId: String(row.aiProposalId || fallback.aiProposalId || "").trim(),
+    aiApprovedBy: String(row.aiApprovedBy || fallback.aiApprovedBy || "").trim(),
+    aiApprovedAt: String(row.aiApprovedAt || fallback.aiApprovedAt || "").trim(),
+    aiSourceFilename: String(row.aiSourceFilename || fallback.aiSourceFilename || "").trim(),
+    aiSourceIdentifier: String(row.aiSourceIdentifier || fallback.aiSourceIdentifier || "").trim(),
+    aiMaterialDevelopments: Array.isArray(row.aiMaterialDevelopments)
+      ? row.aiMaterialDevelopments.map((item) => ({
+          category: String((item && item.category) || "").trim(),
+          summary: String((item && item.summary) || "").trim(),
+          sourceEvidence: String((item && item.sourceEvidence) || "").trim(),
+          sourcePage: String((item && item.sourcePage) || "").trim(),
+          confidence: Number((item && item.confidence) || 0) || 0,
+          riskLevel: String((item && item.riskLevel) || "").trim(),
+          importance: String((item && item.importance) || "").trim(),
+          evidenceStatus: String((item && item.evidenceStatus) || "").trim(),
+          verification: item && item.verification && typeof item.verification === "object"
+            ? item.verification
+            : {}
+        })).filter((item) => item.summary || item.sourceEvidence)
+      : Array.isArray(fallback.aiMaterialDevelopments)
+        ? fallback.aiMaterialDevelopments
+        : []
   };
 }
 
 function normalizeStructuredRows(rows, fallbackRows = []) {
+  const hasValue = (row) =>
+    Object.values(row).some((value) =>
+      Array.isArray(value) ? value.length > 0 : Boolean(value)
+    );
+
   if (Array.isArray(rows) && rows.length) {
     return rows
       .map((row) => normalizeStructuredRow(row))
-      .filter((row) => Object.values(row).some(Boolean));
+      .filter(hasValue);
   }
 
   return fallbackRows
     .map((row) => normalizeStructuredRow(row))
-    .filter((row) => Object.values(row).some(Boolean));
+    .filter(hasValue);
+}
+
+function normalizeReportingCadence(value) {
+  const cadence = String(value || "").trim();
+  return ["Monthly", "Quarterly", "Annual", "Ad Hoc"].includes(cadence) ? cadence : "";
+}
+
+function normalizeUpdateRequestStatus(value) {
+  const status = String(value || "").trim();
+  return ["Requested", "Received", "Follow-up Needed"].includes(status) ? status : "";
+}
+
+function getEffectiveUpdateRequestStatus(investment) {
+  const status = normalizeUpdateRequestStatus(investment && investment.updateRequestStatus);
+  if (status === "Requested") {
+    const sentAt = parseDateValue(investment && investment.lastUpdateRequestSentAt);
+    if (sentAt && Date.now() - sentAt.getTime() >= UPDATE_REQUEST_FOLLOW_UP_DAYS * 24 * 60 * 60 * 1000) {
+      return "Follow-up Needed";
+    }
+  }
+
+  return status;
+}
+
+function parseNumericString(value) {
+  const parsed = Number(
+    String(value || "")
+      .trim()
+      .replace(/[$,\s]/g, "")
+      .replace(/[^\d.-]/g, "")
+  );
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatNumericString(value) {
+  return Number.isFinite(value) && value ? value.toLocaleString("en-US", { maximumFractionDigits: 4 }) : "";
+}
+
+function formatQuotePrice(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return "";
+  }
+
+  return parsed.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6
+  });
+}
+
+const STOCK_QUOTE_CACHE_TTL_MS = 15 * 60 * 1000;
+const STOCK_QUOTE_BASE_URL =
+  process.env.STOCK_QUOTE_BASE_URL || "https://query1.finance.yahoo.com/v8/finance/chart";
+const stockQuoteCache = new Map();
+const stockQuoteRequests = new Map();
+
+function createQuoteError(message, options = {}) {
+  const error = new Error(message);
+  error.statusCode = options.statusCode || 502;
+  error.publicMessage = options.publicMessage || message;
+  return error;
+}
+
+async function fetchStockQuote(ticker) {
+  const symbol = String(ticker || "").trim().toUpperCase();
+  if (!/^[A-Z0-9.^=-]{1,24}$/.test(symbol)) {
+    throw new Error("Enter a valid ticker symbol.");
+  }
+
+  const cachedQuote = stockQuoteCache.get(symbol);
+  if (cachedQuote && Date.now() - cachedQuote.cachedAt < STOCK_QUOTE_CACHE_TTL_MS) {
+    return { ...cachedQuote.quote };
+  }
+
+  if (stockQuoteRequests.has(symbol)) {
+    return stockQuoteRequests.get(symbol);
+  }
+
+  const quoteRequest = fetchFreshStockQuote(symbol)
+    .then((quote) => {
+      stockQuoteCache.set(symbol, {
+        cachedAt: Date.now(),
+        quote
+      });
+      return quote;
+    })
+    .finally(() => {
+      stockQuoteRequests.delete(symbol);
+    });
+
+  stockQuoteRequests.set(symbol, quoteRequest);
+  return quoteRequest;
+}
+
+async function fetchFreshStockQuote(symbol) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const quoteUrl = `${STOCK_QUOTE_BASE_URL.replace(/\/+$/, "")}/${encodeURIComponent(
+      symbol
+    )}?range=1d&interval=1d`;
+    const quoteResponse = await fetch(quoteUrl, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "investment-team-updates/1.0"
+      }
+    });
+
+    if (!quoteResponse.ok) {
+      if (quoteResponse.status === 429) {
+        throw createQuoteError("Yahoo Finance quote lookup was rate limited.", {
+          statusCode: 503,
+          publicMessage: "Price update temporarily unavailable — previous price retained."
+        });
+      }
+      throw createQuoteError(`Quote lookup failed with status ${quoteResponse.status}.`, {
+        statusCode: 502,
+        publicMessage: "Price update temporarily unavailable — previous price retained."
+      });
+    }
+
+    const payload = await quoteResponse.json();
+    const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
+    const meta = (result && result.meta) || {};
+    const closeValues =
+      result &&
+      result.indicators &&
+      result.indicators.quote &&
+      result.indicators.quote[0] &&
+      Array.isArray(result.indicators.quote[0].close)
+        ? result.indicators.quote[0].close
+        : [];
+    const latestClose = [...closeValues].reverse().find((value) => Number.isFinite(Number(value)));
+    const price = Number(meta.regularMarketPrice || latestClose);
+    const marketTime = Number(meta.regularMarketTime || 0);
+    const priceDate = marketTime
+      ? new Date(marketTime * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      throw createQuoteError(`No current price was found for ${symbol}.`, {
+        publicMessage: "Price update temporarily unavailable — previous price retained."
+      });
+    }
+
+    return {
+      symbol: String(meta.symbol || symbol).toUpperCase(),
+      price: formatQuotePrice(price),
+      priceDate,
+      exchangeName: String(meta.exchangeName || meta.fullExchangeName || "").trim(),
+      currency: String(meta.currency || "USD").trim() || "USD",
+      source: "Yahoo Finance"
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function normalizeInvestment(entry) {
@@ -397,14 +734,97 @@ function normalizeInvestment(entry) {
   const notes = String(entry.notes || "").trim();
   const deckSummary = String(entry.deckSummary || "").trim();
   const updatedAt = String(entry.updatedAt || entry.createdAt || new Date().toISOString());
+  const assetType = String(entry.assetType || "Private Investment").trim() || "Private Investment";
+  const isCashAsset = assetType === "Cash";
+  const isBondAsset = assetType === "Bond / Fixed Income";
+  const isRealEstateAsset = assetType === "Real Estate";
+  const amount = String(entry.amount || "").trim();
+  const cashBalanceValue = formatNumericString(parseNumericString(amount));
+  const bondParValue = String(entry.bondParValue || "").trim();
+  const bondPurchasePrice = String(entry.bondPurchasePrice || "").trim();
+  const bondCostBasisInput = String(entry.bondCostBasis || "").trim();
+  const bondCouponRate = String(entry.bondCouponRate || "").trim();
+  const bondCurrentPrice = String(entry.bondCurrentPrice || "").trim();
+  const bondMarketPriceDate = String(entry.bondMarketPriceDate || "").trim();
+  const calculatedBondMarketValue =
+    parseNumericString(bondParValue) * parseNumericString(bondCurrentPrice) / 100;
+  const calculatedBondCostBasis =
+    parseNumericString(bondParValue) * parseNumericString(bondPurchasePrice) / 100;
+  const bondMarketValue = formatNumericString(calculatedBondMarketValue);
+  const bondCostBasis =
+    bondCostBasisInput || formatNumericString(calculatedBondCostBasis);
+  const bondAnnualCouponIncome =
+    parseNumericString(bondParValue) * (parseNumericString(bondCouponRate) / 100);
+  const bondCurrentYield =
+    calculatedBondMarketValue > 0 && bondAnnualCouponIncome > 0
+      ? String(Number(((bondAnnualCouponIncome / calculatedBondMarketValue) * 100).toFixed(6)))
+      : "";
+  const realEstateAppraisedValue = String(entry.realEstateAppraisedValue || "").trim();
+  const realEstateOwnershipPercent = String(entry.realEstateOwnershipPercent || entry.ownershipPercent || "").trim();
+  const realEstateDebt = String(entry.realEstateDebt || "").trim();
+  const realEstateNoi = String(entry.realEstateNoi || "").trim();
+  const realEstateRevenue = String(entry.realEstateRevenue || "").trim();
+  const realEstateInternalValueOverride = String(entry.realEstateInternalValueOverride || "").trim();
+  const realEstateOwnershipRate = parseNumericString(realEstateOwnershipPercent) > 0
+    ? Math.max(0, Math.min(parseNumericString(realEstateOwnershipPercent), 100)) / 100
+    : 1;
+  const calculatedRealEstateEntityValue =
+    parseNumericString(realEstateAppraisedValue) * realEstateOwnershipRate;
+  const calculatedRealEstateEntityDebt = parseNumericString(realEstateDebt) * realEstateOwnershipRate;
+  const calculatedRealEstateNetEquity = calculatedRealEstateEntityValue - calculatedRealEstateEntityDebt;
+  const hasRealEstateValuationInputs =
+    parseNumericString(realEstateAppraisedValue) > 0 || parseNumericString(realEstateDebt) > 0;
+  const realEstateNetEquity = formatNumericString(calculatedRealEstateNetEquity);
+  const realEstateInternalValue = realEstateInternalValueOverride
+    ? formatNumericString(parseNumericString(realEstateInternalValueOverride))
+    : realEstateNetEquity;
+  const realEstateCapRate =
+    parseNumericString(realEstateAppraisedValue) > 0 && parseNumericString(realEstateNoi) > 0
+      ? String(Number(((parseNumericString(realEstateNoi) / parseNumericString(realEstateAppraisedValue)) * 100).toFixed(6)))
+      : "";
+  const realEstateNoiMargin =
+    parseNumericString(realEstateRevenue) > 0 && parseNumericString(realEstateNoi) > 0
+      ? String(Number(((parseNumericString(realEstateNoi) / parseNumericString(realEstateRevenue)) * 100).toFixed(6)))
+      : "";
+  const ticker = String(entry.ticker || "").trim().toUpperCase();
+  const exchange = String(entry.exchange || "").trim().toUpperCase();
+  const shareCount = String(entry.shareCount || "").trim();
+  const costBasisPerShare = String(entry.costBasisPerShare || "").trim();
+  const marketPrice = String(entry.marketPrice || "").trim();
+  const marketPriceDate = String(entry.marketPriceDate || "").trim();
+  const calculatedMarketValue = parseNumericString(shareCount) * parseNumericString(marketPrice);
+  const marketValue =
+    isCashAsset
+      ? cashBalanceValue
+      : isBondAsset
+        ? bondMarketValue
+        : isRealEstateAsset
+          ? (hasRealEstateValuationInputs ? realEstateNetEquity : "")
+      : String(entry.marketValue || "").trim() || formatNumericString(calculatedMarketValue);
   const capitalCallDate = String(entry.capitalCallDate || "").trim();
   const capitalCallAmount = String(entry.capitalCallAmount || "").trim();
   const distributionDate = String(entry.distributionDate || "").trim();
   const distributionAmount = String(entry.distributionAmount || "").trim();
-  const valuationDate = String(entry.valuationDate || "").trim();
-  const officialValue = String(entry.officialValue || "").trim();
-  const internalValue = String(entry.internalValue || "").trim();
-  const exitValue = String(entry.exitValue || "").trim();
+  const valuationDate = isBondAsset && bondCurrentPrice && bondMarketPriceDate
+    ? bondMarketPriceDate
+    : isRealEstateAsset && entry.realEstateAppraisalDate
+      ? String(entry.realEstateAppraisalDate || "").trim()
+      : String(entry.valuationDate || "").trim();
+  const officialValue = isCashAsset
+    ? cashBalanceValue
+    : isBondAsset
+      ? bondMarketValue || String(entry.officialValue || "").trim()
+      : isRealEstateAsset
+        ? (hasRealEstateValuationInputs ? realEstateNetEquity : "") || String(entry.officialValue || "").trim()
+      : String(entry.officialValue || "").trim();
+  const internalValue = isCashAsset
+    ? cashBalanceValue
+    : isBondAsset
+      ? bondMarketValue || String(entry.internalValue || "").trim()
+      : isRealEstateAsset
+        ? (hasRealEstateValuationInputs ? realEstateInternalValue : "") || String(entry.internalValue || "").trim()
+      : String(entry.internalValue || "").trim();
+  const exitValue = isCashAsset ? "" : String(entry.exitValue || "").trim();
   const ownershipPercent = String(entry.ownershipPercent || "").trim();
   const entityOwnershipPercent = String(entry.entityOwnershipPercent || "").trim();
   const ownershipNotes = String(entry.ownershipNotes || "").trim();
@@ -415,6 +835,11 @@ function normalizeInvestment(entry) {
   const contactPosition = String(entry.contactPosition || "").trim();
   const contactEmail = String(entry.contactEmail || "").trim();
   const contactPhone = String(entry.contactPhone || "").trim();
+  const reportingCadence = normalizeReportingCadence(entry.reportingCadence);
+  const updateRequestStatus = normalizeUpdateRequestStatus(entry.updateRequestStatus);
+  const lastUpdateRequestSentAt = String(entry.lastUpdateRequestSentAt || "").trim();
+  const lastUpdateRequestSubject = String(entry.lastUpdateRequestSubject || "").trim();
+  const lastUpdateRequestContact = String(entry.lastUpdateRequestContact || "").trim();
   const decisionDate = String(entry.decisionDate || "").trim();
   const decisionType = String(entry.decisionType || "").trim();
   const decisionSummary = String(entry.decisionSummary || "").trim();
@@ -522,41 +947,123 @@ function normalizeInvestment(entry) {
     id: investmentId,
     company: String(entry.company || "").trim(),
     companyKey: entry.companyKey || normalizeCompanyKey(entry.company),
+    investmentAliases: normalizeStringList(entry.investmentAliases || entry.aliases),
     entity,
-    amount: String(entry.amount || "").trim(),
+    assetType,
+    ticker: isCashAsset || isBondAsset || isRealEstateAsset ? "" : ticker,
+    exchange: isCashAsset || isBondAsset || isRealEstateAsset ? "" : exchange,
+    shareCount: isCashAsset || isBondAsset || isRealEstateAsset ? "" : shareCount,
+    costBasisPerShare: isCashAsset || isBondAsset || isRealEstateAsset ? "" : costBasisPerShare,
+    marketPrice: isCashAsset || isBondAsset || isRealEstateAsset ? "" : marketPrice,
+    marketPriceDate: isCashAsset || isBondAsset || isRealEstateAsset ? "" : marketPriceDate,
+    bondIssuer: isBondAsset ? String(entry.bondIssuer || entry.company || "").trim() : "",
+    bondDescription: isBondAsset ? String(entry.bondDescription || "").trim() : "",
+    bondType: isBondAsset ? String(entry.bondType || entry.stage || "").trim() : "",
+    bondCusip: isBondAsset ? String(entry.bondCusip || "").trim().toUpperCase() : "",
+    bondEntityOwner: isBondAsset ? String(entry.bondEntityOwner || entry.owner || "").trim() : "",
+    bondParValue: isBondAsset ? bondParValue : "",
+    bondPurchasePrice: isBondAsset ? bondPurchasePrice : "",
+    bondPurchaseDate: isBondAsset ? String(entry.bondPurchaseDate || "").trim() : "",
+    bondCostBasis: isBondAsset ? bondCostBasis : "",
+    bondCouponRate: isBondAsset ? bondCouponRate : "",
+    bondCouponFrequency: isBondAsset ? String(entry.bondCouponFrequency || "").trim() : "",
+    bondMaturityDate: isBondAsset ? String(entry.bondMaturityDate || "").trim() : "",
+    bondCallDate: isBondAsset ? String(entry.bondCallDate || "").trim() : "",
+    bondCallPrice: isBondAsset ? String(entry.bondCallPrice || "").trim() : "",
+    bondCurrentPrice: isBondAsset ? bondCurrentPrice : "",
+    bondMarketPriceDate: isBondAsset ? bondMarketPriceDate : "",
+    bondMarketValue: isBondAsset ? bondMarketValue : "",
+    bondYieldToMaturity: isBondAsset ? String(entry.bondYieldToMaturity || "").trim() : "",
+    bondYieldToCall: isBondAsset ? String(entry.bondYieldToCall || "").trim() : "",
+    bondCurrentYield: isBondAsset ? bondCurrentYield : "",
+    bondCreditRating: isBondAsset ? String(entry.bondCreditRating || "").trim() : "",
+    bondInsurer: isBondAsset ? String(entry.bondInsurer || "").trim() : "",
+    bondTaxStatus: isBondAsset ? String(entry.bondTaxStatus || "").trim() : "",
+    bondAccruedInterest: isBondAsset ? String(entry.bondAccruedInterest || "").trim() : "",
+    realEstatePropertyName: isRealEstateAsset ? String(entry.realEstatePropertyName || entry.company || "").trim() : "",
+    realEstateAddress: isRealEstateAsset ? String(entry.realEstateAddress || "").trim() : "",
+    realEstateCity: isRealEstateAsset ? String(entry.realEstateCity || "").trim() : "",
+    realEstateState: isRealEstateAsset ? String(entry.realEstateState || "").trim() : "",
+    realEstateZip: isRealEstateAsset ? String(entry.realEstateZip || "").trim() : "",
+    realEstateEntityOwner: isRealEstateAsset ? String(entry.realEstateEntityOwner || entry.owner || "").trim() : "",
+    realEstatePropertyType: isRealEstateAsset ? String(entry.realEstatePropertyType || entry.stage || "").trim() : "",
+    realEstateOwnershipPercent: isRealEstateAsset ? realEstateOwnershipPercent : "",
+    realEstateOwnershipNotes: isRealEstateAsset ? String(entry.realEstateOwnershipNotes || "").trim() : "",
+    realEstateAcquisitionDate: isRealEstateAsset ? String(entry.realEstateAcquisitionDate || "").trim() : "",
+    realEstatePurchasePrice: isRealEstateAsset ? String(entry.realEstatePurchasePrice || "").trim() : "",
+    realEstateCostBasis: isRealEstateAsset ? String(entry.realEstateCostBasis || "").trim() : "",
+    realEstateAppraisedValue: isRealEstateAsset ? realEstateAppraisedValue : "",
+    realEstateAppraisalDate: isRealEstateAsset ? String(entry.realEstateAppraisalDate || "").trim() : "",
+    realEstateAppraiser: isRealEstateAsset ? String(entry.realEstateAppraiser || "").trim() : "",
+    realEstateAppraisalDocument: isRealEstateAsset ? String(entry.realEstateAppraisalDocument || "").trim() : "",
+    realEstateInternalValueOverride: isRealEstateAsset ? realEstateInternalValueOverride : "",
+    realEstateInternalValueDate: isRealEstateAsset ? String(entry.realEstateInternalValueDate || "").trim() : "",
+    realEstateDebt: isRealEstateAsset ? realEstateDebt : "",
+    realEstateLoanLender: isRealEstateAsset ? String(entry.realEstateLoanLender || "").trim() : "",
+    realEstateDebtInterestRate: isRealEstateAsset ? String(entry.realEstateDebtInterestRate || "").trim() : "",
+    realEstateDebtMaturityDate: isRealEstateAsset ? String(entry.realEstateDebtMaturityDate || "").trim() : "",
+    realEstateDebtService: isRealEstateAsset ? String(entry.realEstateDebtService || "").trim() : "",
+    realEstateLoanNotes: isRealEstateAsset ? String(entry.realEstateLoanNotes || "").trim() : "",
+    realEstateNoi: isRealEstateAsset ? realEstateNoi : "",
+    realEstateRevenue: isRealEstateAsset ? realEstateRevenue : "",
+    realEstateCapRate: isRealEstateAsset ? realEstateCapRate : "",
+    realEstateNoiMargin: isRealEstateAsset ? realEstateNoiMargin : "",
+    realEstateOccupancy: isRealEstateAsset ? String(entry.realEstateOccupancy || "").trim() : "",
+    realEstateSquareFootage: isRealEstateAsset ? String(entry.realEstateSquareFootage || entry.realEstateSize || "").trim() : "",
+    realEstateAcreage: isRealEstateAsset ? String(entry.realEstateAcreage || "").trim() : "",
+    realEstateUnits: isRealEstateAsset ? String(entry.realEstateUnits || "").trim() : "",
+    realEstatePropertyTaxes: isRealEstateAsset ? String(entry.realEstatePropertyTaxes || "").trim() : "",
+    realEstateInsurance: isRealEstateAsset ? String(entry.realEstateInsurance || "").trim() : "",
+    realEstateOtherExpenses: isRealEstateAsset ? String(entry.realEstateOtherExpenses || "").trim() : "",
+    realEstateOperatingNotes: isRealEstateAsset ? String(entry.realEstateOperatingNotes || "").trim() : "",
+    marketValue,
+    amount: isBondAsset ? bondCostBasis || amount : isRealEstateAsset ? String(entry.realEstateCostBasis || entry.realEstatePurchasePrice || amount || "").trim() : amount,
     currency: String(entry.currency || "USD").trim() || "USD",
-    stage: String(entry.stage || "").trim(),
-    status: String(entry.status || "").trim(),
-    owner: String(entry.owner || "").trim(),
+    stage: isRealEstateAsset ? String(entry.realEstatePropertyType || entry.stage || "").trim() : String(entry.stage || "").trim(),
+    status: isCashAsset || isBondAsset || isRealEstateAsset ? String(entry.status || "Active").trim() : String(entry.status || "").trim(),
+    owner: isBondAsset
+      ? String(entry.bondEntityOwner || entry.owner || "").trim()
+      : isRealEstateAsset
+        ? String(entry.realEstateEntityOwner || entry.owner || "").trim()
+        : String(entry.owner || "").trim(),
     nextStep: String(entry.nextStep || "").trim(),
     nextStepDueDate: String(entry.nextStepDueDate || "").trim(),
     notes,
     deckSummary,
-    capitalCallDate: capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
-    capitalCallAmount: capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
-    distributionDate: distributionDate || (latestDistribution ? latestDistribution.date : ""),
-    distributionAmount: distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
+    capitalCallDate: isCashAsset || isBondAsset || isRealEstateAsset ? "" : capitalCallDate || (latestCapitalCall ? latestCapitalCall.date : ""),
+    capitalCallAmount: isCashAsset || isBondAsset || isRealEstateAsset ? "" : capitalCallAmount || (latestCapitalCall ? latestCapitalCall.amount : ""),
+    distributionDate: isCashAsset || isBondAsset || isRealEstateAsset ? "" : distributionDate || (latestDistribution ? latestDistribution.date : ""),
+    distributionAmount: isCashAsset || isBondAsset || isRealEstateAsset ? "" : distributionAmount || (latestDistribution ? latestDistribution.amount : ""),
     valuationDate,
     officialValue,
     internalValue,
     exitValue,
-    ownershipPercent,
-    entityOwnershipPercent,
-    ownershipNotes,
-    followOnCapitalAmount,
-    followOnCapitalStatus,
-    followOnCapitalNotes,
+    ownershipPercent: isCashAsset || isBondAsset ? "" : isRealEstateAsset ? realEstateOwnershipPercent : ownershipPercent,
+    entityOwnershipPercent: isCashAsset || isBondAsset || isRealEstateAsset ? "" : entityOwnershipPercent,
+    ownershipNotes: isCashAsset || isBondAsset || isRealEstateAsset ? "" : ownershipNotes,
+    followOnCapitalAmount: isCashAsset || isBondAsset || isRealEstateAsset ? "" : followOnCapitalAmount,
+    followOnCapitalStatus: isCashAsset || isBondAsset || isRealEstateAsset ? "" : followOnCapitalStatus,
+    followOnCapitalNotes: isCashAsset || isBondAsset || isRealEstateAsset ? "" : followOnCapitalNotes,
     contactName,
     contactPosition,
     contactEmail,
     contactPhone,
+    reportingCadence,
+    updateRequestStatus: getEffectiveUpdateRequestStatus({
+      updateRequestStatus,
+      lastUpdateRequestSentAt
+    }),
+    lastUpdateRequestSentAt,
+    lastUpdateRequestSubject,
+    lastUpdateRequestContact,
     documentLinks: String(entry.documentLinks || "").trim(),
     documents: normalizeDocuments(entry.documents),
     decisionDate,
     decisionType,
     decisionSummary,
     researchEntries: normalizeStructuredRows(entry.researchEntries, fallbackResearchEntries),
-    capitalActivity: normalizedCapitalActivity,
+    reportUpdates: normalizeStructuredRows(entry.reportUpdates),
+    capitalActivity: isCashAsset || isBondAsset || isRealEstateAsset ? [] : normalizedCapitalActivity,
     valuationHistory: normalizeStructuredRows(entry.valuationHistory, fallbackValuationHistory),
     ownershipHistory: normalizeStructuredRows(entry.ownershipHistory, fallbackOwnershipHistory),
     followOnHistory: normalizeStructuredRows(entry.followOnHistory, fallbackFollowOnHistory),
@@ -594,44 +1101,256 @@ function normalizeTask(entry) {
   };
 }
 
-function writeInvestments(investments) {
-  writeJsonFile(DATA_FILE, investments);
+const AI_UPDATE_PROPOSAL_STATUSES = ["pending", "approved", "rejected"];
+
+function normalizeProposalStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return AI_UPDATE_PROPOSAL_STATUSES.includes(normalized) ? normalized : "pending";
 }
 
-function readInvestments() {
-  const parsed = readJsonFile(DATA_FILE, []);
-  if (!Array.isArray(parsed)) {
+function normalizeProposalDocuments(value) {
+  if (!Array.isArray(value)) {
     return [];
   }
 
-  const normalized = parsed.map(normalizeInvestment);
-  const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
-  if (changed) {
-    writeInvestments(normalized);
-    writeMetadata({ lastMigrationAt: new Date().toISOString() });
-  }
-
-  return normalized;
+  return value
+    .map((document) => ({
+      id: String((document && document.id) || "").trim(),
+      name: String((document && document.name) || "").trim(),
+      url: String((document && document.url) || "").trim(),
+      storedName: String((document && document.storedName) || "").trim(),
+      source: String((document && document.source) || "").trim()
+    }))
+    .filter((document) => document.id || document.name || document.url);
 }
 
-function writeTasks(tasks) {
-  writeJsonFile(TASKS_FILE, tasks);
+function normalizeJsonObject(value, fallback) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  return fallback;
 }
 
-function readTasks() {
-  const parsed = readJsonFile(TASKS_FILE, []);
-  if (!Array.isArray(parsed)) {
-    return [];
+function normalizeAiUpdateProposal(entry) {
+  const createdAt = String((entry && entry.createdAt) || new Date().toISOString()).trim();
+  const investmentId = String((entry && (entry.investmentId || entry.investment_id)) || "").trim();
+  const entity = normalizeEntityName(
+    (entry && (entry.entity || entry.entityId || entry.entity_id)) || ""
+  );
+  const parsedConfidence = Number(
+    (entry && (entry.confidenceScore || entry.confidence_score)) || 0
+  );
+
+  return {
+    id: String((entry && entry.id) || makeId()).trim(),
+    investmentId,
+    entityId: entity,
+    sourceType: String((entry && (entry.sourceType || entry.source_type)) || "").trim(),
+    sourceIdentifier: String(
+      (entry && (entry.sourceIdentifier || entry.source_identifier)) || ""
+    ).trim(),
+    sourceDate: String((entry && (entry.sourceDate || entry.source_date)) || "").trim(),
+    sender: String((entry && entry.sender) || "").trim(),
+    subject: String((entry && entry.subject) || "").trim(),
+    confidenceScore: Number.isFinite(parsedConfidence)
+      ? Math.max(0, Math.min(100, parsedConfidence))
+      : 0,
+    matchReason: String((entry && (entry.matchReason || entry.match_reason)) || "").trim(),
+    summary: String((entry && entry.summary) || "").trim(),
+    extractedData: normalizeJsonObject(
+      entry && (entry.extractedData || entry.extracted_data),
+      {}
+    ),
+    proposedChanges: normalizeJsonObject(
+      entry && (entry.proposedChanges || entry.proposed_changes),
+      []
+    ),
+    documents: normalizeProposalDocuments(
+      entry && (entry.documents || entry.attachments || entry.attachmentReferences)
+    ),
+    status: normalizeProposalStatus(entry && entry.status),
+    reviewedBy: String((entry && (entry.reviewedBy || entry.reviewed_by)) || "").trim(),
+    reviewedAt: String((entry && (entry.reviewedAt || entry.reviewed_at)) || "").trim(),
+    createdAt,
+    updatedAt: String((entry && entry.updatedAt) || createdAt).trim()
+  };
+}
+
+const { readTasks, writeTasks, saveTask, updateTask, deleteTask } = createTaskService({
+  TASKS_FILE,
+  readJsonFile,
+  writeJsonFile,
+  writeMetadata,
+  normalizeTask,
+  createBackupSnapshot
+});
+
+const {
+  readInvestments,
+  writeInvestments,
+  saveInvestment,
+  updateInvestment,
+  deleteInvestment
+} = createInvestmentService({
+  DATA_FILE,
+  readJsonFile,
+  writeJsonFile,
+  writeMetadata,
+  normalizeInvestment,
+  createBackupSnapshot,
+  findLatestByPositionKey,
+  getInvestmentPositionKey,
+  normalizeCompanyKey,
+  syncNextStepReminderTasks
+});
+
+function applyApprovedAiUpdateProposal(proposal) {
+  const investments = readInvestments();
+  const investment = investments.find((item) => item.id === proposal.investmentId) || null;
+  return applyApprovedAiUpdateProposalToInvestment({
+    proposal,
+    investment,
+    approver: proposal.reviewedBy,
+    approvedAt: proposal.reviewedAt || new Date().toISOString(),
+    updateInvestment,
+    normalizeStructuredRows
+  });
+}
+
+async function callAiUpdateAnalysisModel(prompt) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI analysis is not configured yet.");
   }
 
-  const normalized = parsed.map(normalizeTask);
-  const changed = JSON.stringify(parsed) !== JSON.stringify(normalized);
-  if (changed) {
-    writeTasks(normalized);
-    writeMetadata({ lastMigrationAt: new Date().toISOString() });
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: prompt
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_object"
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(formatOpenAiError(errorText, "OpenAI analysis failed"));
   }
 
-  return normalized;
+  const payload = await response.json();
+  const parsed = extractJsonObject(extractResponseText(payload));
+  if (!parsed) {
+    throw new Error("OpenAI analysis returned malformed JSON.");
+  }
+
+  return parsed;
+}
+
+const { analyzeInvestmentUpdate } = createAiUpdateAnalysisService({
+  callModel: callAiUpdateAnalysisModel,
+  normalizeEntityName
+});
+
+const {
+  readAiUpdateProposals,
+  saveAiUpdateProposal,
+  approveAiUpdateProposal,
+  rejectAiUpdateProposal
+} = createAiUpdateProposalService({
+  AI_UPDATE_PROPOSALS_FILE,
+  readJsonFile,
+  writeJsonFile,
+  writeMetadata,
+  normalizeAiUpdateProposal,
+  createBackupSnapshot,
+  applyApprovedAiUpdateProposal
+});
+
+const microsoftGraphMailService = createMicrosoftGraphMailService({
+  tenantId: process.env.MICROSOFT_TENANT_ID,
+  clientId: process.env.MICROSOFT_CLIENT_ID,
+  clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+  mailboxUser: process.env.MICROSOFT_MAILBOX_USER,
+  folderName: process.env.MICROSOFT_MAIL_FOLDER_NAME || "AI Investment Updates",
+  maxMessagesPerRun: process.env.AI_EMAIL_MAX_MESSAGES_PER_RUN
+});
+
+const aiEmailIntakeStateService = createAiEmailIntakeStateService({
+  STATE_FILE: AI_EMAIL_INTAKE_STATE_FILE,
+  readJsonFile,
+  writeJsonFile
+});
+
+function saveAiEmailIntakeUpload({ filename, buffer, uploadedAt }) {
+  ensureDataFile();
+  const storedName = safeFilename(filename);
+  const filePath = path.join(UPLOADS_DIR, storedName);
+  fs.writeFileSync(filePath, buffer);
+  return {
+    id: makeId(),
+    name: filename,
+    storedName,
+    url: `/uploads/${storedName}`,
+    uploadedAt,
+    uploadedBy: "microsoft-365-email-intake",
+    source: "microsoft-365-email"
+  };
+}
+
+const aiEmailIntakeService = createAiEmailIntakeService({
+  graphMailService: microsoftGraphMailService,
+  stateService: aiEmailIntakeStateService,
+  analyzeInvestmentUpdate,
+  extractPdfTextFromUpload,
+  finalizeAnalysisForResponse,
+  enforceProposalSafetyInvariant,
+  saveAiUpdateProposal,
+  readInvestments,
+  filterInvestmentsForUser,
+  entities: INVESTMENT_ENTITIES,
+  canViewEntity,
+  makeId,
+  saveUpload: saveAiEmailIntakeUpload,
+  allowedSenders: process.env.AI_EMAIL_ALLOWED_SENDERS || "",
+  allowedDomains: process.env.AI_EMAIL_ALLOWED_DOMAINS || ""
+});
+
+function serializeAiUpdateProposal(proposal, investments) {
+  const investment = investments.find((item) => item.id === proposal.investmentId) || null;
+  return {
+    ...proposal,
+    investment: investment
+      ? {
+          id: investment.id,
+          company: investment.company,
+          entity: investment.entity,
+          assetType: investment.assetType,
+          status: investment.status
+        }
+      : null
+  };
 }
 
 function writeCompanyDocuments(documents) {
@@ -674,60 +1393,6 @@ function deleteCompanyDocument(id) {
   createBackupSnapshot("before-company-document-delete");
   writeCompanyDocuments(remaining);
   return match;
-}
-
-function saveTask(entry) {
-  const tasks = readTasks();
-  createBackupSnapshot("before-task-create");
-  const normalized = normalizeTask({
-    ...entry,
-    updatedAt: new Date().toISOString()
-  });
-  tasks.unshift(normalized);
-  writeTasks(tasks);
-  return normalized;
-}
-
-function updateTask(id, updates) {
-  const tasks = readTasks();
-  const index = tasks.findIndex((task) => task.id === id);
-
-  if (index === -1) {
-    return null;
-  }
-
-  createBackupSnapshot("before-task-update");
-  const merged = normalizeTask({
-    ...tasks[index],
-    ...updates,
-    id: tasks[index].id,
-    createdAt: tasks[index].createdAt,
-    createdBy: tasks[index].createdBy,
-    completedAt:
-      updates.status === "Completed" && !tasks[index].completedAt
-        ? new Date().toISOString()
-        : updates.status && updates.status !== "Completed"
-          ? ""
-          : tasks[index].completedAt,
-    updatedAt: new Date().toISOString()
-  });
-
-  tasks[index] = merged;
-  writeTasks(tasks);
-  return merged;
-}
-
-function deleteTask(id) {
-  const tasks = readTasks();
-  const remaining = tasks.filter((task) => task.id !== id);
-
-  if (remaining.length === tasks.length) {
-    return false;
-  }
-
-  createBackupSnapshot("before-task-delete");
-  writeTasks(remaining);
-  return true;
 }
 
 function parseDateValue(value) {
@@ -1035,75 +1700,6 @@ function buildBiweeklyDigest(investments, tasks, metadata, recipients = DEFAULT_
   };
 }
 
-function saveInvestment(entry) {
-  const investments = readInvestments();
-  createBackupSnapshot("before-investment-create");
-  const normalizedEntry = normalizeInvestment({
-    ...entry,
-    updatedAt: new Date().toISOString()
-  });
-  const latestMatch = findLatestByPositionKey(
-    getInvestmentPositionKey(normalizedEntry),
-    investments
-  );
-
-  if (latestMatch && latestMatch.company) {
-    normalizedEntry.company = latestMatch.company;
-  }
-
-  investments.unshift(normalizedEntry);
-  writeInvestments(investments);
-  syncNextStepReminderTasks(investments);
-}
-
-function updateInvestment(id, updates) {
-  const investments = readInvestments();
-  const index = investments.findIndex((investment) => investment.id === id);
-
-  if (index === -1) {
-    return null;
-  }
-
-  createBackupSnapshot("before-investment-update");
-  const merged = normalizeInvestment({
-    ...investments[index],
-    ...updates,
-    id: investments[index].id,
-    companyKey: normalizeCompanyKey(updates.company || investments[index].company),
-    createdAt: investments[index].createdAt,
-    submittedBy: investments[index].submittedBy,
-    updatedAt: new Date().toISOString()
-  });
-
-  const latestMatch = findLatestByPositionKey(
-    getInvestmentPositionKey(merged),
-    investments.filter((investment) => investment.id !== id)
-  );
-
-  if (latestMatch && latestMatch.company) {
-    merged.company = latestMatch.company;
-  }
-
-  investments[index] = merged;
-  writeInvestments(investments);
-  syncNextStepReminderTasks(investments);
-  return merged;
-}
-
-function deleteInvestment(id) {
-  const investments = readInvestments();
-  const remaining = investments.filter((investment) => investment.id !== id);
-
-  if (remaining.length === investments.length) {
-    return false;
-  }
-
-  createBackupSnapshot("before-investment-delete");
-  writeInvestments(remaining);
-  syncNextStepReminderTasks(remaining);
-  return true;
-}
-
 function sortStructuredRows(rows) {
   return [...rows].sort((left, right) => {
     const rightTime = new Date(right.date || 0).getTime();
@@ -1177,6 +1773,16 @@ function buildCompanyRecords(investments, tasks = [], companyDocuments = []) {
         },
         updates,
         researchEntries: sortStructuredRows(updates.flatMap((investment) => investment.researchEntries || [])),
+        reportUpdates: sortStructuredRows(
+          updates.flatMap((investment) =>
+            (investment.reportUpdates || []).map((report) => ({
+              ...report,
+              entity: investment.entity,
+              currency: investment.currency,
+              sourceUpdateId: report.sourceUpdateId || investment.id
+            }))
+          )
+        ),
         capitalActivities: sortStructuredRows(
           updates.flatMap((investment) =>
             (investment.capitalActivity || []).map((activity) => ({
@@ -1321,16 +1927,17 @@ function getSessionUser(request) {
   return {
     email: session.email,
     name: session.name || session.email,
-    role: session.role || "editor"
+    role: normalizeUserRole(session.role || "editor"),
+    roleLabel: getRoleLabel(session.role || "editor")
   };
 }
 
 function canEdit(user) {
-  return user && !["viewer", "dashboard-viewer"].includes(user.role);
+  return Boolean(user && ["master-editor", "editor"].includes(normalizeUserRole(user.role)));
 }
 
 function canAccessOperatingViews(user) {
-  return user && user.role !== "dashboard-viewer";
+  return Boolean(user && !isDashboardViewerRole(user));
 }
 
 function sendJson(response, statusCode, payload, headers = {}) {
@@ -1415,6 +2022,78 @@ function dxnpv(rate, cashFlows) {
   }, 0);
 }
 
+function bisectXirrRoot(cashFlows, low, high) {
+  let lowValue = xnpv(low, cashFlows);
+  let highValue = xnpv(high, cashFlows);
+
+  if (Math.abs(lowValue) < 1e-7) {
+    return low;
+  }
+
+  if (Math.abs(highValue) < 1e-7) {
+    return high;
+  }
+
+  if (lowValue * highValue > 0) {
+    return null;
+  }
+
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const mid = (low + high) / 2;
+    const midValue = xnpv(mid, cashFlows);
+
+    if (Math.abs(midValue) < 1e-7) {
+      return mid;
+    }
+
+    if (lowValue * midValue <= 0) {
+      high = mid;
+      highValue = midValue;
+    } else {
+      low = mid;
+      lowValue = midValue;
+    }
+  }
+
+  return (low + high) / 2;
+}
+
+function findXirrByBrackets(cashFlows) {
+  const guesses = [
+    -0.9999, -0.95, -0.75, -0.5, -0.25, -0.1, -0.05, 0, 0.05, 0.1, 0.15, 0.25,
+    0.5, 0.75, 1, 1.5, 2, 3, 5, 10, 25, 50, 100, 250, 1000
+  ];
+  const roots = [];
+
+  for (let index = 0; index < guesses.length - 1; index += 1) {
+    const low = guesses[index];
+    const high = guesses[index + 1];
+    const lowValue = xnpv(low, cashFlows);
+    const highValue = xnpv(high, cashFlows);
+
+    if (!Number.isFinite(lowValue) || !Number.isFinite(highValue)) {
+      continue;
+    }
+
+    if (Math.abs(lowValue) < 1e-7) {
+      roots.push(low);
+      continue;
+    }
+
+    if (lowValue * highValue <= 0) {
+      const root = bisectXirrRoot(cashFlows, low, high);
+      if (Number.isFinite(root)) {
+        roots.push(root);
+      }
+    }
+  }
+
+  const uniqueRoots = roots.filter(
+    (root, index) => roots.findIndex((candidate) => Math.abs(candidate - root) < 1e-6) === index
+  );
+  return uniqueRoots.sort((left, right) => Math.abs(left - 0.15) - Math.abs(right - 0.15))[0] ?? null;
+}
+
 function calculateXirr(cashFlows) {
   if (!Array.isArray(cashFlows) || cashFlows.length < 2) {
     return null;
@@ -1452,37 +2131,7 @@ function calculateXirr(cashFlows) {
     rate = nextRate;
   }
 
-  let low = -0.9999;
-  let high = 1;
-  let lowValue = xnpv(low, sorted);
-  let highValue = xnpv(high, sorted);
-
-  for (let attempt = 0; attempt < 12 && lowValue * highValue > 0; attempt += 1) {
-    high *= 2;
-    highValue = xnpv(high, sorted);
-  }
-
-  if (lowValue * highValue > 0) {
-    return null;
-  }
-
-  for (let iteration = 0; iteration < 80; iteration += 1) {
-    const mid = (low + high) / 2;
-    const midValue = xnpv(mid, sorted);
-
-    if (Math.abs(midValue) < 1e-7) {
-      return mid;
-    }
-
-    if (lowValue * midValue <= 0) {
-      high = mid;
-    } else {
-      low = mid;
-      lowValue = midValue;
-    }
-  }
-
-  return (low + high) / 2;
+  return findXirrByBrackets(sorted);
 }
 
 function normalizeHeaderKey(value) {
@@ -1554,6 +2203,14 @@ function buildInvestmentsCsv(investments) {
   const headers = [
     "Entity",
     "Company",
+    "Asset Type",
+    "Ticker",
+    "Exchange",
+    "Shares",
+    "Cost Basis Per Share",
+    "Market Price",
+    "Market Price Date",
+    "Market Value",
     "Amount",
     "Currency",
     "Stage",
@@ -1581,6 +2238,11 @@ function buildInvestmentsCsv(investments) {
     "Contact Position",
     "Contact Email",
     "Contact Phone",
+    "Reporting Cadence",
+    "Update Request Status",
+    "Last Update Request Sent At",
+    "Last Update Request Contact",
+    "Last Update Request Subject",
     "Document Links",
     "Uploaded Documents",
     "Decision Date",
@@ -1595,6 +2257,14 @@ function buildInvestmentsCsv(investments) {
     [
       investment.entity,
       investment.company,
+      investment.assetType,
+      investment.ticker,
+      investment.exchange,
+      investment.shareCount,
+      investment.costBasisPerShare,
+      investment.marketPrice,
+      investment.marketPriceDate,
+      investment.marketValue,
       investment.amount,
       investment.currency,
       investment.stage,
@@ -1622,6 +2292,11 @@ function buildInvestmentsCsv(investments) {
       investment.contactPosition,
       investment.contactEmail,
       investment.contactPhone,
+      investment.reportingCadence,
+      investment.updateRequestStatus,
+      investment.lastUpdateRequestSentAt,
+      investment.lastUpdateRequestContact,
+      investment.lastUpdateRequestSubject,
       investment.documentLinks,
       investment.documents.map((document) => `${document.name} (${document.url})`).join(" | "),
       investment.decisionDate,
@@ -1643,6 +2318,14 @@ function buildInvestmentsWorkbookBuffer(investments) {
   const rows = investments.map((investment) => ({
     Entity: investment.entity,
     Company: investment.company,
+    "Asset Type": investment.assetType,
+    Ticker: investment.ticker,
+    Exchange: investment.exchange,
+    Shares: investment.shareCount,
+    "Cost Basis Per Share": investment.costBasisPerShare,
+    "Market Price": investment.marketPrice,
+    "Market Price Date": investment.marketPriceDate,
+    "Market Value": investment.marketValue,
     Amount: investment.amount,
     Currency: investment.currency,
     Stage: investment.stage,
@@ -1670,6 +2353,11 @@ function buildInvestmentsWorkbookBuffer(investments) {
     "Contact Position": investment.contactPosition,
     "Contact Email": investment.contactEmail,
     "Contact Phone": investment.contactPhone,
+    "Reporting Cadence": investment.reportingCadence,
+    "Update Request Status": investment.updateRequestStatus,
+    "Last Update Request Sent At": investment.lastUpdateRequestSentAt,
+    "Last Update Request Contact": investment.lastUpdateRequestContact,
+    "Last Update Request Subject": investment.lastUpdateRequestSubject,
     "Document Links": investment.documentLinks,
     "Uploaded Documents": investment.documents
       .map((document) => `${document.name} (${document.url})`)
@@ -1893,6 +2581,20 @@ function buildCompanyAnalystContext(company) {
       type: textOrNull(row.type),
       summary: textOrNull(row.summary)
     })),
+    reportUpdates: limitRows(company.reportUpdates, 6).map((row) => ({
+      date: textOrNull(row.date),
+      reportPeriod: textOrNull(row.reportPeriod),
+      type: textOrNull(row.type),
+      sourceType: textOrNull(row.sourceType),
+      title: textOrNull(row.title),
+      originalNotes: textOrNull(row.originalNotes),
+      aiSummary: textOrNull(row.aiSummary),
+      keyWins: textOrNull(row.keyWins),
+      keyRisks: textOrNull(row.keyRisks),
+      keyMetrics: textOrNull(row.keyMetrics),
+      actionItems: textOrNull(row.actionItems),
+      attachmentLink: textOrNull(row.attachmentLink)
+    })),
     documents: limitRows(company.documents, 5).map((row) => row.name).filter(Boolean),
     openTasks: limitRows(openTasks, 5).map((task) => ({
       title: textOrNull(task.title),
@@ -2003,7 +2705,7 @@ function findRelevantCompanyRecord({ companies, company, entity, question }) {
   return matched || null;
 }
 
-async function askInvestmentAnalyst({ question, company, entity }) {
+async function askInvestmentAnalyst({ question, company, entity, user }) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -2011,9 +2713,10 @@ async function askInvestmentAnalyst({ question, company, entity }) {
   }
 
   const investments = readInvestments();
-  const tasks = syncNextStepReminderTasks(investments, readTasks());
-  const companyDocuments = readCompanyDocuments();
-  const companies = buildCompanyRecords(investments, tasks, companyDocuments);
+  const visibleInvestments = filterInvestmentsForUser(investments, user);
+  const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
+  const companyDocuments = filterCompanyDocumentsForUser(readCompanyDocuments(), user, investments);
+  const companies = buildCompanyRecords(visibleInvestments, tasks, companyDocuments);
   const matchedCompany = findRelevantCompanyRecord({ companies, company, entity, question });
 
   const context = matchedCompany
@@ -2023,7 +2726,7 @@ async function askInvestmentAnalyst({ question, company, entity }) {
       }
     : {
         scope: "portfolio",
-        portfolio: buildPortfolioAnalystContext(investments, tasks, companyDocuments)
+        portfolio: buildPortfolioAnalystContext(visibleInvestments, tasks, companyDocuments)
       };
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -2318,6 +3021,11 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
           contactPosition: String(row["Contact Position"] || "").trim(),
           contactEmail: String(row["Contact Email"] || "").trim(),
           contactPhone: String(row["Contact Phone"] || "").trim(),
+          reportingCadence: String(row["Reporting Cadence"] || "").trim(),
+          updateRequestStatus: String(row["Update Request Status"] || "").trim(),
+          lastUpdateRequestSentAt: String(row["Last Update Request Sent At"] || "").trim(),
+          lastUpdateRequestContact: String(row["Last Update Request Contact"] || "").trim(),
+          lastUpdateRequestSubject: String(row["Last Update Request Subject"] || "").trim(),
           documentLinks: String(row["Document Links"] || "").trim(),
           documents: [],
           decisionDate: String(row["Decision Date"] || "").trim(),
@@ -2454,6 +3162,11 @@ function importWorkbookIntoInvestments(buffer, sessionUser, sourceName = "") {
             contactPosition: "Lead contact",
             contactEmail: "",
             contactPhone: "",
+            reportingCadence: "",
+            updateRequestStatus: "",
+            lastUpdateRequestSentAt: "",
+            lastUpdateRequestContact: "",
+            lastUpdateRequestSubject: "",
             documentLinks: "",
             documents: [],
             decisionDate: "",
@@ -2832,21 +3545,46 @@ function extractResponseText(payload) {
   return fragments.join("\n").trim();
 }
 
-async function summarizeDeck({ filename, fileData, company, stage }) {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("OpenAI summarization is not configured yet.");
+function extractJsonObject(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return null;
   }
 
-  const companyLine = company ? `Company: ${company}` : "Company: Not provided";
-  const stageLine = stage ? `Stage: ${stage}` : "Stage: Not provided";
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+    try {
+      return JSON.parse(match[0]);
+    } catch (error) {
+      return null;
+    }
+  }
+}
+
+function getUploadMimeType(filename) {
+  const extension = path.extname(String(filename || "")).toLowerCase();
+  return (
+    {
+      ".pdf": "application/pdf",
+      ".txt": "text/plain",
+      ".md": "text/markdown"
+    }[extension] || "application/octet-stream"
+  );
+}
+
+async function uploadOpenAiUserFile({ filename, fileData }) {
+  const apiKey = process.env.OPENAI_API_KEY;
   const fileBytes = Buffer.from(fileData, "base64");
   const uploadForm = new FormData();
-  const pdfBlob = new Blob([fileBytes], { type: "application/pdf" });
+  const fileBlob = new Blob([fileBytes], { type: getUploadMimeType(filename) });
 
   uploadForm.append("purpose", "user_data");
-  uploadForm.append("file", pdfBlob, filename);
+  uploadForm.append("file", fileBlob, filename);
 
   const uploadResponse = await fetch("https://api.openai.com/v1/files", {
     method: "POST",
@@ -2862,11 +3600,40 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
   }
 
   const uploadedFile = await uploadResponse.json();
-  const fileId = uploadedFile.id;
-
-  if (!fileId) {
+  if (!uploadedFile.id) {
     throw new Error("OpenAI file upload did not return a file ID.");
   }
+
+  return uploadedFile.id;
+}
+
+function formatOpenAiError(errorText, fallback) {
+  if (String(errorText || "").includes("insufficient_quota")) {
+    return "OpenAI summary failed: your OpenAI API account needs billing or more quota before summaries can run.";
+  }
+
+  try {
+    const parsed = JSON.parse(errorText);
+    if (parsed && parsed.error && parsed.error.message) {
+      return `OpenAI summary failed: ${parsed.error.message}`;
+    }
+  } catch (_) {
+    // Keep the original response below.
+  }
+
+  return `${fallback}: ${errorText}`;
+}
+
+async function summarizeDeck({ filename, fileData, company, stage }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI summarization is not configured yet.");
+  }
+
+  const companyLine = company ? `Company: ${company}` : "Company: Not provided";
+  const stageLine = stage ? `Stage: ${stage}` : "Stage: Not provided";
+  const fileId = await uploadOpenAiUserFile({ filename, fileData });
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -2929,6 +3696,87 @@ async function summarizeDeck({ filename, fileData, company, stage }) {
   }
 
   return summary;
+}
+
+async function summarizeReportFile({ filename, fileData, company, entity, reportPeriod, updateType }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OpenAI summarization is not configured yet.");
+  }
+
+  const fileId = await uploadOpenAiUserFile({ filename, fileData });
+  const contextLines = [
+    company ? `Company: ${company}` : "Company: Not provided",
+    entity ? `Entity: ${entity}` : "Entity: Not provided",
+    reportPeriod ? `Report period: ${reportPeriod}` : "Report period: Not provided",
+    updateType ? `Update type: ${updateType}` : "Update type: Not provided"
+  ].join("\n");
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                "Read this investment update/report file and return JSON only.",
+                "Return exactly these keys:",
+                "title, originalNotes, aiSummary, keyMetrics, keyWins, keyRisks, actionItems.",
+                "",
+                "Rules:",
+                "- Be concise and practical for an internal family office update timeline.",
+                "- aiSummary should be a short paragraph or 3-5 bullets covering the overall update.",
+                "- keyMetrics should include financial, operating, runway, valuation, pipeline, or KPI details if present.",
+                "- keyWins should capture positive developments and momentum.",
+                "- keyRisks should capture risks, misses, delays, concerns, or open questions.",
+                "- actionItems should capture follow-ups, requested materials, decisions needed, or next steps.",
+                "- originalNotes should be a brief source note, not a full transcription.",
+                "- If a field is not clearly stated, use an empty string for that field.",
+                "- Do not invent facts.",
+                "",
+                contextLines
+              ].join("\n")
+            },
+            {
+              type: "input_file",
+              file_id: fileId
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(formatOpenAiError(errorText, "OpenAI report summary failed"));
+  }
+
+  const payload = await response.json();
+  const text = extractResponseText(payload);
+  const parsed = extractJsonObject(text);
+  if (!parsed) {
+    throw new Error("OpenAI did not return structured report fields.");
+  }
+
+  return {
+    title: String(parsed.title || "").trim(),
+    originalNotes: String(parsed.originalNotes || "").trim(),
+    aiSummary: String(parsed.aiSummary || "").trim(),
+    keyMetrics: String(parsed.keyMetrics || "").trim(),
+    keyWins: String(parsed.keyWins || "").trim(),
+    keyRisks: String(parsed.keyRisks || "").trim(),
+    actionItems: String(parsed.actionItems || "").trim()
+  };
 }
 
 async function summarizeEmail({ emailText, company, stage }) {
@@ -3191,9 +4039,10 @@ function buildSummary(entry) {
   return { subject, text, html };
 }
 
-async function sendEmail(summary, recipients) {
+async function sendEmail(summary, recipients, options = {}) {
   const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.FROM_EMAIL;
+  const fromEmail = String(options.from || process.env.FROM_EMAIL || "").trim();
+  const replyToEmail = String(options.replyTo || "").trim();
 
   if (!apiKey || !fromEmail || recipients.length === 0) {
     return {
@@ -3214,7 +4063,8 @@ async function sendEmail(summary, recipients) {
       to: recipients,
       subject: summary.subject,
       html: summary.html,
-      text: summary.text
+      text: summary.text,
+      ...(replyToEmail ? { reply_to: replyToEmail } : {})
     })
   });
 
@@ -3226,7 +4076,137 @@ async function sendEmail(summary, recipients) {
   const result = await resendResponse.json();
   return {
     sent: true,
-    id: result.id || null
+    id: result.id || null,
+    from: fromEmail,
+    replyTo: replyToEmail || fromEmail
+  };
+}
+
+function getUpdateRequestFromEmail() {
+  return String(process.env.UPDATE_REQUEST_FROM_EMAIL || DEFAULT_UPDATE_REQUEST_EMAIL).trim();
+}
+
+function getUpdateRequestReplyToEmail() {
+  return String(
+    process.env.UPDATE_REQUEST_REPLY_TO_EMAIL ||
+      process.env.UPDATE_REQUEST_FROM_EMAIL ||
+      DEFAULT_UPDATE_REQUEST_EMAIL
+  ).trim();
+}
+
+function plainTextToHtml(text) {
+  return `<div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6; max-width: 640px; margin: 0 auto; white-space: pre-wrap;">${escapeHtml(text)}</div>`;
+}
+
+function normalizeMaterialsRequested(value) {
+  const allowed = new Set([
+    "Latest investor update",
+    "Updated financials",
+    "Current cash balance / runway",
+    "Revenue / EBITDA metrics",
+    "Pipeline updates",
+    "Capital needs",
+    "Major risks or changes",
+    "Updated cap table"
+  ]);
+
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter((item) => allowed.has(item))
+    : [];
+}
+
+function buildUpdateRequestDraft(investment, materialsRequested = []) {
+  const companyName = investment.company || "the company";
+  const contactName = investment.contactName || "there";
+  const subject = `Request for Latest Update – ${companyName}`;
+  const materials = normalizeMaterialsRequested(materialsRequested);
+  const materialsSentence = materials.length
+    ? `\n\nSpecifically, it would be helpful to include: ${materials.join(", ")}.`
+    : "";
+  const body = [
+    `Hi ${contactName},`,
+    "",
+    `I hope you’re doing well. I’m working through our investment updates and wanted to see if you could send over the latest update for ${companyName} when you have a chance.`,
+    "",
+    `If available, it would be helpful to include any recent investor materials, updated financials, current cash/runway, revenue or operating metrics, major developments, and any expected capital needs or key risks we should be aware of.${materialsSentence}`,
+    "",
+    "Thanks,",
+    "Tyler"
+  ]
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+
+  return { subject, body, materialsRequested: materials };
+}
+
+async function sendUpdateRequestEmail(investmentId, payload, user) {
+  const investments = readInvestments();
+  const investment = investments.find((item) => item.id === investmentId);
+  if (!investment) {
+    return { error: "Investment update not found.", statusCode: 404 };
+  }
+
+  const recipient = String(payload.recipient || investment.contactEmail || "").trim();
+  if (!recipient) {
+    return { error: "Add a primary contact email before requesting an update.", statusCode: 400 };
+  }
+
+  const materialsRequested = normalizeMaterialsRequested(payload.materialsRequested);
+  const draft = buildUpdateRequestDraft(investment, materialsRequested);
+  const subject = String(payload.subject || draft.subject).trim();
+  const body = String(payload.body || draft.body).trim();
+  if (!subject || !body) {
+    return { error: "Subject and body are required before sending.", statusCode: 400 };
+  }
+
+  const email = await sendEmail(
+    {
+      subject,
+      text: body,
+      html: plainTextToHtml(body)
+    },
+    [recipient],
+    {
+      from: getUpdateRequestFromEmail(),
+      replyTo: getUpdateRequestReplyToEmail()
+    }
+  );
+
+  if (!email.sent) {
+    return { error: "Email sending is not configured yet.", statusCode: 500 };
+  }
+
+  const sentAt = new Date().toISOString();
+  const timelineEntry = normalizeStructuredRow({
+    date: sentAt,
+    type: "Update Request",
+    title: "Latest update requested",
+    sourceType: "Email",
+    contactEmailed: recipient,
+    subjectLine: subject,
+    responseStatus: "Sent",
+    materialsRequested,
+    actionItems: "Awaiting response. Follow up if no response is received within 7 days.",
+    originalNotes: body,
+    sourceUpdateId: investment.id
+  });
+  const updated = updateInvestment(investment.id, {
+    ...investment,
+    reportUpdates: [timelineEntry, ...normalizeStructuredRows(investment.reportUpdates)],
+    updateRequestStatus: "Requested",
+    lastUpdateRequestSentAt: sentAt,
+    lastUpdateRequestContact: recipient,
+    lastUpdateRequestSubject: subject
+  });
+
+  return {
+    value: {
+      message: "Update request email sent.",
+      email,
+      investment: updated,
+      timelineEntry,
+      sentBy: user.email
+    }
   };
 }
 
@@ -3249,7 +4229,7 @@ function validateLogin(payload) {
       return { error: "Incorrect password." };
     }
 
-    return { value: email, role: teamUser.role || "editor" };
+    return { value: email, role: normalizeUserRole(teamUser.role || "editor") };
   }
 
   if (!sharedPassword) {
@@ -3264,7 +4244,7 @@ function validateLogin(payload) {
     return { error: "Incorrect password." };
   }
 
-  return { value: email, role: "editor" };
+  return { value: email, role: normalizeUserRole(process.env.TEAM_SHARED_ROLE || "master-editor") };
 }
 
 function validateTaskSubmission(payload, sessionUser) {
@@ -3313,6 +4293,74 @@ function validateSubmission(payload, sessionUser) {
   const clean = normalizeInvestment({
     company: payload.company,
     entity: payload.entity,
+    assetType: payload.assetType,
+    ticker: payload.ticker,
+    exchange: payload.exchange,
+    shareCount: payload.shareCount,
+    costBasisPerShare: payload.costBasisPerShare,
+    marketPrice: payload.marketPrice,
+    marketPriceDate: payload.marketPriceDate,
+    marketValue: payload.marketValue,
+    bondIssuer: payload.bondIssuer,
+    bondDescription: payload.bondDescription,
+    bondType: payload.bondType,
+    bondCusip: payload.bondCusip,
+    bondEntityOwner: payload.bondEntityOwner,
+    bondParValue: payload.bondParValue,
+    bondPurchasePrice: payload.bondPurchasePrice,
+    bondPurchaseDate: payload.bondPurchaseDate,
+    bondCostBasis: payload.bondCostBasis,
+    bondCouponRate: payload.bondCouponRate,
+    bondCouponFrequency: payload.bondCouponFrequency,
+    bondMaturityDate: payload.bondMaturityDate,
+    bondCallDate: payload.bondCallDate,
+    bondCallPrice: payload.bondCallPrice,
+    bondCurrentPrice: payload.bondCurrentPrice,
+    bondMarketPriceDate: payload.bondMarketPriceDate,
+    bondMarketValue: payload.bondMarketValue,
+    bondYieldToMaturity: payload.bondYieldToMaturity,
+    bondYieldToCall: payload.bondYieldToCall,
+    bondCurrentYield: payload.bondCurrentYield,
+    bondCreditRating: payload.bondCreditRating,
+    bondInsurer: payload.bondInsurer,
+    bondTaxStatus: payload.bondTaxStatus,
+    bondAccruedInterest: payload.bondAccruedInterest,
+    realEstatePropertyName: payload.realEstatePropertyName,
+    realEstateAddress: payload.realEstateAddress,
+    realEstateCity: payload.realEstateCity,
+    realEstateState: payload.realEstateState,
+    realEstateZip: payload.realEstateZip,
+    realEstateEntityOwner: payload.realEstateEntityOwner,
+    realEstatePropertyType: payload.realEstatePropertyType,
+    realEstateOwnershipPercent: payload.realEstateOwnershipPercent,
+    realEstateOwnershipNotes: payload.realEstateOwnershipNotes,
+    realEstateAcquisitionDate: payload.realEstateAcquisitionDate,
+    realEstatePurchasePrice: payload.realEstatePurchasePrice,
+    realEstateCostBasis: payload.realEstateCostBasis,
+    realEstateAppraisedValue: payload.realEstateAppraisedValue,
+    realEstateAppraisalDate: payload.realEstateAppraisalDate,
+    realEstateAppraiser: payload.realEstateAppraiser,
+    realEstateAppraisalDocument: payload.realEstateAppraisalDocument,
+    realEstateInternalValueOverride: payload.realEstateInternalValueOverride,
+    realEstateInternalValueDate: payload.realEstateInternalValueDate,
+    realEstateDebt: payload.realEstateDebt,
+    realEstateLoanLender: payload.realEstateLoanLender,
+    realEstateDebtInterestRate: payload.realEstateDebtInterestRate,
+    realEstateDebtMaturityDate: payload.realEstateDebtMaturityDate,
+    realEstateDebtService: payload.realEstateDebtService,
+    realEstateLoanNotes: payload.realEstateLoanNotes,
+    realEstateNoi: payload.realEstateNoi,
+    realEstateRevenue: payload.realEstateRevenue,
+    realEstateCapRate: payload.realEstateCapRate,
+    realEstateNoiMargin: payload.realEstateNoiMargin,
+    realEstateOccupancy: payload.realEstateOccupancy,
+    realEstateSquareFootage: payload.realEstateSquareFootage,
+    realEstateAcreage: payload.realEstateAcreage,
+    realEstateUnits: payload.realEstateUnits,
+    realEstatePropertyTaxes: payload.realEstatePropertyTaxes,
+    realEstateInsurance: payload.realEstateInsurance,
+    realEstateOtherExpenses: payload.realEstateOtherExpenses,
+    realEstateOperatingNotes: payload.realEstateOperatingNotes,
     amount: payload.amount,
     currency: payload.currency,
     stage: payload.stage,
@@ -3341,11 +4389,17 @@ function validateSubmission(payload, sessionUser) {
     contactPosition: payload.contactPosition,
     contactEmail: payload.contactEmail,
     contactPhone: payload.contactPhone,
+    reportingCadence: payload.reportingCadence,
+    updateRequestStatus: payload.updateRequestStatus,
+    lastUpdateRequestSentAt: payload.lastUpdateRequestSentAt,
+    lastUpdateRequestSubject: payload.lastUpdateRequestSubject,
+    lastUpdateRequestContact: payload.lastUpdateRequestContact,
     documentLinks: payload.documentLinks,
     documents: payload.documents,
     decisionDate: payload.decisionDate,
     decisionType: payload.decisionType,
     decisionSummary: payload.decisionSummary,
+    reportUpdates: payload.reportUpdates,
     recipients: payload.recipients,
     submittedBy: sessionUser.email,
     createdAt: new Date().toISOString()
@@ -3370,6 +4424,74 @@ function validateInvestmentPatch(payload) {
   const clean = {
     company: String(payload.company || "").trim(),
     entity: String(payload.entity || "").trim(),
+    assetType: String(payload.assetType || "Private Investment").trim() || "Private Investment",
+    ticker: String(payload.ticker || "").trim().toUpperCase(),
+    exchange: String(payload.exchange || "").trim().toUpperCase(),
+    shareCount: String(payload.shareCount || "").trim(),
+    costBasisPerShare: String(payload.costBasisPerShare || "").trim(),
+    marketPrice: String(payload.marketPrice || "").trim(),
+    marketPriceDate: String(payload.marketPriceDate || "").trim(),
+    marketValue: String(payload.marketValue || "").trim(),
+    bondIssuer: String(payload.bondIssuer || "").trim(),
+    bondDescription: String(payload.bondDescription || "").trim(),
+    bondType: String(payload.bondType || "").trim(),
+    bondCusip: String(payload.bondCusip || "").trim().toUpperCase(),
+    bondEntityOwner: String(payload.bondEntityOwner || "").trim(),
+    bondParValue: String(payload.bondParValue || "").trim(),
+    bondPurchasePrice: String(payload.bondPurchasePrice || "").trim(),
+    bondPurchaseDate: String(payload.bondPurchaseDate || "").trim(),
+    bondCostBasis: String(payload.bondCostBasis || "").trim(),
+    bondCouponRate: String(payload.bondCouponRate || "").trim(),
+    bondCouponFrequency: String(payload.bondCouponFrequency || "").trim(),
+    bondMaturityDate: String(payload.bondMaturityDate || "").trim(),
+    bondCallDate: String(payload.bondCallDate || "").trim(),
+    bondCallPrice: String(payload.bondCallPrice || "").trim(),
+    bondCurrentPrice: String(payload.bondCurrentPrice || "").trim(),
+    bondMarketPriceDate: String(payload.bondMarketPriceDate || "").trim(),
+    bondMarketValue: String(payload.bondMarketValue || "").trim(),
+    bondYieldToMaturity: String(payload.bondYieldToMaturity || "").trim(),
+    bondYieldToCall: String(payload.bondYieldToCall || "").trim(),
+    bondCurrentYield: String(payload.bondCurrentYield || "").trim(),
+    bondCreditRating: String(payload.bondCreditRating || "").trim(),
+    bondInsurer: String(payload.bondInsurer || "").trim(),
+    bondTaxStatus: String(payload.bondTaxStatus || "").trim(),
+    bondAccruedInterest: String(payload.bondAccruedInterest || "").trim(),
+    realEstatePropertyName: String(payload.realEstatePropertyName || "").trim(),
+    realEstateAddress: String(payload.realEstateAddress || "").trim(),
+    realEstateCity: String(payload.realEstateCity || "").trim(),
+    realEstateState: String(payload.realEstateState || "").trim(),
+    realEstateZip: String(payload.realEstateZip || "").trim(),
+    realEstateEntityOwner: String(payload.realEstateEntityOwner || "").trim(),
+    realEstatePropertyType: String(payload.realEstatePropertyType || "").trim(),
+    realEstateOwnershipPercent: String(payload.realEstateOwnershipPercent || "").trim(),
+    realEstateOwnershipNotes: String(payload.realEstateOwnershipNotes || "").trim(),
+    realEstateAcquisitionDate: String(payload.realEstateAcquisitionDate || "").trim(),
+    realEstatePurchasePrice: String(payload.realEstatePurchasePrice || "").trim(),
+    realEstateCostBasis: String(payload.realEstateCostBasis || "").trim(),
+    realEstateAppraisedValue: String(payload.realEstateAppraisedValue || "").trim(),
+    realEstateAppraisalDate: String(payload.realEstateAppraisalDate || "").trim(),
+    realEstateAppraiser: String(payload.realEstateAppraiser || "").trim(),
+    realEstateAppraisalDocument: String(payload.realEstateAppraisalDocument || "").trim(),
+    realEstateInternalValueOverride: String(payload.realEstateInternalValueOverride || "").trim(),
+    realEstateInternalValueDate: String(payload.realEstateInternalValueDate || "").trim(),
+    realEstateDebt: String(payload.realEstateDebt || "").trim(),
+    realEstateLoanLender: String(payload.realEstateLoanLender || "").trim(),
+    realEstateDebtInterestRate: String(payload.realEstateDebtInterestRate || "").trim(),
+    realEstateDebtMaturityDate: String(payload.realEstateDebtMaturityDate || "").trim(),
+    realEstateDebtService: String(payload.realEstateDebtService || "").trim(),
+    realEstateLoanNotes: String(payload.realEstateLoanNotes || "").trim(),
+    realEstateNoi: String(payload.realEstateNoi || "").trim(),
+    realEstateRevenue: String(payload.realEstateRevenue || "").trim(),
+    realEstateCapRate: String(payload.realEstateCapRate || "").trim(),
+    realEstateNoiMargin: String(payload.realEstateNoiMargin || "").trim(),
+    realEstateOccupancy: String(payload.realEstateOccupancy || "").trim(),
+    realEstateSquareFootage: String(payload.realEstateSquareFootage || payload.realEstateSize || "").trim(),
+    realEstateAcreage: String(payload.realEstateAcreage || "").trim(),
+    realEstateUnits: String(payload.realEstateUnits || "").trim(),
+    realEstatePropertyTaxes: String(payload.realEstatePropertyTaxes || "").trim(),
+    realEstateInsurance: String(payload.realEstateInsurance || "").trim(),
+    realEstateOtherExpenses: String(payload.realEstateOtherExpenses || "").trim(),
+    realEstateOperatingNotes: String(payload.realEstateOperatingNotes || "").trim(),
     amount: String(payload.amount || "").trim(),
     currency: String(payload.currency || "USD").trim() || "USD",
     stage: String(payload.stage || "").trim(),
@@ -3398,11 +4520,19 @@ function validateInvestmentPatch(payload) {
     contactPosition: String(payload.contactPosition || "").trim(),
     contactEmail: String(payload.contactEmail || "").trim(),
     contactPhone: String(payload.contactPhone || "").trim(),
+    reportingCadence: normalizeReportingCadence(payload.reportingCadence),
+    updateRequestStatus: normalizeUpdateRequestStatus(payload.updateRequestStatus),
+    lastUpdateRequestSentAt: String(payload.lastUpdateRequestSentAt || "").trim(),
+    lastUpdateRequestSubject: String(payload.lastUpdateRequestSubject || "").trim(),
+    lastUpdateRequestContact: String(payload.lastUpdateRequestContact || "").trim(),
     documentLinks: String(payload.documentLinks || "").trim(),
     documents: normalizeDocuments(payload.documents),
     decisionDate: String(payload.decisionDate || "").trim(),
     decisionType: String(payload.decisionType || "").trim(),
     decisionSummary: String(payload.decisionSummary || "").trim(),
+    ...(payload.reportUpdates !== undefined
+      ? { reportUpdates: normalizeStructuredRows(payload.reportUpdates) }
+      : {}),
     recipients: Array.isArray(payload.recipients)
       ? payload.recipients.map((value) => String(value).trim()).filter(Boolean)
       : []
@@ -3463,6 +4593,20 @@ function requireOperatingViewer(request, response) {
   return user;
 }
 
+function requireMasterEditor(request, response) {
+  const user = requireAuth(request, response);
+  if (!user) {
+    return null;
+  }
+
+  if (!canUseAdminFeature(user)) {
+    sendJson(response, 403, { error: "Master Editor access is required for this action." });
+    return null;
+  }
+
+  return user;
+}
+
 process.on("uncaughtException", (error) => {
   console.error("Uncaught exception:", error);
 });
@@ -3491,7 +4635,10 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/api/config") {
     const user = getSessionUser(request);
     const metadata = readMetadata();
-    const tasks = syncNextStepReminderTasks();
+    const investments = readInvestments();
+    const tasks = user
+      ? filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments)
+      : [];
     const openReminderCount = tasks.filter(
       (task) =>
         task.autoManaged &&
@@ -3501,8 +4648,28 @@ const server = http.createServer(async (request, response) => {
     sendJson(response, 200, {
       defaultRecipients: DEFAULT_RECIPIENTS,
       emailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL),
+      updateRequestEmailConfigured: Boolean(
+        process.env.RESEND_API_KEY && getUpdateRequestFromEmail()
+      ),
+      updateRequestFromEmail: getUpdateRequestFromEmail(),
+      updateRequestReplyToEmail: getUpdateRequestReplyToEmail(),
       aiConfigured: Boolean(process.env.OPENAI_API_KEY),
-      entities: INVESTMENT_ENTITIES,
+      aiEmailIntake: {
+        enabled: AI_EMAIL_INTAKE_ENABLED,
+        configured: AI_EMAIL_INTAKE_ENABLED && microsoftGraphMailService.isConfigured(),
+        mailboxUser: AI_EMAIL_INTAKE_ENABLED
+          ? microsoftGraphMailService.getSafeConfigStatus().mailboxUser
+          : "",
+        folderName: AI_EMAIL_INTAKE_ENABLED
+          ? microsoftGraphMailService.getSafeConfigStatus().folderName
+          : "",
+        maxMessagesPerRun: AI_EMAIL_INTAKE_ENABLED
+          ? microsoftGraphMailService.getSafeConfigStatus().maxMessagesPerRun
+          : 0,
+        allowedSendersConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_SENDERS),
+        allowedDomainsConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_DOMAINS)
+      },
+      entities: INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity)),
       familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
       authConfigured: Boolean(
         (process.env.TEAM_PASSWORD || Object.keys(TEAM_USERS).length > 0) && process.env.SESSION_SECRET
@@ -3512,6 +4679,7 @@ const server = http.createServer(async (request, response) => {
       schemaVersion: metadata.schemaVersion,
       lastBackupAt: metadata.lastBackupAt,
       lastDigestSentAt: metadata.lastDigestSentAt,
+      dismissedDataAlerts: metadata.dismissedDataAlerts,
       nextDigestDueAt: metadata.lastDigestSentAt
         ? addDays(metadata.lastDigestSentAt, DIGEST_WINDOW_DAYS).toISOString()
         : addDays(new Date(), DIGEST_WINDOW_DAYS).toISOString(),
@@ -3520,6 +4688,63 @@ const server = http.createServer(async (request, response) => {
       user
     });
     return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/stock-quote") {
+    const user = requireAuth(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const quote = await fetchStockQuote(url.searchParams.get("ticker"));
+      sendJson(response, 200, quote);
+      return;
+    } catch (error) {
+      const message =
+        error && error.name === "AbortError"
+          ? "Stock quote lookup timed out. Try again in a moment."
+          : error.publicMessage || error.message || "Stock quote could not be loaded.";
+      sendJson(response, error.statusCode || 502, { error: message });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/data-alerts/dismiss") {
+    const user = getSessionUser(request);
+    if (!canEdit(user)) {
+      sendJson(response, 403, { error: "Only editors can dismiss data alerts." });
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const alertKey = String((payload && payload.alertKey) || "").trim();
+      if (!alertKey) {
+        sendJson(response, 400, { error: "Alert key is required." });
+        return;
+      }
+
+      const metadata = readMetadata();
+      const dismissedDataAlerts = { ...(metadata.dismissedDataAlerts || {}) };
+      const now = new Date();
+
+      Object.entries(dismissedDataAlerts).forEach(([key, dismissedUntil]) => {
+        const parsed = parseDateValue(dismissedUntil, null);
+        if (!parsed || parsed.getTime() <= now.getTime()) {
+          delete dismissedDataAlerts[key];
+        }
+      });
+
+      const dismissedUntil = addDays(now, 30).toISOString();
+      dismissedDataAlerts[alertKey] = dismissedUntil;
+      writeMetadata({ dismissedDataAlerts });
+      sendJson(response, 200, { ok: true, alertKey, dismissedUntil, dismissedDataAlerts });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Unexpected server error." });
+      return;
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/session") {
@@ -3533,10 +4758,11 @@ const server = http.createServer(async (request, response) => {
       }
 
       const expiresAt = Date.now() + SESSION_DURATION_MS;
+      const role = normalizeUserRole(validation.role || "editor");
       const sessionValue = signSession({
         email: validation.value,
         name: validation.value,
-        role: validation.role || "editor",
+        role,
         expiresAt
       });
 
@@ -3548,7 +4774,8 @@ const server = http.createServer(async (request, response) => {
           user: {
             email: validation.value,
             name: validation.value,
-            role: validation.role || "editor"
+            role,
+            roleLabel: getRoleLabel(role)
           }
         },
         {
@@ -3581,12 +4808,369 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investments = readInvestments();
-    const tasks = syncNextStepReminderTasks(investments, readTasks());
-    const companyDocuments = readCompanyDocuments();
+    const visibleInvestments = filterInvestmentsForUser(investments, user);
+    const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
+    const companyDocuments = filterCompanyDocumentsForUser(readCompanyDocuments(), user, investments);
     sendJson(response, 200, {
-      investments,
-      companies: buildCompanyRecords(investments, tasks, companyDocuments),
+      investments: visibleInvestments,
+      companies: buildCompanyRecords(visibleInvestments, tasks, companyDocuments),
       user
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ai-update-proposals") {
+    const user = requireOperatingViewer(request, response);
+    if (!user) {
+      return;
+    }
+
+    const investments = readInvestments();
+    const proposals = filterAiUpdateProposalsForUser(
+      readAiUpdateProposals(),
+      user,
+      investments
+    );
+    sendJson(response, 200, {
+      proposals: proposals.map((proposal) => serializeAiUpdateProposal(proposal, investments)),
+      counts: AI_UPDATE_PROPOSAL_STATUSES.reduce((counts, status) => {
+        counts[status] = proposals.filter((proposal) => proposal.status === status).length;
+        return counts;
+      }, {}),
+      user
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-email-intake/check") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+    if (!AI_EMAIL_INTAKE_ENABLED) {
+      sendJson(response, 400, {
+        error: "Microsoft 365 email intake is disabled. Set AI_EMAIL_INTAKE_ENABLED=true after configuring Microsoft Graph."
+      });
+      return;
+    }
+
+    try {
+      const result = await aiEmailIntakeService.checkForNewEmails({ user });
+      const status = result.configured === false ? 400 : 200;
+      sendJson(response, status, result);
+      return;
+    } catch (error) {
+      sendJson(response, error.statusCode || 500, {
+        checked: 0,
+        processed: 0,
+        skipped: 0,
+        failed: 1,
+        proposalsCreated: 0,
+        error: error.message || "Microsoft 365 email intake failed.",
+        results: []
+      });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-update-proposals/analyze") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const analyzedAt = new Date().toISOString();
+    try {
+      const payload = await parseRequestBody(request);
+      const investments = filterInvestmentsForUser(readInvestments(), user);
+      const entities = INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity));
+      const selectedInvestmentId = String(payload.investmentId || "").trim();
+      const selectedEntityId = String(payload.entityId || "").trim();
+      const selectedInvestment = selectedInvestmentId
+        ? investments.find((investment) => investment.id === selectedInvestmentId)
+        : null;
+
+      if (selectedInvestmentId && !selectedInvestment) {
+        sendJson(response, 403, { error: "Selected investment is not available." });
+        return;
+      }
+
+      const result = await analyzeInvestmentUpdate({
+        source: {
+          sourceType: payload.sourceType,
+          sender: payload.sender,
+          subject: payload.subject,
+          sourceDate: payload.sourceDate,
+          sourceIdentifier:
+            payload.sourceIdentifier ||
+            [payload.sourceType, payload.sender, payload.subject, payload.sourceDate]
+              .map((item) => String(item || "").trim())
+              .filter(Boolean)
+              .join(" | "),
+          sourceText: payload.sourceText
+        },
+        investments,
+        entities,
+        investmentOverrideId: selectedInvestmentId,
+        entityOverrideId: selectedEntityId
+      });
+      console.log(
+        "[ai-update-analysis]",
+        JSON.stringify({
+          analyzedAt,
+          sourceIdentifier: result.source.sourceIdentifier || result.source.subject || "",
+          investmentId: result.analysis.investmentMatch.investmentId,
+          investmentName: result.analysis.investmentMatch.investmentName,
+          matchConfidence: result.analysis.investmentMatch.confidence,
+          succeeded: true
+        })
+      );
+
+      result.analysis = finalizeAnalysisForResponse(result.analysis);
+      sendJson(response, 200, result);
+      return;
+    } catch (error) {
+      console.warn(
+        "[ai-update-analysis]",
+        JSON.stringify({
+          analyzedAt,
+          succeeded: false,
+          error: error.message || "Analysis failed"
+        })
+      );
+      sendJson(response, 500, { error: error.message || "AI update analysis failed." });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-update-proposals/analyze-document") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const analyzedAt = new Date().toISOString();
+    try {
+      const payload = await parseRequestBody(request);
+      const investments = filterInvestmentsForUser(readInvestments(), user);
+      const entities = INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity));
+      const selectedInvestmentId = String(payload.investmentId || "").trim();
+      const selectedEntityId = String(payload.entityId || "").trim();
+      const selectedInvestment = selectedInvestmentId
+        ? investments.find((investment) => investment.id === selectedInvestmentId)
+        : null;
+
+      if (selectedInvestmentId && !selectedInvestment) {
+        sendJson(response, 403, { error: "Selected investment is not available." });
+        return;
+      }
+
+      const extracted = await extractPdfTextFromUpload({
+        filename: payload.filename,
+        mimeType: payload.mimeType,
+        fileData: payload.fileData
+      });
+      const sourceIdentifier =
+        payload.sourceIdentifier ||
+        [payload.sourceType || "PDF", payload.sender, payload.subject, payload.sourceDate, extracted.filename]
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+          .join(" | ");
+      const result = await analyzeInvestmentUpdate({
+        source: {
+          sourceType: payload.sourceType || "PDF",
+          sender: payload.sender,
+          subject: payload.subject,
+          sourceDate: payload.sourceDate,
+          sourceIdentifier,
+          filename: extracted.filename,
+          pageCount: extracted.pageCount,
+          pages: extracted.pages,
+          sourceText: extracted.combinedText
+        },
+        investments,
+        entities,
+        investmentOverrideId: selectedInvestmentId,
+        entityOverrideId: selectedEntityId
+      });
+      const diagnostics = extracted.diagnostics || {};
+      const financialWarnings = Array.isArray(diagnostics.financialImageHeavyPages)
+        ? diagnostics.financialImageHeavyPages.map(
+            (pageNumber) =>
+              `Financial statement page ${pageNumber} contained insufficient extractable text for reliable metric extraction.`
+          )
+        : [];
+      result.analysis.warnings = Array.from(
+        new Set([...(result.analysis.warnings || []), ...financialWarnings])
+      );
+
+      ensureDataFile();
+      const storedName = safeFilename(extracted.filename);
+      const filePath = path.join(UPLOADS_DIR, storedName);
+      fs.writeFileSync(filePath, extracted.buffer);
+      const document = {
+        id: makeId(),
+        name: extracted.filename,
+        storedName,
+        url: `/uploads/${storedName}`,
+        uploadedAt: analyzedAt,
+        uploadedBy: user.email
+      };
+
+      result.document = document;
+      result.source = {
+        ...result.source,
+        filename: extracted.filename,
+        pageCount: extracted.pageCount,
+        sourceIdentifier,
+        diagnostics
+      };
+      result.diagnostics = diagnostics;
+
+      console.log(
+        "[ai-update-analysis]",
+        JSON.stringify({
+          analyzedAt,
+          sourceIdentifier,
+          filename: extracted.filename,
+          pageCount: extracted.pageCount,
+          extractedTextLength: extracted.extractedTextLength,
+          investmentId: result.analysis.investmentMatch.investmentId,
+          investmentName: result.analysis.investmentMatch.investmentName,
+          matchConfidence: result.analysis.investmentMatch.confidence,
+          succeeded: true
+        })
+      );
+
+      result.analysis = finalizeAnalysisForResponse(result.analysis);
+      sendJson(response, 200, result);
+      return;
+    } catch (error) {
+      console.warn(
+        "[ai-update-analysis]",
+        JSON.stringify({
+          analyzedAt,
+          succeeded: false,
+          error: error.message || "PDF analysis failed"
+        })
+      );
+      const status = /required|only pdf|valid pdf|limited|image-based|password|encrypted/i.test(error.message || "")
+        ? 400
+        : 500;
+      sendJson(response, status, { error: error.message || "PDF update analysis failed." });
+      return;
+    }
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/api/ai-update-proposals/")) {
+    const user = requireOperatingViewer(request, response);
+    if (!user) {
+      return;
+    }
+
+    const proposalId = url.pathname.split("/")[3];
+    const investments = readInvestments();
+    const proposal = readAiUpdateProposals().find((item) => item.id === proposalId);
+    if (!proposal || !canViewAiUpdateProposal(user, proposal, investments)) {
+      sendJson(response, 404, { error: "AI update proposal not found." });
+      return;
+    }
+
+    sendJson(response, 200, {
+      proposal: serializeAiUpdateProposal(proposal, investments),
+      user
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-update-proposals") {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const investments = readInvestments();
+      const normalizedProposal = normalizeAiUpdateProposal(payload || {});
+      const matchedInvestment = investments.find((investment) => investment.id === normalizedProposal.investmentId) || null;
+      const proposal = enforceProposalSafetyInvariant(normalizedProposal, matchedInvestment);
+      if (!canReviewAiUpdateProposal(user, proposal, investments)) {
+        sendJson(response, 403, { error: "You do not have access to stage that proposed update." });
+        return;
+      }
+
+      const saved = saveAiUpdateProposal({
+        ...proposal,
+        status: "pending",
+        reviewedBy: "",
+        reviewedAt: ""
+      });
+      sendJson(response, 201, {
+        proposal: serializeAiUpdateProposal(saved, investments)
+      });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "AI update proposal could not be saved." });
+      return;
+    }
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/api/ai-update-proposals/") &&
+    url.pathname.endsWith("/approve")
+  ) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const proposalId = url.pathname.split("/")[3];
+    const investments = readInvestments();
+    const existing = readAiUpdateProposals().find((item) => item.id === proposalId);
+    if (!existing || !canReviewAiUpdateProposal(user, existing, investments)) {
+      sendJson(response, 404, { error: "AI update proposal not found." });
+      return;
+    }
+    if (existing.status !== "pending") {
+      sendJson(response, 409, { error: "Only pending AI update proposals can be approved." });
+      return;
+    }
+
+    const result = approveAiUpdateProposal(proposalId, user.email);
+    sendJson(response, 200, {
+      proposal: serializeAiUpdateProposal(result.proposal, investments),
+      applyResult: result.applyResult
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/api/ai-update-proposals/") &&
+    url.pathname.endsWith("/reject")
+  ) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    const proposalId = url.pathname.split("/")[3];
+    const investments = readInvestments();
+    const existing = readAiUpdateProposals().find((item) => item.id === proposalId);
+    if (!existing || !canReviewAiUpdateProposal(user, existing, investments)) {
+      sendJson(response, 404, { error: "AI update proposal not found." });
+      return;
+    }
+    if (existing.status !== "pending") {
+      sendJson(response, 409, { error: "Only pending AI update proposals can be rejected." });
+      return;
+    }
+
+    const proposal = rejectAiUpdateProposal(proposalId, user.email);
+    sendJson(response, 200, {
+      proposal: serializeAiUpdateProposal(proposal, investments)
     });
     return;
   }
@@ -3597,7 +5181,9 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    sendJson(response, 200, { tasks: syncNextStepReminderTasks(readInvestments(), readTasks()), user });
+    const investments = readInvestments();
+    const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
+    sendJson(response, 200, { tasks, user });
     return;
   }
 
@@ -3607,7 +5193,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    const csv = buildInvestmentsCsv(readInvestments());
+    const csv = buildInvestmentsCsv(filterInvestmentsForUser(readInvestments(), user));
     response.writeHead(200, {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": 'attachment; filename="investment-updates.csv"'
@@ -3623,7 +5209,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     try {
-      const workbookBuffer = buildInvestmentsWorkbookBuffer(readInvestments());
+      const workbookBuffer = buildInvestmentsWorkbookBuffer(filterInvestmentsForUser(readInvestments(), user));
       response.writeHead(200, {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3638,12 +5224,12 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/api/backup-export") {
-    const user = requireOperatingViewer(request, response);
+    const user = requireMasterEditor(request, response);
     if (!user) {
       return;
     }
 
-    const { fileName, backup } = createBackupSnapshot("manual-export");
+    const { fileName, backup } = createBackupExportPayload("manual-export");
     response.writeHead(200, {
       "Content-Type": "application/json; charset=utf-8",
       "Content-Disposition": `attachment; filename="${fileName}"`
@@ -3659,9 +5245,10 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investments = readInvestments();
-    const tasks = syncNextStepReminderTasks(investments, readTasks());
+    const visibleInvestments = filterInvestmentsForUser(investments, user);
+    const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
     const metadata = readMetadata();
-    const digest = buildBiweeklyDigest(investments, tasks, metadata);
+    const digest = buildBiweeklyDigest(visibleInvestments, tasks, metadata);
     sendJson(response, 200, {
       digest: {
         subject: digest.subject,
@@ -3691,9 +5278,10 @@ const server = http.createServer(async (request, response) => {
         ? payload.recipients.map((item) => String(item).trim()).filter(Boolean)
         : DEFAULT_RECIPIENTS;
       const investments = readInvestments();
-      const tasks = syncNextStepReminderTasks(investments, readTasks());
+      const visibleInvestments = filterInvestmentsForUser(investments, user);
+      const tasks = filterTasksForUser(syncNextStepReminderTasks(investments, readTasks()), user, investments);
       const metadata = readMetadata();
-      const digest = buildBiweeklyDigest(investments, tasks, metadata, recipients);
+      const digest = buildBiweeklyDigest(visibleInvestments, tasks, metadata, recipients);
       const email = await sendEmail(
         {
           subject: digest.subject,
@@ -3733,7 +5321,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     try {
-      const workbookBuffer = buildFamilyOfficeWorkbookBuffer(readInvestments());
+      const workbookBuffer = buildFamilyOfficeWorkbookBuffer(filterInvestmentsForUser(readInvestments(), user));
       response.writeHead(200, {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3751,7 +5339,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/import-workbook") {
-    const user = requireEditor(request, response);
+    const user = requireMasterEditor(request, response);
     if (!user) {
       return;
     }
@@ -3788,7 +5376,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/api/restore-backup") {
-    const user = requireEditor(request, response);
+    const user = requireMasterEditor(request, response);
     if (!user) {
       return;
     }
@@ -3885,6 +5473,11 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      if (!canViewCompanyDocument(user, { company, entity }, readInvestments())) {
+        sendJson(response, 403, { error: "You do not have access to documents for that investment." });
+        return;
+      }
+
       ensureDataFile();
       const storedName = safeFilename(filename);
       const filePath = path.join(UPLOADS_DIR, storedName);
@@ -3916,6 +5509,12 @@ const server = http.createServer(async (request, response) => {
     }
 
     const documentId = url.pathname.split("/").pop();
+    const investments = readInvestments();
+    const document = readCompanyDocuments().find((item) => item.id === documentId);
+    if (document && !canViewCompanyDocument(user, document, investments)) {
+      sendJson(response, 403, { error: "You do not have access to delete that investment file." });
+      return;
+    }
     const deleted = deleteCompanyDocument(documentId);
 
     if (!deleted) {
@@ -3954,6 +5553,10 @@ const server = http.createServer(async (request, response) => {
       }
 
       const entry = validation.value;
+      if (!canEditInvestment(user, entry)) {
+        sendJson(response, 403, { error: "You do not have access to create or edit that holding." });
+        return;
+      }
       const recipients = entry.recipients.length > 0 ? entry.recipients : DEFAULT_RECIPIENTS;
       const completeEntry = {
         ...entry,
@@ -3978,6 +5581,38 @@ const server = http.createServer(async (request, response) => {
     }
   }
 
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/api/investments/") &&
+    url.pathname.endsWith("/update-request")
+  ) {
+    const user = requireEditor(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const investmentId = url.pathname.split("/")[3];
+      const payload = await parseRequestBody(request);
+      const investment = readInvestments().find((item) => item.id === investmentId);
+      if (investment && !canEditInvestment(user, investment)) {
+        sendJson(response, 403, { error: "You do not have access to request updates for that holding." });
+        return;
+      }
+      const result = await sendUpdateRequestEmail(investmentId, payload, user);
+      if (result.error) {
+        sendJson(response, result.statusCode || 400, { error: result.error });
+        return;
+      }
+
+      sendJson(response, 200, result.value);
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Update request email failed." });
+      return;
+    }
+  }
+
   if (request.method === "PATCH" && url.pathname.startsWith("/api/investments/")) {
     const user = requireEditor(request, response);
     if (!user) {
@@ -3986,11 +5621,21 @@ const server = http.createServer(async (request, response) => {
 
     try {
       const investmentId = url.pathname.split("/").pop();
+      const existingInvestment = readInvestments().find((investment) => investment.id === investmentId);
+      if (existingInvestment && !canEditInvestment(user, existingInvestment)) {
+        sendJson(response, 403, { error: "You do not have access to edit that holding." });
+        return;
+      }
       const payload = await parseRequestBody(request);
       const validation = validateInvestmentPatch(payload);
 
       if (validation.error) {
         sendJson(response, 400, { error: validation.error });
+        return;
+      }
+
+      if (!canEditInvestment(user, validation.value)) {
+        sendJson(response, 403, { error: "You do not have access to move or edit that holding." });
         return;
       }
 
@@ -4015,6 +5660,11 @@ const server = http.createServer(async (request, response) => {
     }
 
     const investmentId = url.pathname.split("/").pop();
+    const existingInvestment = readInvestments().find((investment) => investment.id === investmentId);
+    if (existingInvestment && !canEditInvestment(user, existingInvestment)) {
+      sendJson(response, 403, { error: "You do not have access to delete that holding." });
+      return;
+    }
     const deleted = deleteInvestment(investmentId);
 
     if (!deleted) {
@@ -4084,6 +5734,47 @@ const server = http.createServer(async (request, response) => {
     }
   }
 
+  if (request.method === "POST" && url.pathname === "/api/summarize-report-file") {
+    const user = requireOperatingViewer(request, response);
+    if (!user) {
+      return;
+    }
+
+    try {
+      const payload = await parseRequestBody(request);
+      const filename = String(payload.filename || "").trim();
+      const fileData = String(payload.fileData || "").trim();
+      const company = String(payload.company || "").trim();
+      const entity = String(payload.entity || "").trim();
+      const reportPeriod = String(payload.reportPeriod || "").trim();
+      const updateType = String(payload.updateType || "").trim();
+
+      if (!filename.match(/\.(pdf|txt|md)$/i)) {
+        sendJson(response, 400, { error: "Please upload a PDF or text file." });
+        return;
+      }
+
+      if (!fileData) {
+        sendJson(response, 400, { error: "Report file data is required." });
+        return;
+      }
+
+      const summary = await summarizeReportFile({
+        filename,
+        fileData,
+        company,
+        entity,
+        reportPeriod,
+        updateType
+      });
+      sendJson(response, 200, { summary });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Report file summarization failed." });
+      return;
+    }
+  }
+
   if (request.method === "POST" && url.pathname === "/api/ai-agent") {
     const user = requireOperatingViewer(request, response);
     if (!user) {
@@ -4101,7 +5792,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = await askInvestmentAnalyst({ question, company, entity });
+      const result = await askInvestmentAnalyst({ question, company, entity, user });
       sendJson(response, 200, result);
       return;
     } catch (error) {
@@ -4125,6 +5816,11 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      if (!canViewTask(user, validation.value, readInvestments())) {
+        sendJson(response, 403, { error: "You do not have access to create tasks for that holding." });
+        return;
+      }
+
       const task = saveTask(validation.value);
       sendJson(response, 201, { task });
       return;
@@ -4142,11 +5838,22 @@ const server = http.createServer(async (request, response) => {
 
     try {
       const taskId = url.pathname.split("/").pop();
+      const investments = readInvestments();
+      const existingTask = readTasks().find((task) => task.id === taskId);
+      if (existingTask && !canViewTask(user, existingTask, investments)) {
+        sendJson(response, 403, { error: "You do not have access to edit that task." });
+        return;
+      }
       const payload = await parseRequestBody(request);
       const validation = validateTaskPatch(payload);
 
       if (validation.error) {
         sendJson(response, 400, { error: validation.error });
+        return;
+      }
+
+      if (!canViewTask(user, validation.value, investments)) {
+        sendJson(response, 403, { error: "You do not have access to move that task." });
         return;
       }
 
@@ -4171,6 +5878,12 @@ const server = http.createServer(async (request, response) => {
     }
 
     const taskId = url.pathname.split("/").pop();
+    const investments = readInvestments();
+    const existingTask = readTasks().find((task) => task.id === taskId);
+    if (existingTask && !canViewTask(user, existingTask, investments)) {
+      sendJson(response, 403, { error: "You do not have access to delete that task." });
+      return;
+    }
     const deleted = deleteTask(taskId);
 
     if (!deleted) {
@@ -4184,12 +5897,24 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET") {
     if (url.pathname.startsWith("/uploads/")) {
+      const user = requireAuth(request, response);
+      if (!user) {
+        return;
+      }
       const requestedUpload = path
         .normalize(url.pathname.replace(/^\/uploads\//, ""))
         .replace(/^(\.\.[/\\])+/, "");
       const filePath = path.join(UPLOADS_DIR, requestedUpload);
 
       if (!filePath.startsWith(UPLOADS_DIR)) {
+        sendText(response, 403, "Forbidden");
+        return;
+      }
+
+      const document = readCompanyDocuments().find(
+        (item) => String(item.storedName || "").trim() === requestedUpload
+      );
+      if (document && !canViewCompanyDocument(user, document, readInvestments())) {
         sendText(response, 403, "Forbidden");
         return;
       }
