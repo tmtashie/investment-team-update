@@ -145,3 +145,33 @@ test("funded contributions remain included in performance inputs", () => {
     [-75, -5]
   );
 });
+
+test("server performance snapshot excludes New Lead and Under Review activity and marks", () => {
+  const { calculateCompanyPerformanceSnapshot } = require("../server")._test;
+  const result = calculateCompanyPerformanceSnapshot({
+    capitalActivities: [
+      { type: "Capital Call", amount: "500000", date: "2026-01-01", sourceStatus: "New Lead" },
+      { type: "Fee", amount: "10000", date: "2026-01-02", sourceStage: "Under Review" }
+    ],
+    valuationHistory: [
+      { officialValue: "1000000", internalValue: "1200000", date: "2026-02-01", sourceStatus: "New Lead" }
+    ]
+  });
+  assert.equal(result.totalInvestedCapital, 0);
+  assert.equal(result.totalDistributions, 0);
+  assert.equal(result.officialValue, 0);
+  assert.equal(result.internalValue, 0);
+  assert.equal(result.official.moic, null);
+  assert.equal(result.official.xirr, null);
+});
+
+test("server performance snapshot retains funded activity", () => {
+  const { calculateCompanyPerformanceSnapshot } = require("../server")._test;
+  const result = calculateCompanyPerformanceSnapshot({
+    capitalActivities: [{ type: "Capital Call", amount: "100", date: "2026-01-01", sourceStatus: "Funded" }],
+    valuationHistory: [{ officialValue: "150", date: "2026-09-01", sourceStatus: "Funded" }]
+  });
+  assert.equal(result.totalInvestedCapital, 100);
+  assert.equal(result.officialValue, 150);
+  assert.equal(result.official.moic, 1.5);
+});

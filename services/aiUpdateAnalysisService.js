@@ -1,3 +1,8 @@
+const {
+  generateInvestmentMatchCandidates: generateSharedInvestmentMatchCandidates,
+  confidenceFromDeterministicCandidate: sharedConfidenceFromDeterministicCandidate
+} = require("./investmentMatchService");
+
 const MAX_SOURCE_TEXT_LENGTH = 60000;
 const MAX_ARRAY_ITEMS = 40;
 const SEMANTIC_ONLY_CONFIDENCE_CAP = 84;
@@ -808,75 +813,11 @@ function scoreDomainEvidence(sender, aliases) {
 }
 
 function generateInvestmentMatchCandidates({ source, investments }) {
-  const sourceParts = {
-    body: asString(source && source.sourceText, MAX_SOURCE_TEXT_LENGTH),
-    subject: asString(source && source.subject, 240),
-    sender: asString(source && source.sender, 240),
-    filename: asString(source && source.filename, 240)
-  };
-
-  const candidates = investments
-    .map((investment) => {
-      const aliases = getInvestmentAliasValues(investment);
-      const aliasMatch = findMatchedAlias(sourceParts, aliases);
-      const domainEvidence = scoreDomainEvidence(sourceParts.sender, aliases);
-      const score = (aliasMatch ? aliasMatch.weight : 0) + (domainEvidence ? domainEvidence.weight : 0);
-      const evidence = [];
-      if (aliasMatch) {
-        evidence.push(`Exact ${aliasMatch.location} match for '${aliasMatch.alias}'.`);
-      }
-      if (domainEvidence) {
-        evidence.push(domainEvidence.reason);
-      }
-      return {
-        investment,
-        investmentId: investment.id,
-        investmentName: investment.company,
-        entityName: investment.entity,
-        score,
-        hasExplicitNameEvidence: Boolean(aliasMatch),
-        hasDomainEvidence: Boolean(domainEvidence),
-        matchedAlias: aliasMatch ? aliasMatch.alias : "",
-        reason: evidence.join(" ")
-      };
-    })
-    .filter((candidate) => candidate.score > 0)
-    .sort((left, right) => right.score - left.score || left.investmentName.localeCompare(right.investmentName));
-
-  const explicitCandidates = candidates.filter((candidate) => candidate.hasExplicitNameEvidence);
-  const best = candidates[0] || null;
-  const runnerUp = candidates[1] || null;
-  const hasCompetingCandidate = Boolean(
-    best &&
-      runnerUp &&
-      (runnerUp.hasExplicitNameEvidence || runnerUp.score >= best.score - 12)
-  );
-
-  return {
-    candidates,
-    explicitCandidates,
-    best,
-    hasCompetingCandidate
-  };
+  return generateSharedInvestmentMatchCandidates({ source, investments });
 }
 
 function confidenceFromDeterministicCandidate(candidate, hasCompetingCandidate) {
-  if (!candidate) {
-    return 0;
-  }
-  if (candidate.hasExplicitNameEvidence && /filename/i.test(candidate.reason || "")) {
-    return hasCompetingCandidate ? 72 : candidate.hasDomainEvidence ? 84 : 78;
-  }
-  if (candidate.hasExplicitNameEvidence && !hasCompetingCandidate) {
-    return candidate.hasDomainEvidence ? 98 : 96;
-  }
-  if (candidate.hasExplicitNameEvidence) {
-    return 88;
-  }
-  if (candidate.hasDomainEvidence && !hasCompetingCandidate) {
-    return 78;
-  }
-  return 62;
+  return sharedConfidenceFromDeterministicCandidate(candidate, hasCompetingCandidate);
 }
 
 function normalizeEntityOverride(entityId, entities, normalizeEntityName) {

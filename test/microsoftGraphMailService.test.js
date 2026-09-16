@@ -27,7 +27,7 @@ function createFetchMock(responses) {
   return fetchImpl;
 }
 
-test("Microsoft Graph mail service uses client credentials and returns only PDF attachments", async () => {
+test("Microsoft Graph mail service uses client credentials and preserves supported non-inline attachments", async () => {
   const fetchImpl = createFetchMock([
     graphResponse({ access_token: "token-value" }),
     graphResponse({
@@ -76,6 +76,22 @@ test("Microsoft Graph mail service uses client credentials and returns only PDF 
           isInline: false
         }
       ]
+    }),
+    graphResponse({
+      id: "attachment-1",
+      name: "Board Deck.pdf",
+      contentType: "application/pdf",
+      size: 123,
+      isInline: false,
+      contentBytes: Buffer.from("pdf").toString("base64")
+    }),
+    graphResponse({
+      id: "attachment-3",
+      name: "notes.docx",
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: 55,
+      isInline: false,
+      contentBytes: Buffer.from("docx").toString("base64")
     })
   ]);
   const service = createMicrosoftGraphMailService({
@@ -96,7 +112,11 @@ test("Microsoft Graph mail service uses client credentials and returns only PDF 
   assert.equal(result.messages.length, 1);
   assert.equal(result.messages[0].pdfAttachments.length, 1);
   assert.equal(result.messages[0].pdfAttachments[0].name, "Board Deck.pdf");
-  assert.equal(result.messages[0].skippedAttachments.length, 2);
+  assert.equal(result.messages[0].attachments.length, 2);
+  assert.equal(result.messages[0].attachments[1].name, "notes.docx");
+  assert.equal(result.messages[0].attachments[1].extractionStatus, "not-parsed");
+  assert.equal(result.messages[0].skippedAttachments.length, 1);
+  assert.equal(result.messages[0].unresolvedAttachments.length, 0);
   assert.match(fetchImpl.calls[0].url, /\/tenant-id\/oauth2\/v2\.0\/token$/);
   assert.match(fetchImpl.calls[0].options.body, /grant_type=client_credentials/);
   assert.match(fetchImpl.calls[0].options.body, /scope=https%3A%2F%2Fgraph\.microsoft\.com%2F\.default/);
@@ -106,7 +126,8 @@ test("Microsoft Graph mail service uses client credentials and returns only PDF 
   );
   assert.match(fetchImpl.calls[1].url, /\/users\/updates%40example\.test\/mailFolders\?\$top=100$/);
   assert.match(fetchImpl.calls[2].url, /mailFolders\/folder-1\/messages/);
-  assert.match(fetchImpl.calls[3].url, /\/users\/updates%40example\.test\/messages\/message-1\/attachments\?\$top=50$/);
+  assert.match(fetchImpl.calls[3].url, /\/users\/updates%40example\.test\/messages\/message-1\/attachments\?\$top=21&\$select=/);
+  assert.equal(fetchImpl.calls.every((call) => !call.options.method || call.options.method === "GET" || call.url.includes("oauth2")), true);
 });
 
 test("Microsoft Graph mail APIs address configured mailbox UPN directly without directory lookup", async () => {
@@ -138,6 +159,13 @@ test("Microsoft Graph mail APIs address configured mailbox UPN directly without 
           contentBytes: Buffer.from("pdf").toString("base64")
         }
       ]
+    }),
+    graphResponse({
+      id: "attachment-1",
+      name: "Deck.pdf",
+      contentType: "application/pdf",
+      isInline: false,
+      contentBytes: Buffer.from("pdf").toString("base64")
     })
   ]);
   const service = createMicrosoftGraphMailService({
@@ -157,7 +185,7 @@ test("Microsoft Graph mail APIs address configured mailbox UPN directly without 
   assert.equal(urls.some((url) => /\/users\/[^/]+\?\$select=id/.test(url)), false);
   assert.match(urls[1], /\/users\/updates%2Bai%40example\.test\/mailFolders\?\$top=100$/);
   assert.match(urls[2], /\/users\/updates%2Bai%40example\.test\/mailFolders\/folder-1\/messages/);
-  assert.match(urls[3], /\/users\/updates%2Bai%40example\.test\/messages\/message-1\/attachments\?\$top=50$/);
+  assert.match(urls[3], /\/users\/updates%2Bai%40example\.test\/messages\/message-1\/attachments\?\$top=21&\$select=/);
 });
 
 test("Microsoft Graph safe config status does not expose client secret", () => {
@@ -196,4 +224,30 @@ test("Microsoft Graph throttling returns a safe retry message", async () => {
     () => service.getAccessToken(),
     /Microsoft Graph request was throttled\. Retry after 30 seconds\./
   );
+});
+
+test("oversized and unsupported attachments are visible as unresolved without download", async () => {
+  const fetchImpl = createFetchMock([
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({ value: [{
+      id: "message-1", internetMessageId: "<message-1@example.test>", subject: "Opportunity",
+      from: { emailAddress: { address: "sender@example.test" } }, receivedDateTime: "2026-09-16T12:00:00Z",
+      hasAttachments: true, body: { contentType: "text", content: "Opportunity" }
+    }] }),
+    graphResponse({ value: [
+      { id: "large", name: "LargeDeck.pdf", contentType: "application/pdf", size: 11 * 1024 * 1024, isInline: false },
+      { id: "unsafe", name: "script.exe", contentType: "application/octet-stream", size: 100, isInline: false }
+    ] })
+  ]);
+  const service = createMicrosoftGraphMailService({
+    tenantId: "tenant", clientId: "client", clientSecret: "secret", mailboxUser: "updates@example.test",
+    fetchImpl, graphBaseUrl: "https://graph.test/v1.0", tokenBaseUrl: "https://login.test"
+  });
+  const result = await service.fetchIntakeMessages();
+  assert.equal(result.messages[0].attachments.length, 0);
+  assert.equal(result.messages[0].unresolvedAttachments.length, 2);
+  assert.match(result.messages[0].unresolvedAttachments[0].reason, /10 MB/);
+  assert.match(result.messages[0].unresolvedAttachments[1].reason, /Unsupported/);
+  assert.equal(fetchImpl.calls.length, 4);
 });

@@ -49,6 +49,7 @@ function createInvestmentService({
     investments.unshift(normalizedEntry);
     writeInvestments(investments);
     syncNextStepReminderTasks(investments);
+    return normalizedEntry;
   }
 
   function updateInvestment(id, updates) {

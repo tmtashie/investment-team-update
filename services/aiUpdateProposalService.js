@@ -29,11 +29,37 @@ function createAiUpdateProposalService({
 
   function saveAiUpdateProposal(entry) {
     const proposals = readAiUpdateProposals();
-    createBackupSnapshot("before-ai-update-proposal-create");
     const normalized = normalizeAiUpdateProposal({
       ...entry,
       updatedAt: new Date().toISOString()
     });
+    if (normalized.proposalType === "new-deal") {
+      const exactSource = normalized.sourceMessageKey && proposals.find(
+        (proposal) => proposal.proposalType === "new-deal" && proposal.sourceMessageKey === normalized.sourceMessageKey
+      );
+      if (exactSource) return exactSource;
+      const sameOpportunity = normalized.opportunityFingerprint && proposals.find(
+        (proposal) => proposal.proposalType === "new-deal" &&
+          proposal.opportunityFingerprint === normalized.opportunityFingerprint &&
+          proposal.status === "pending"
+      );
+      if (sameOpportunity) {
+        const documentKey = (document) => document.hash || document.storedName || document.id || document.name;
+        const documents = Array.from(
+          new Map([...(sameOpportunity.documents || []), ...(normalized.documents || [])]
+            .map((document) => [documentKey(document), document])).values()
+        );
+        return updateAiUpdateProposal(sameOpportunity.id, {
+          documents,
+          sourceMessageKeys: Array.from(new Set([
+            ...(sameOpportunity.sourceMessageKeys || []),
+            sameOpportunity.sourceMessageKey,
+            normalized.sourceMessageKey
+          ].filter(Boolean)))
+        });
+      }
+    }
+    createBackupSnapshot("before-ai-update-proposal-create");
     proposals.unshift(normalized);
     writeAiUpdateProposals(proposals);
     return normalized;

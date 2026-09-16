@@ -71,6 +71,18 @@ Processed messages are deduplicated using their Internet Message ID or Microsoft
 
 Automated intake must find explicit portfolio evidence before it creates a proposal, and the existing source-evidence safety checks still apply. Successful analysis creates a `pending` proposal only. It never approves or applies an investment update: an authorized human must review and approve or reject each proposal in the AI Update Inbox.
 
+### Potential New Deal intake
+
+When deterministic company and alias matching finds one confident existing investment, email content stays in the existing investment-update workflow. Competing deterministic matches create an ambiguous `Potential New Deal` review that cannot be approved until a master editor selects an existing investment or explicitly confirms that no existing match exists. The AI cannot override deterministic conflicts.
+
+Potential New Deal proposals default to `Beaman Ventures`, but the entity must be confirmed before approval. Only a `master-editor` can approve a proposal as a new pipeline deal. Approval creates a `Private Investment` with status `New Lead`; it does not create capital activity, valuations, distributions, or ownership history. A proposed check size becomes the pipeline `amount` only when source-verified and explicitly confirmed. Total round size is never mapped to `amount`.
+
+Microsoft 365 attachments are bounded to 10 MB per file, 20 MB per message, 50 MB per run, and 20 attachments per message. Supported non-inline PDF, Office, text, CSV, and common image files are preserved in `DATA_DIR/uploads`. Only PDFs are parsed. Unsupported, excessive, or unavailable attachments remain visible on the proposal as unresolved records and are not described as parsed. Approval associates preserved files with the existing company-document vault without copying the binary.
+
+Graph access remains read-only and requires application `Mail.Read` because message bodies and attachments are read. Do not grant `Mail.ReadWrite` or `Mail.Send`. As a separately approved Microsoft 365 hardening task, restrict the application to the intake mailbox with Exchange Online Application RBAC; this repository does not apply tenant configuration.
+
+Email and attachment contents are untrusted model input. They are delimited as source data, cannot supply system or tool instructions, and cannot set approval, authorization, proposal status, or investment-creation fields.
+
 ## Deployment
 
 This project includes `render.yaml` for an easy Render deployment.
