@@ -93,9 +93,17 @@ function loadPerformanceHelpers() {
   vm.runInContext(appSource, context, { filename: "public/app.js" });
 
   return {
-    buildPerformanceInputs: context.buildPerformanceInputs
+    buildPerformanceInputs: context.buildPerformanceInputs,
+    getAiProposalTypeLabel: context.getAiProposalTypeLabel
   };
 }
+
+test("proposal labels distinguish existing updates, ambiguous review, and potential new deals", () => {
+  const { getAiProposalTypeLabel } = loadPerformanceHelpers();
+  assert.equal(getAiProposalTypeLabel({ proposalType: "investment-update" }), "Existing Investment Update");
+  assert.equal(getAiProposalTypeLabel({ proposalType: "new-deal", matchResult: { status: "ambiguous" } }), "Ambiguous Review");
+  assert.equal(getAiProposalTypeLabel({ proposalType: "new-deal", matchResult: { status: "no-match" } }), "Potential New Deal");
+});
 
 test("pipeline contributions are excluded from performance inputs", () => {
   const { buildPerformanceInputs } = loadPerformanceHelpers();
@@ -144,4 +152,34 @@ test("funded contributions remain included in performance inputs", () => {
     Array.from(result.baseCashFlows, (cashFlow) => cashFlow.amount),
     [-75, -5]
   );
+});
+
+test("server performance snapshot excludes New Lead and Under Review activity and marks", () => {
+  const { calculateCompanyPerformanceSnapshot } = require("../server")._test;
+  const result = calculateCompanyPerformanceSnapshot({
+    capitalActivities: [
+      { type: "Capital Call", amount: "500000", date: "2026-01-01", sourceStatus: "New Lead" },
+      { type: "Fee", amount: "10000", date: "2026-01-02", sourceStage: "Under Review" }
+    ],
+    valuationHistory: [
+      { officialValue: "1000000", internalValue: "1200000", date: "2026-02-01", sourceStatus: "New Lead" }
+    ]
+  });
+  assert.equal(result.totalInvestedCapital, 0);
+  assert.equal(result.totalDistributions, 0);
+  assert.equal(result.officialValue, 0);
+  assert.equal(result.internalValue, 0);
+  assert.equal(result.official.moic, null);
+  assert.equal(result.official.xirr, null);
+});
+
+test("server performance snapshot retains funded activity", () => {
+  const { calculateCompanyPerformanceSnapshot } = require("../server")._test;
+  const result = calculateCompanyPerformanceSnapshot({
+    capitalActivities: [{ type: "Capital Call", amount: "100", date: "2026-01-01", sourceStatus: "Funded" }],
+    valuationHistory: [{ officialValue: "150", date: "2026-09-01", sourceStatus: "Funded" }]
+  });
+  assert.equal(result.totalInvestedCapital, 100);
+  assert.equal(result.officialValue, 150);
+  assert.equal(result.official.moic, 1.5);
 });

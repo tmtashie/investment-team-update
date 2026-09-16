@@ -44,6 +44,20 @@ function normalizeAnalysisAudit(audit) {
 }
 
 function normalizeStateEntry(entry) {
+  const attachments = Array.isArray(entry && entry.attachments)
+    ? entry.attachments.map((attachment) => ({
+        hash: cleanString(attachment && attachment.hash, 128),
+        id: cleanString(attachment && attachment.id, 120),
+        name: cleanString(attachment && attachment.name, 500),
+        storedName: cleanString(attachment && attachment.storedName, 500),
+        url: cleanString(attachment && attachment.url, 1000),
+        contentType: cleanString(attachment && attachment.contentType, 200),
+        size: Number(attachment && attachment.size) || 0,
+        preservationStatus: cleanString(attachment && attachment.preservationStatus, 80),
+        extractionStatus: cleanString(attachment && attachment.extractionStatus, 80),
+        reason: cleanString(attachment && attachment.reason, 1000)
+      })).filter((attachment) => attachment.hash || attachment.name)
+    : [];
   return {
     graphMessageId: cleanString(entry && entry.graphMessageId, 500),
     internetMessageId: cleanString(entry && entry.internetMessageId, 500),
@@ -55,7 +69,9 @@ function normalizeStateEntry(entry) {
     receivedDateTime: cleanString(entry && entry.receivedDateTime, 80),
     attachmentHashes: Array.isArray(entry && entry.attachmentHashes)
       ? entry.attachmentHashes.map((item) => cleanString(item, 128)).filter(Boolean)
-      : [],
+      : attachments.map((attachment) => attachment.hash).filter(Boolean),
+    attachments,
+    reservedAt: cleanString(entry && entry.reservedAt, 80),
     processedAt: cleanString(entry && entry.processedAt, 80),
     proposalIds: Array.isArray(entry && entry.proposalIds)
       ? entry.proposalIds.map((item) => cleanString(item, 120)).filter(Boolean)
@@ -109,6 +125,46 @@ function createAiEmailIntakeStateService({
     return readState().some((entry) => entry.attachmentHashes.includes(cleanHash));
   }
 
+  function findAttachmentByHash(hash) {
+    const cleanHash = cleanString(hash, 128);
+    if (!cleanHash) return null;
+    for (const entry of readState()) {
+      const attachment = entry.attachments.find((item) => item.hash === cleanHash && item.storedName);
+      if (attachment) return attachment;
+    }
+    return null;
+  }
+
+  function claimMessage(message, now = new Date()) {
+    const key = messageDedupeKey(message);
+    if (!key) return { claimed: false, reason: "Message has no stable identifier." };
+    const existing = findByMessage(message);
+    if (existing && ["processed", "skipped"].includes(existing.status)) {
+      return { claimed: false, reason: "Duplicate message already processed.", entry: existing };
+    }
+    if (existing && existing.status === "reserved") {
+      const reservedAt = new Date(existing.reservedAt || existing.processedAt || 0).getTime();
+      if (Number.isFinite(reservedAt) && now.getTime() - reservedAt < 15 * 60 * 1000) {
+        return { claimed: false, reason: "Message intake is already in progress.", entry: existing };
+      }
+    }
+    const entry = upsertEntry({
+      graphMessageId: message && (message.id || message.graphMessageId),
+      internetMessageId: message && message.internetMessageId,
+      conversationId: message && message.conversationId,
+      mailbox: message && message.mailbox,
+      folderId: message && message.folderId,
+      subject: message && message.subject,
+      sender: message && message.sender,
+      receivedDateTime: message && message.receivedDateTime,
+      reservedAt: now.toISOString(),
+      processedAt: "",
+      status: "reserved",
+      error: ""
+    });
+    return { claimed: true, entry };
+  }
+
   function upsertEntry(entry) {
     const normalized = normalizeStateEntry(entry);
     const entries = readState();
@@ -125,6 +181,10 @@ function createAiEmailIntakeStateService({
         ...entries[index],
         ...normalized,
         attachmentHashes: Array.from(new Set(entries[index].attachmentHashes.concat(normalized.attachmentHashes))),
+        attachments: Array.from(new Map(entries[index].attachments.concat(normalized.attachments).map((attachment) => [
+          attachment.hash || attachment.storedName || attachment.name,
+          attachment
+        ])).values()),
         proposalIds: Array.from(new Set(entries[index].proposalIds.concat(normalized.proposalIds))),
         analysisAudits: entries[index].analysisAudits.concat(normalized.analysisAudits)
       };
@@ -135,7 +195,9 @@ function createAiEmailIntakeStateService({
 
   return {
     findByMessage,
+    findAttachmentByHash,
     hasAttachmentHash,
+    claimMessage,
     messageDedupeKey,
     readState,
     upsertEntry,
