@@ -6841,12 +6841,22 @@ function renderNewDealProposalDetail(proposal) {
         <label>Contact email (${escapeHtml(dealClaimStatus(proposal, "contactEmail"))})<input id="newDealContactEmail" type="email" value="${escapeHtml(dealClaimValue(proposal, "contactEmail"))}"></label>
         <label>Entity<select id="newDealEntity">${entityOptions}</select></label>
         <label>Round type (${escapeHtml(dealClaimStatus(proposal, "roundType"))})<input id="newDealRoundType" value="${escapeHtml(dealClaimValue(proposal, "roundType"))}"></label>
+        <label>Stage (${escapeHtml(dealClaimStatus(proposal, "stage"))})<input id="newDealStage" value="${escapeHtml(dealClaimValue(proposal, "stage"))}"></label>
         <label>Amount being raised (${escapeHtml(dealClaimStatus(proposal, "amountBeingRaised"))})<input id="newDealAmountRaised" value="${escapeHtml(dealClaimValue(proposal, "amountBeingRaised"))}"></label>
+        <label>Amount committed (${escapeHtml(dealClaimStatus(proposal, "amountCommitted"))})<input id="newDealAmountCommitted" value="${escapeHtml(dealClaimValue(proposal, "amountCommitted"))}"></label>
+        <label>Amount remaining (${escapeHtml(dealClaimStatus(proposal, "amountRemaining"))})<input id="newDealAmountRemaining" value="${escapeHtml(dealClaimValue(proposal, "amountRemaining"))}"></label>
         <label>Proposed check size (${escapeHtml(dealClaimStatus(proposal, "proposedCheckSize"))})<input id="newDealCheckSize" value="${escapeHtml(dealClaimValue(proposal, "proposedCheckSize"))}"></label>
         <label>Valuation / cap (${escapeHtml(dealClaimStatus(proposal, "valuationCap"))})<input id="newDealValuationCap" value="${escapeHtml(dealClaimValue(proposal, "valuationCap"))}"></label>
         <label>Security type (${escapeHtml(dealClaimStatus(proposal, "securityType"))})<input id="newDealSecurityType" value="${escapeHtml(dealClaimValue(proposal, "securityType"))}"></label>
+        <label>Lead investor (${escapeHtml(dealClaimStatus(proposal, "leadInvestor"))})<input id="newDealLeadInvestor" value="${escapeHtml(dealClaimValue(proposal, "leadInvestor"))}"></label>
       </div>
       <label>AI summary<textarea id="newDealSummary" rows="4">${escapeHtml(dealClaimValue(proposal, "dealSummary"))}</textarea></label>
+      <label>What the company does<textarea id="newDealWhatCompanyDoes" rows="3">${escapeHtml(dealClaimValue(proposal, "whatCompanyDoes"))}</textarea></label>
+      <label>Product / business model<textarea id="newDealBusinessModel" rows="3">${escapeHtml(dealClaimValue(proposal, "businessModel"))}</textarea></label>
+      <label>Traction / revenue<textarea id="newDealTractionRevenue" rows="3">${escapeHtml(dealClaimValue(proposal, "tractionRevenue"))}</textarea></label>
+      <label>Customers / contracts / deployments<textarea id="newDealCustomers" rows="3">${escapeHtml(dealClaimValue(proposal, "customersContractsDeployments"))}</textarea></label>
+      <label>Financing terms<textarea id="newDealFinancingTerms" rows="3">${escapeHtml(dealClaimValue(proposal, "financingTerms"))}</textarea></label>
+      <label>Use of proceeds<textarea id="newDealUseOfProceeds" rows="3">${escapeHtml(dealClaimValue(proposal, "useOfProceeds"))}</textarea></label>
       <label>Key investment points<textarea id="newDealPoints" rows="4">${escapeHtml(dealClaimListText(proposal, "keyInvestmentPoints"))}</textarea></label>
       <label>Key risks<textarea id="newDealRisks" rows="4">${escapeHtml(dealClaimListText(proposal, "keyRisks"))}</textarea></label>
       <label>Next steps<textarea id="newDealNextSteps" rows="3">${escapeHtml(dealClaimListText(proposal, "nextSteps"))}</textarea></label>
@@ -11432,11 +11442,21 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
           contactName: document.getElementById("newDealContactName").value,
           contactEmail: document.getElementById("newDealContactEmail").value,
           dealSummary: document.getElementById("newDealSummary").value,
+          whatCompanyDoes: document.getElementById("newDealWhatCompanyDoes").value,
+          businessModel: document.getElementById("newDealBusinessModel").value,
+          stage: document.getElementById("newDealStage").value,
+          tractionRevenue: document.getElementById("newDealTractionRevenue").value,
+          customersContractsDeployments: document.getElementById("newDealCustomers").value,
           roundType: document.getElementById("newDealRoundType").value,
           amountBeingRaised: document.getElementById("newDealAmountRaised").value,
+          amountCommitted: document.getElementById("newDealAmountCommitted").value,
+          amountRemaining: document.getElementById("newDealAmountRemaining").value,
           proposedCheckSize: document.getElementById("newDealCheckSize").value,
           valuationCap: document.getElementById("newDealValuationCap").value,
           securityType: document.getElementById("newDealSecurityType").value,
+          financingTerms: document.getElementById("newDealFinancingTerms").value,
+          leadInvestor: document.getElementById("newDealLeadInvestor").value,
+          useOfProceeds: document.getElementById("newDealUseOfProceeds").value,
           keyInvestmentPoints: document.getElementById("newDealPoints").value,
           keyRisks: document.getElementById("newDealRisks").value,
           nextSteps: document.getElementById("newDealNextSteps").value,

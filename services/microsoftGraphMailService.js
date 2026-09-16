@@ -1,7 +1,8 @@
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 const TOKEN_BASE_URL = "https://login.microsoftonline.com";
 const MAX_ATTACHMENT_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_ATTACHMENT_MESSAGE_BYTES = 20 * 1024 * 1024;
+const MAX_ATTACHMENT_PDF_BYTES = 25 * 1024 * 1024;
+const MAX_ATTACHMENT_MESSAGE_BYTES = 30 * 1024 * 1024;
 const MAX_ATTACHMENT_RUN_BYTES = 50 * 1024 * 1024;
 const MAX_ATTACHMENTS_PER_MESSAGE = 20;
 const SUPPORTED_ATTACHMENT_EXTENSIONS = new Set([
@@ -36,6 +37,15 @@ function attachmentExtension(name) {
 
 function isSupportedAttachment(attachment) {
   return SUPPORTED_ATTACHMENT_EXTENSIONS.has(attachmentExtension(attachment && attachment.name));
+}
+
+function maxAttachmentBytes(attachment) {
+  return isPdfAttachment(attachment) ? MAX_ATTACHMENT_PDF_BYTES : MAX_ATTACHMENT_FILE_BYTES;
+}
+
+function attachmentLimitReason(attachment) {
+  const limitMb = maxAttachmentBytes(attachment) / (1024 * 1024);
+  return `Attachment exceeds the ${limitMb} MB per-file limit.`;
 }
 
 function decodedByteLength(contentBytes) {
@@ -298,12 +308,12 @@ function createMicrosoftGraphMailService({
           });
           continue;
         }
-        if (attachment.size > MAX_ATTACHMENT_FILE_BYTES) {
-          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment exceeds the 10 MB per-file limit." });
+        if (attachment.size > maxAttachmentBytes(attachment)) {
+          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: attachmentLimitReason(attachment) });
           continue;
         }
         if (messageAttachmentBytes + attachment.size > MAX_ATTACHMENT_MESSAGE_BYTES) {
-          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment exceeds the 20 MB per-message limit." });
+          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment exceeds the 30 MB per-message limit." });
           continue;
         }
         if (runAttachmentBytes + attachment.size > MAX_ATTACHMENT_RUN_BYTES) {
@@ -313,7 +323,7 @@ function createMicrosoftGraphMailService({
         try {
           const fetched = await fetchAttachment(token, message.id, attachment);
           const actualSize = decodedByteLength(fetched.contentBytes);
-          if (!actualSize || actualSize > MAX_ATTACHMENT_FILE_BYTES || messageAttachmentBytes + actualSize > MAX_ATTACHMENT_MESSAGE_BYTES || runAttachmentBytes + actualSize > MAX_ATTACHMENT_RUN_BYTES) {
+          if (!actualSize || actualSize > maxAttachmentBytes(fetched) || messageAttachmentBytes + actualSize > MAX_ATTACHMENT_MESSAGE_BYTES || runAttachmentBytes + actualSize > MAX_ATTACHMENT_RUN_BYTES) {
             unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment data exceeded a configured preservation limit." });
             continue;
           }
@@ -357,6 +367,7 @@ function createMicrosoftGraphMailService({
 
 module.exports = {
   MAX_ATTACHMENT_FILE_BYTES,
+  MAX_ATTACHMENT_PDF_BYTES,
   MAX_ATTACHMENT_MESSAGE_BYTES,
   MAX_ATTACHMENT_RUN_BYTES,
   MAX_ATTACHMENTS_PER_MESSAGE,

@@ -1233,9 +1233,15 @@ function normalizeAiUpdateProposal(entry) {
 
 const NEW_DEAL_EDITABLE_FIELDS = [
   "companyName", "contactName", "contactEmail", "dealSummary", "roundType",
-  "amountBeingRaised", "proposedCheckSize", "valuationCap", "securityType"
+  "whatCompanyDoes", "businessModel", "stage", "tractionRevenue",
+  "customersContractsDeployments", "amountBeingRaised", "amountCommitted",
+  "amountRemaining", "proposedCheckSize", "valuationCap", "securityType",
+  "financingTerms", "leadInvestor", "useOfProceeds"
 ];
-const NEW_DEAL_FINANCIAL_FIELDS = new Set(["amountBeingRaised", "proposedCheckSize", "valuationCap"]);
+const NEW_DEAL_FINANCIAL_FIELDS = new Set([
+  "tractionRevenue", "amountBeingRaised", "amountCommitted", "amountRemaining",
+  "proposedCheckSize", "valuationCap", "financingTerms"
+]);
 const NEW_DEAL_EDITABLE_LIST_FIELDS = [
   "keyInvestmentPoints", "keyRisks", "nextSteps", "deadlines", "relevantUrls"
 ];
