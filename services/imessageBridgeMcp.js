@@ -107,8 +107,9 @@ function createMcpRequestHandler(service) {
       return { jsonrpc: "2.0", id: request.id, error: { code: -32601, message: "Tool not found" } };
     }
     const operation = operations[name];
+    const args = Object.hasOwn(request.params, "arguments") ? request.params.arguments : {};
     try {
-      const output = await operation(request.params.arguments || {});
+      const output = await operation(args);
       return {
         jsonrpc: "2.0",
         id: request.id,
