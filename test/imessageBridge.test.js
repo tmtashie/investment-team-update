@@ -289,6 +289,20 @@ test("the MCP surface contains only three annotated read-only tools", () => {
   assert.equal(TOOL_DEFINITIONS.some((tool) => /send|reply|react|edit|delete|attachment|mark/i.test(tool.name)), false);
 });
 
+test("the MCP handler rejects inherited object properties as tool names", async (t) => {
+  const { service } = withService(t);
+  const handle = createMcpRequestHandler(service);
+  for (const name of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+    const response = await handle({
+      jsonrpc: "2.0",
+      id: name,
+      method: "tools/call",
+      params: { name, arguments: {} }
+    });
+    assert.deepEqual(response.error, { code: -32601, message: "Tool not found" });
+  }
+});
+
 test("the MCP handler completes the read-only handshake and ignores notifications", async (t) => {
   const { service } = withService(t);
   const handle = createMcpRequestHandler(service);
