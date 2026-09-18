@@ -6840,7 +6840,7 @@ function renderNewDealProposalDetail(proposal) {
     <section class="ai-detail-section">
       <h4>Proposed fields</h4>
       <div class="company-summary-grid new-deal-edit-grid">
-        <label>Company / deal name (${escapeHtml(dealClaimStatus(proposal, "companyName"))})<input id="newDealCompanyName" value="${escapeHtml(dealClaimValue(proposal, "companyName"))}"></label>
+        <label>Company / fund / deal name (${escapeHtml(dealClaimStatus(proposal, "companyName"))})<input id="newDealCompanyName" value="${escapeHtml(dealClaimValue(proposal, "companyName"))}"></label>
         <label>Contact name (${escapeHtml(dealClaimStatus(proposal, "contactName"))})<input id="newDealContactName" value="${escapeHtml(dealClaimValue(proposal, "contactName"))}"></label>
         <label>Contact email (${escapeHtml(dealClaimStatus(proposal, "contactEmail"))})<input id="newDealContactEmail" type="email" value="${escapeHtml(dealClaimValue(proposal, "contactEmail"))}"></label>
         <label>Entity<select id="newDealEntity">${entityOptions}</select></label>
@@ -6855,10 +6855,10 @@ function renderNewDealProposalDetail(proposal) {
         <label>Lead investor (${escapeHtml(dealClaimStatus(proposal, "leadInvestor"))})<input id="newDealLeadInvestor" value="${escapeHtml(dealClaimValue(proposal, "leadInvestor"))}"></label>
       </div>
       <label>AI summary<textarea id="newDealSummary" rows="4">${escapeHtml(dealClaimValue(proposal, "dealSummary"))}</textarea></label>
-      <label>What the company does<textarea id="newDealWhatCompanyDoes" rows="3">${escapeHtml(dealClaimValue(proposal, "whatCompanyDoes"))}</textarea></label>
-      <label>Product / business model<textarea id="newDealBusinessModel" rows="3">${escapeHtml(dealClaimValue(proposal, "businessModel"))}</textarea></label>
-      <label>Traction / revenue<textarea id="newDealTractionRevenue" rows="3">${escapeHtml(dealClaimValue(proposal, "tractionRevenue"))}</textarea></label>
-      <label>Customers / contracts / deployments<textarea id="newDealCustomers" rows="3">${escapeHtml(dealClaimValue(proposal, "customersContractsDeployments"))}</textarea></label>
+      <label>Strategy / what the opportunity does<textarea id="newDealWhatCompanyDoes" rows="3">${escapeHtml(dealClaimValue(proposal, "whatCompanyDoes"))}</textarea></label>
+      <label>Business model / fund strategy<textarea id="newDealBusinessModel" rows="3">${escapeHtml(dealClaimValue(proposal, "businessModel"))}</textarea></label>
+      <label>Traction / deployment / revenue<textarea id="newDealTractionRevenue" rows="3">${escapeHtml(dealClaimValue(proposal, "tractionRevenue"))}</textarea></label>
+      <label>Portfolio / contracts / deployments<textarea id="newDealCustomers" rows="3">${escapeHtml(dealClaimValue(proposal, "customersContractsDeployments"))}</textarea></label>
       <label>Financing terms<textarea id="newDealFinancingTerms" rows="3">${escapeHtml(dealClaimValue(proposal, "financingTerms"))}</textarea></label>
       <label>Use of proceeds<textarea id="newDealUseOfProceeds" rows="3">${escapeHtml(dealClaimValue(proposal, "useOfProceeds"))}</textarea></label>
       <label>Key investment points<textarea id="newDealPoints" rows="4">${escapeHtml(dealClaimListText(proposal, "keyInvestmentPoints"))}</textarea></label>

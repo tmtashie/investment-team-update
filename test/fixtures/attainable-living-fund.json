@@ -1,0 +1,216 @@
+{
+  "source": {
+    "sender": "sponsor@attainable-housing.example",
+    "senderName": "Sanitized Fund Sponsor",
+    "subject": "Sanitized Attainable Housing Fund III opportunity",
+    "sourceDate": "2026-09-18T14:00:00Z",
+    "sourceText": "Sanitized Attainable Housing Fund III is a real estate investment fund targeting workforce and attainable multifamily housing in the Southeast and Texas. The Fund has a $450M target, and the minimum investment is $1M. The offering includes Class A and Class B investor interests. Class A has an 8% preferred return and quarterly cash distributions after asset stabilization; Class B participates in residual appreciation. The Fund term is 10 years with two optional one-year extensions. Target portfolio allocation is 70% existing attainable multifamily assets and 30% development or conversion programs. Page 6 states that $175M is committed and $120M has been deployed across 14 properties. Page 18 states that $168M has been contributed and $132M has been deployed across 16 properties. The strategy expects cost-segregation studies and accelerated depreciation where available, subject to each investor's tax circumstances. Target investors include pensions, endowments, and family offices. The manager charges a 1.5% management fee on commitments and 20% carried interest after the preferred return. An illustrative property model shows a 19% gross IRR and 2.0x equity multiple; this scenario is not actual fund performance, is not guaranteed, and is not stated as the Fund's expected return. The Fund seeks to complete fundraising by Q2 2027 and reports $275M remaining against the target. The sender is available for questions and can connect prospective investors with the portfolio operations team. Disclosed risks include: higher interest rates may increase financing costs and reduce asset values; new apartment supply and concessions may pressure rents and occupancy; execution depends on property-level operations and lease-up; development projects face construction-cost and schedule risk; results depend on third-party developers and operators; and REIT qualification, tax law, zoning, or other regulatory changes may affect outcomes. No Beaman Ventures proposed check, allocation, or commitment is stated."
+  },
+  "modelResponse": {
+    "isPotentialNewDeal": true,
+    "classificationReason": "A new real estate investment fund opportunity not present in the portfolio.",
+    "companyName": {
+      "value": "Sanitized Attainable Housing Fund III",
+      "sourceEvidence": "Sanitized Attainable Housing Fund III is a real estate investment fund",
+      "sourceLocation": "Email body"
+    },
+    "dealSummary": {
+      "value": "A $450M real estate fund focused on attainable multifamily housing with two investor classes, an 8% Class A preferred return, and disclosed deployment and development risks.",
+      "sourceEvidence": "The Fund has a $450M target, and the minimum investment is $1M.",
+      "sourceLocation": "Email body"
+    },
+    "whatCompanyDoes": {
+      "value": "Invests in workforce and attainable multifamily housing in the Southeast and Texas.",
+      "sourceEvidence": "targeting workforce and attainable multifamily housing in the Southeast and Texas",
+      "sourceLocation": "Email body"
+    },
+    "businessModel": {
+      "value": "Closed-end real estate fund with management fees, carried interest, preferred-return economics, and cash distributions after stabilization.",
+      "sourceEvidence": "The manager charges a 1.5% management fee on commitments and 20% carried interest after the preferred return.",
+      "sourceLocation": "Email body"
+    },
+    "stage": {
+      "value": "Fundraising and deploying capital",
+      "sourceEvidence": "The Fund seeks to complete fundraising by Q2 2027",
+      "sourceLocation": "Email body"
+    },
+    "tractionRevenue": {
+      "value": "$120M deployed across 14 properties",
+      "conflictingEvidence": [
+        {
+          "value": "$120M deployed across 14 properties",
+          "sourceEvidence": "$120M has been deployed across 14 properties",
+          "sourceLocation": "Deck page 6"
+        },
+        {
+          "value": "$132M deployed across 16 properties",
+          "sourceEvidence": "$132M has been deployed across 16 properties",
+          "sourceLocation": "Deck page 18"
+        }
+      ]
+    },
+    "customersContractsDeployments": {
+      "value": "Pensions, endowments, and family offices",
+      "sourceEvidence": "Target investors include pensions, endowments, and family offices.",
+      "sourceLocation": "Email body"
+    },
+    "roundType": {
+      "value": "Real estate fund interests",
+      "sourceEvidence": "The offering includes Class A and Class B investor interests.",
+      "sourceLocation": "Email body"
+    },
+    "amountBeingRaised": {
+      "value": "$450M",
+      "sourceEvidence": "The Fund has a $450M target",
+      "sourceLocation": "Email body"
+    },
+    "amountCommitted": {
+      "value": "$175M committed",
+      "conflictingEvidence": [
+        {
+          "value": "$175M committed",
+          "sourceEvidence": "$175M is committed",
+          "sourceLocation": "Deck page 6"
+        },
+        {
+          "value": "$168M contributed",
+          "sourceEvidence": "$168M has been contributed",
+          "sourceLocation": "Deck page 18"
+        }
+      ]
+    },
+    "amountRemaining": {
+      "value": "$275M",
+      "sourceEvidence": "$275M remaining against the target",
+      "sourceLocation": "Email body"
+    },
+    "proposedCheckSize": {
+      "value": "$1M",
+      "sourceEvidence": "the minimum investment is $1M",
+      "sourceLocation": "Email body"
+    },
+    "valuationCap": {
+      "value": "",
+      "sourceEvidence": "",
+      "sourceLocation": ""
+    },
+    "securityType": {
+      "value": "Class A or Class B fund interests",
+      "sourceEvidence": "Class A and Class B investor interests",
+      "sourceLocation": "Email body"
+    },
+    "financingTerms": {
+      "value": "10-year term with two one-year extensions; Class A 8% preferred return and quarterly cash distributions after stabilization; 1.5% management fee and 20% carry.",
+      "sourceEvidence": "The Fund term is 10 years with two optional one-year extensions.",
+      "sourceLocation": "Email body"
+    },
+    "leadInvestor": {
+      "value": "",
+      "sourceEvidence": "",
+      "sourceLocation": ""
+    },
+    "useOfProceeds": {
+      "value": "70% existing attainable multifamily assets and 30% development or conversion programs.",
+      "sourceEvidence": "Target portfolio allocation is 70% existing attainable multifamily assets and 30% development or conversion programs.",
+      "sourceLocation": "Email body"
+    },
+    "keyInvestmentPoints": [
+      {
+        "value": "$450M fund target with a $1M minimum investment",
+        "sourceEvidence": "The Fund has a $450M target, and the minimum investment is $1M.",
+        "sourceLocation": "Email body"
+      },
+      {
+        "value": "Class A and Class B interests; Class A receives an 8% preferred return and quarterly cash distributions after stabilization",
+        "sourceEvidence": "Class A has an 8% preferred return and quarterly cash distributions after asset stabilization; Class B participates in residual appreciation.",
+        "sourceLocation": "Email body"
+      },
+      {
+        "value": "10-year term with two optional one-year extensions",
+        "sourceEvidence": "The Fund term is 10 years with two optional one-year extensions.",
+        "sourceLocation": "Email body"
+      },
+      {
+        "value": "70% existing assets and 30% development or conversion programs",
+        "sourceEvidence": "Target portfolio allocation is 70% existing attainable multifamily assets and 30% development or conversion programs.",
+        "sourceLocation": "Email body"
+      },
+      {
+        "value": "Cost segregation and accelerated depreciation strategy where available",
+        "sourceEvidence": "expects cost-segregation studies and accelerated depreciation where available, subject to each investor's tax circumstances",
+        "sourceLocation": "Email body"
+      },
+      {
+        "value": "Targets attainable multifamily assets in the Southeast and Texas",
+        "sourceEvidence": "targeting workforce and attainable multifamily housing in the Southeast and Texas",
+        "sourceLocation": "Email body"
+      },
+      {
+        "value": "1.5% management fee on commitments and 20% carried interest after the preferred return",
+        "sourceEvidence": "The manager charges a 1.5% management fee on commitments and 20% carried interest after the preferred return.",
+        "sourceLocation": "Email body"
+      },
+      {
+        "value": "Achieved 19% gross IRR and guaranteed 2.0x equity multiple",
+        "sourceEvidence": "An illustrative property model shows a 19% gross IRR and 2.0x equity multiple; this scenario is not actual fund performance, is not guaranteed, and is not stated as the Fund's expected return.",
+        "sourceLocation": "Illustrative property model"
+      },
+      {
+        "value": "Strong projected returns for investors",
+        "sourceEvidence": "Class B participates in residual appreciation.",
+        "sourceLocation": "Email body"
+      }
+    ],
+    "keyRisks": [
+      {
+        "value": "Macro/rate risk: higher rates may increase financing costs and reduce asset values",
+        "sourceEvidence": "higher interest rates may increase financing costs and reduce asset values",
+        "sourceLocation": "Risk factors"
+      },
+      {
+        "value": "Supply/concession risk: new supply and concessions may pressure rents and occupancy",
+        "sourceEvidence": "new apartment supply and concessions may pressure rents and occupancy",
+        "sourceLocation": "Risk factors"
+      },
+      {
+        "value": "Operational execution risk: results depend on property operations and lease-up",
+        "sourceEvidence": "execution depends on property-level operations and lease-up",
+        "sourceLocation": "Risk factors"
+      },
+      {
+        "value": "Construction/development risk: projects face cost and schedule risk",
+        "sourceEvidence": "development projects face construction-cost and schedule risk",
+        "sourceLocation": "Risk factors"
+      },
+      {
+        "value": "Counterparty risk: results depend on third-party developers and operators",
+        "sourceEvidence": "results depend on third-party developers and operators",
+        "sourceLocation": "Risk factors"
+      },
+      {
+        "value": "Regulatory/REIT/tax risk: qualification, tax, zoning, or regulatory changes may affect outcomes",
+        "sourceEvidence": "REIT qualification, tax law, zoning, or other regulatory changes may affect outcomes",
+        "sourceLocation": "Risk factors"
+      },
+      {
+        "value": "Generic investment risk",
+        "sourceEvidence": "",
+        "sourceLocation": ""
+      }
+    ],
+    "nextSteps": [
+      {
+        "value": "Complete fundraising by Q2 2027",
+        "sourceEvidence": "The Fund seeks to complete fundraising by Q2 2027",
+        "sourceLocation": "Email body"
+      },
+      {
+        "value": "Schedule a meeting with the portfolio operations team",
+        "sourceEvidence": "The sender is available for questions and can connect prospective investors with the portfolio operations team.",
+        "sourceLocation": "Email body"
+      }
+    ],
+    "deadlines": [],
+    "relevantUrls": []
+  }
+}
