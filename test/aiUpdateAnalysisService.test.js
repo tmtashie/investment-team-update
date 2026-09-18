@@ -154,6 +154,10 @@ test("source explicitly says FINSYNC and portfolio contains FINSYNC", async () =
   assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
   assert.equal(result.analysis.investmentMatch.confidence, 98);
   assert.match(result.analysis.investmentMatch.reason, /Exact source body match for 'FINSYNC'/);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "finsync-id",
+    types: ["sourceBody", "senderDomain"]
+  });
 });
 
 test("FINSYNC subject and sender domain deterministically match FINSYNC instead of Healing Innovations", async () => {
@@ -260,6 +264,10 @@ test("semantic-only match produces lower confidence and warning", async () => {
       reason: "Financial update sounded similar."
     },
     entityMatch: {},
+    deterministicEvidence: {
+      investmentId: "vanguard-id",
+      types: ["sourceBody"]
+    },
     extractedFacts: [],
     whatChanged: [],
     proposedChanges: [],
@@ -278,6 +286,120 @@ test("semantic-only match produces lower confidence and warning", async () => {
 
   assert.equal(result.analysis.investmentMatch.investmentId, "vanguard-id");
   assert.equal(result.analysis.investmentMatch.confidence, 84);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "",
+    types: []
+  });
+  assert.match(result.analysis.warnings.join(" "), /lacks explicit/);
+});
+
+test("embedded compact alias text is not deterministic portfolio evidence", async () => {
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "finsync-id",
+      investmentName: "FINSYNC",
+      confidence: 96,
+      reason: "The report appeared related to FINSYNC."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sourceText: "The integration uses a FINSYNChronization process for monthly reporting."
+    },
+    investments: finsyncInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "finsync-id");
+  assert.equal(result.analysis.investmentMatch.confidence, 84);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "",
+    types: []
+  });
+  assert.match(result.analysis.warnings.join(" "), /lacks explicit/);
+});
+
+test("compact alias matching still accepts complete punctuation-normalized tokens", async () => {
+  const punctuationInvestments = [
+    {
+      id: "elf-id",
+      company: "E.L.F. Beauty",
+      entity: "Beaman Ventures",
+      assetType: "Public Stock",
+      status: "Active"
+    }
+  ];
+  const { service } = createService({
+    investmentMatch: { investmentId: "elf-id", confidence: 80 },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: { sourceText: "ELF Beauty issued its monthly investor update." },
+    investments: punctuationInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "elf-id");
+  assert.ok(result.analysis.investmentMatch.confidence >= 95);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "elf-id",
+    types: ["sourceBody"]
+  });
+});
+
+test("sender domain substrings are not deterministic portfolio evidence", async () => {
+  const beamInvestments = [
+    {
+      id: "beam-id",
+      company: "Beam",
+      entity: "Beaman Ventures",
+      assetType: "Private Investment",
+      status: "Active"
+    }
+  ];
+  const { service } = createService({
+    investmentMatch: {
+      investmentId: "beam-id",
+      investmentName: "Beam",
+      confidence: 96,
+      reason: "The sender domain appeared related to Beam."
+    },
+    entityMatch: {},
+    extractedFacts: [],
+    whatChanged: [],
+    proposedChanges: [],
+    warnings: [],
+    unresolved: []
+  });
+
+  const result = await service.analyzeInvestmentUpdate({
+    source: {
+      sender: "updates@sunbeam.com",
+      sourceText: "Monthly investor report with no named portfolio company."
+    },
+    investments: beamInvestments,
+    entities
+  });
+
+  assert.equal(result.analysis.investmentMatch.investmentId, "beam-id");
+  assert.equal(result.analysis.investmentMatch.confidence, 84);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "",
+    types: []
+  });
   assert.match(result.analysis.warnings.join(" "), /lacks explicit/);
 });
 
@@ -312,6 +434,10 @@ test("competing candidates lower confidence", async () => {
 
   assert.ok(result.analysis.investmentMatch.confidence <= 88);
   assert.match(result.analysis.warnings.join(" "), /Multiple plausible/);
+  assert.deepEqual(result.analysis.deterministicEvidence, {
+    investmentId: "",
+    types: []
+  });
 });
 
 test("$3,000,000 source text verifies normalized 3.0M revenue evidence", async () => {
@@ -1931,3 +2057,4 @@ test("failed material development is absent from What Changed and not actionable
   assert.doesNotMatch(result.analysis.whatChanged.join(" "), /\$5M|line of credit|committed/i);
   assert.match(result.analysis.warnings.join(" "), /Removed unsupported material development/);
 });
+

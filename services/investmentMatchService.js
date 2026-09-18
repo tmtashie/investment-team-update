@@ -29,7 +29,20 @@ function hasExplicitPhrase(sourceText, phrase) {
     return true;
   }
   const compactPhrase = compactMatchText(phrase);
-  return compactPhrase.length >= 6 && compactMatchText(sourceText).includes(compactPhrase);
+  if (compactPhrase.length < 6) {
+    return false;
+  }
+  const sourceTokens = normalizeMatchText(sourceText).split(" ").filter(Boolean);
+  for (let start = 0; start < sourceTokens.length; start += 1) {
+    let compactSpan = "";
+    for (let end = start; end < sourceTokens.length && compactSpan.length < compactPhrase.length; end += 1) {
+      compactSpan += compactMatchText(sourceTokens[end]);
+      if (compactSpan === compactPhrase) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function uniqueValues(values) {
@@ -70,7 +83,7 @@ function scoreDomainEvidence(sender, aliases) {
   if (!rootDomain || rootDomain.length < 4) return null;
   const matchedAlias = aliases.find((alias) => {
     const compactAlias = compactMatchText(alias);
-    return compactAlias.length >= 4 && (compactAlias.includes(rootDomain) || rootDomain.includes(compactAlias));
+    return compactAlias.length >= 4 && compactAlias === compactMatchText(rootDomain);
   });
   return matchedAlias
     ? { alias: matchedAlias, domain: rootDomain, weight: 18, reason: `Sender domain '${rootDomain}' supports '${matchedAlias}'.` }
@@ -92,6 +105,17 @@ function generateInvestmentMatchCandidates({ source, investments = [] }) {
     const evidence = [];
     if (aliasMatch) evidence.push(`Exact ${aliasMatch.location} match for '${aliasMatch.alias}'.`);
     if (domainEvidence) evidence.push(domainEvidence.reason);
+    const evidenceTypes = [];
+    if (aliasMatch) {
+      evidenceTypes.push(
+        aliasMatch.location === "source body"
+          ? "sourceBody"
+          : aliasMatch.location === "subject"
+            ? "subject"
+            : "attachmentFilename"
+      );
+    }
+    if (domainEvidence) evidenceTypes.push("senderDomain");
     return {
       investment,
       investmentId: cleanString(investment && investment.id, 200),
@@ -100,6 +124,7 @@ function generateInvestmentMatchCandidates({ source, investments = [] }) {
       score,
       hasExplicitNameEvidence: Boolean(aliasMatch),
       hasDomainEvidence: Boolean(domainEvidence),
+      evidenceTypes,
       matchedAlias: aliasMatch ? aliasMatch.alias : "",
       reason: evidence.join(" ")
     };

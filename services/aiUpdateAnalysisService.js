@@ -775,7 +775,20 @@ function hasExplicitPhrase(sourceText, phrase) {
     return true;
   }
   const compactPhrase = compactMatchText(phrase);
-  return compactPhrase.length >= 6 && compactMatchText(sourceText).includes(compactPhrase);
+  if (compactPhrase.length < 6) {
+    return false;
+  }
+  const sourceTokens = normalizeMatchText(sourceText).split(" ").filter(Boolean);
+  for (let start = 0; start < sourceTokens.length; start += 1) {
+    let compactSpan = "";
+    for (let end = start; end < sourceTokens.length && compactSpan.length < compactPhrase.length; end += 1) {
+      compactSpan += compactMatchText(sourceTokens[end]);
+      if (compactSpan === compactPhrase) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function findMatchedAlias(sourceParts, aliases) {
@@ -800,7 +813,7 @@ function scoreDomainEvidence(sender, aliases) {
   }
   const matchedAlias = aliases.find((alias) => {
     const compactAlias = compactMatchText(alias);
-    return compactAlias.length >= 4 && (compactAlias.includes(rootDomain) || rootDomain.includes(compactAlias));
+    return compactAlias.length >= 4 && compactAlias === compactMatchText(rootDomain);
   });
   return matchedAlias
     ? {
@@ -1579,6 +1592,9 @@ function normalizeAnalysisResult({
   const whatChanged = shouldEnforceEvidenceGate
     ? enrichSafeWhatChangedSummary([], proposedChanges, materialDevelopments)
     : enrichWhatChangedSummary(raw.whatChanged || raw.what_changed, proposedChanges);
+  const matchedDeterministicCandidate = matchedInvestment && !hasCompetingCandidate
+    ? deterministicCandidates.find((candidate) => candidate.investmentId === matchedInvestment.id)
+    : null;
 
   const normalizedAnalysis = {
     investmentMatch: {
@@ -1592,6 +1608,12 @@ function normalizeAnalysisResult({
         : deterministicBest && matchedInvestment && matchedInvestment.id === deterministicBest.investmentId
           ? deterministicReason
           : asString(modelInvestmentMatch.reason || modelInvestmentMatch.matchReason, 600)
+    },
+    deterministicEvidence: {
+      investmentId: matchedDeterministicCandidate ? matchedDeterministicCandidate.investmentId : "",
+      types: matchedDeterministicCandidate && Array.isArray(matchedDeterministicCandidate.evidenceTypes)
+        ? matchedDeterministicCandidate.evidenceTypes.slice()
+        : []
     },
     entityMatch: {
       entityId: entityName,
