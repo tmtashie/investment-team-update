@@ -1,4 +1,5 @@
 const SEMANTIC_ONLY_CONFIDENCE_CAP = 84;
+const DEFAULT_HOUSE_DOMAINS = ["beamanventures.com"];
 
 function cleanString(value, maxLength = 2000) {
   return String(value || "").trim().slice(0, maxLength);
@@ -56,6 +57,28 @@ function getRootDomain(sender) {
   return parts.length >= 2 ? parts.slice(-2, -1)[0] || "" : "";
 }
 
+function getSenderDomain(sender) {
+  const emailOrDomain = cleanString(sender, 240).toLowerCase();
+  const domain = (emailOrDomain.match(/@([^>\s]+)/) || [])[1] || emailOrDomain;
+  return domain.replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[/?#]/)[0].replace(/\.+$/, "");
+}
+
+function normalizeDomains(domains = DEFAULT_HOUSE_DOMAINS) {
+  const values = Array.isArray(domains) ? domains : String(domains || "").split(",");
+  return values
+    .map((domain) => getSenderDomain(domain))
+    .filter(Boolean);
+}
+
+function isDomainOrSubdomain(domain, configuredDomain) {
+  return domain === configuredDomain || domain.endsWith(`.${configuredDomain}`);
+}
+
+function isHouseDomainSender(sender, houseDomains = DEFAULT_HOUSE_DOMAINS) {
+  const senderDomain = getSenderDomain(sender);
+  return Boolean(senderDomain && normalizeDomains(houseDomains).some((domain) => isDomainOrSubdomain(senderDomain, domain)));
+}
+
 function findMatchedAlias(sourceParts, aliases) {
   for (const alias of aliases) {
     if (hasExplicitPhrase(sourceParts.body, alias)) return { alias, location: "source body", weight: 100 };
@@ -65,7 +88,8 @@ function findMatchedAlias(sourceParts, aliases) {
   return null;
 }
 
-function scoreDomainEvidence(sender, aliases) {
+function scoreDomainEvidence(sender, aliases, houseDomains) {
+  if (isHouseDomainSender(sender, houseDomains)) return null;
   const rootDomain = getRootDomain(sender);
   if (!rootDomain || rootDomain.length < 4) return null;
   const matchedAlias = aliases.find((alias) => {
@@ -77,7 +101,7 @@ function scoreDomainEvidence(sender, aliases) {
     : null;
 }
 
-function generateInvestmentMatchCandidates({ source, investments = [] }) {
+function generateInvestmentMatchCandidates({ source, investments = [], houseDomains = DEFAULT_HOUSE_DOMAINS }) {
   const sourceParts = {
     body: cleanString(source && source.sourceText, 60000),
     subject: cleanString(source && source.subject, 240),
@@ -87,7 +111,7 @@ function generateInvestmentMatchCandidates({ source, investments = [] }) {
   const candidates = investments.map((investment) => {
     const aliases = getInvestmentAliasValues(investment);
     const aliasMatch = findMatchedAlias(sourceParts, aliases);
-    const domainEvidence = scoreDomainEvidence(sourceParts.sender, aliases);
+    const domainEvidence = scoreDomainEvidence(sourceParts.sender, aliases, houseDomains);
     const score = (aliasMatch ? aliasMatch.weight : 0) + (domainEvidence ? domainEvidence.weight : 0);
     const evidence = [];
     if (aliasMatch) evidence.push(`Exact ${aliasMatch.location} match for '${aliasMatch.alias}'.`);
@@ -137,6 +161,7 @@ function confidenceFromDeterministicCandidate(candidate, hasCompetingCandidate) 
 }
 
 module.exports = {
+  DEFAULT_HOUSE_DOMAINS,
   SEMANTIC_ONLY_CONFIDENCE_CAP,
   compactMatchText,
   confidenceFromDeterministicCandidate,
@@ -144,5 +169,6 @@ module.exports = {
   getInvestmentAliasValues,
   getRootDomain,
   hasExplicitPhrase,
+  isHouseDomainSender,
   normalizeMatchText
 };

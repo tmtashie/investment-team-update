@@ -50,11 +50,13 @@ function createMessage(overrides = {}) {
 
 function createHarness({
   messages = [createMessage()],
+  initialState = [],
   analysisFactory,
   analyzePotentialNewDeal,
   extractPdfTextFromUpload,
   allowedSenders = "",
   allowedDomains = "",
+  houseDomains,
   investments = [
     { id: "healing-id", company: "Healing Innovations", owningEntity: "Beaman Ventures" }
   ]
@@ -64,12 +66,19 @@ function createHarness({
   const finalizeCalls = [];
   const safetyCalls = [];
   const uploads = [];
-  const { service: stateService, getStored } = createMemoryStateService();
+  const { service: stateService, getStored } = createMemoryStateService(initialState);
   const graphMailService = {
     isConfigured: () => true,
     fetchIntakeMessages: async () => ({
       mailbox: "updates@example.test",
       folder: { id: "folder-1", displayName: "AI Investment Updates" },
+      messages
+    }),
+    fetchIntakePreviewMessages: async () => ({
+      mailbox: "updates@example.test",
+      folder: { id: "folder-1", displayName: "AI Investment Updates" },
+      maxMessagesPerRun: 10,
+      attachmentBudget: { estimatedRunBytes: 0, runBudgetBytes: 50 * 1024 * 1024 },
       messages
     })
   };
@@ -148,7 +157,8 @@ function createHarness({
       return document;
     },
     allowedSenders,
-    allowedDomains
+    allowedDomains,
+    houseDomains
   });
 
   return {
@@ -161,6 +171,85 @@ function createHarness({
     uploads
   };
 }
+
+test("house-domain-only evidence cannot pass automated proposal eligibility", async () => {
+  const harness = createHarness({
+    messages: [createMessage({
+      subject: "Quarterly investment update",
+      sender: "tyler@beamanventures.com",
+      body: "Quarterly investor update with revenue, customer pipeline, cash runway, product development milestones, operational risks, and board-level financial commentary."
+    })],
+    investments: [{ id: "company-ventures", company: "Company Ventures", owningEntity: "Beaman Ventures" }],
+    analysisFactory: () => ({
+      investmentMatch: {
+        investmentId: "company-ventures",
+        investmentName: "Company Ventures",
+        confidence: 78,
+        reason: "Sender domain 'ventures' supports 'Company Ventures'."
+      },
+      entityMatch: { entityId: "beaman-ventures", entityName: "Beaman Ventures", confidence: 100 },
+      extractedFacts: [{ category: "financial", field: "revenue", value: "$1m" }],
+      proposedChanges: [],
+      materialDevelopments: [],
+      warnings: [],
+      unresolved: [],
+      candidates: [{ investmentId: "company-ventures", reason: "Sender domain 'ventures' supports 'Company Ventures'." }]
+    })
+  });
+
+  const result = await harness.service.checkForNewEmails({ user: { email: "editor@example.test" } });
+
+  assert.equal(result.proposalsCreated, 0);
+  assert.equal(result.results[0].status, "skipped");
+  assert.equal(harness.savedProposals.length, 0);
+  assert.equal(harness.safetyCalls.length, 0);
+});
+
+test("read-only intake preview reports decisions without mutating state or invoking analysis", async () => {
+  const now = new Date();
+  const processed = createMessage({
+    id: "processed-id",
+    internetMessageId: "<processed@example.test>",
+    subject: "Already handled",
+    attachmentCount: 0,
+    attachmentPlan: [],
+    attachmentBudget: { estimatedMessageBytes: 0, messageBudgetBytes: 30 * 1024 * 1024 }
+  });
+  const reserved = createMessage({
+    id: "reserved-id",
+    internetMessageId: "<reserved@example.test>",
+    subject: "In progress",
+    attachmentCount: 0,
+    attachmentPlan: [],
+    attachmentBudget: { estimatedMessageBytes: 0, messageBudgetBytes: 30 * 1024 * 1024 }
+  });
+  const eligible = createMessage({
+    id: "eligible-id",
+    internetMessageId: "<eligible@example.test>",
+    subject: "Attainable Living update",
+    attachmentCount: 1,
+    attachmentPlan: [{ id: "deck", name: "Attainable Living.pdf", contentType: "application/pdf", size: 1024, disposition: "eligible", reason: "Within configured limits." }],
+    attachmentBudget: { estimatedMessageBytes: 1024, messageBudgetBytes: 30 * 1024 * 1024 }
+  });
+  const initialState = [
+    { graphMessageId: processed.id, internetMessageId: processed.internetMessageId, status: "processed", processedAt: now.toISOString(), proposalIds: ["proposal-1"] },
+    { graphMessageId: reserved.id, internetMessageId: reserved.internetMessageId, status: "reserved", reservedAt: now.toISOString() }
+  ];
+  const harness = createHarness({ messages: [eligible, processed, reserved], initialState });
+  const before = JSON.stringify(harness.getStored());
+
+  const result = await harness.service.previewIntake();
+
+  assert.equal(result.readOnly, true);
+  assert.equal(result.checked, 3);
+  assert.deepEqual(result.results.map((item) => item.status), ["eligible", "already-processed", "reserved"]);
+  assert.equal(result.results[0].attachments[0].name, "Attainable Living.pdf");
+  assert.equal(result.results[0].allowlist.allowed, true);
+  assert.equal(JSON.stringify(harness.getStored()), before);
+  assert.equal(harness.analyzeCalls.length, 0);
+  assert.equal(harness.savedProposals.length, 0);
+  assert.equal(harness.uploads.length, 0);
+});
 
 test("email body intake normalizes HTML and uses the existing AI analysis and proposal safety pipeline", async () => {
   const harness = createHarness();

@@ -23,3 +23,39 @@ test("competing deterministic candidates are ambiguous", () => {
   assert.equal(result.hasCompetingCandidate, true);
   assert.equal(result.candidates.length, 2);
 });
+
+test("Beaman Ventures house domain does not support Company Ventures by domain alone", () => {
+  const result = generateInvestmentMatchCandidates({
+    source: { sender: "tyler@beamanventures.com" },
+    investments: [{ id: "company-ventures", company: "Company Ventures", entity: "Beaman Ventures" }]
+  });
+
+  assert.equal(result.status, "no-match");
+  assert.equal(result.candidates.length, 0);
+});
+
+test("legitimate portfolio-company domain still supports Company Ventures", () => {
+  const result = generateInvestmentMatchCandidates({
+    source: { sender: "founder@companyventures.com" },
+    investments: [{ id: "company-ventures", company: "Company Ventures", entity: "Beaman Ventures" }]
+  });
+
+  assert.equal(result.status, "existing-possible");
+  assert.equal(result.best.investmentId, "company-ventures");
+  assert.equal(result.best.hasDomainEvidence, true);
+});
+
+test("explicit Company Ventures text still matches from the house domain", () => {
+  const result = generateInvestmentMatchCandidates({
+    source: {
+      sender: "tyler@updates.beamanventures.com",
+      sourceText: "Company Ventures reported a quarterly revenue and customer pipeline update."
+    },
+    investments: [{ id: "company-ventures", company: "Company Ventures", entity: "Beaman Ventures" }]
+  });
+
+  assert.equal(result.status, "existing-confident");
+  assert.equal(result.best.investmentId, "company-ventures");
+  assert.equal(result.best.hasExplicitNameEvidence, true);
+  assert.equal(result.best.hasDomainEvidence, false);
+});

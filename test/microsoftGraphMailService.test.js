@@ -213,6 +213,49 @@ test("Microsoft Graph safe config status does not expose client secret", () => {
   assert.equal(JSON.stringify(status).includes("client-secret"), false);
 });
 
+test("read-only preview uses the production folder window and lists attachment metadata without downloading content", async () => {
+  const fetchImpl = createFetchMock([
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({ value: [{
+      id: "message-1",
+      internetMessageId: "<message-1@example.test>",
+      subject: "Attainable Living update",
+      from: { emailAddress: { address: "founder@attainableliving.example" } },
+      receivedDateTime: "2026-09-18T12:00:00Z",
+      hasAttachments: true,
+      body: { contentType: "text", content: "Quarterly update" }
+    }] }),
+    graphResponse({ value: [
+      { id: "deck", name: "Attainable Living.pdf", contentType: "application/pdf", size: 1024, isInline: false },
+      { id: "large", name: "Large Model.xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", size: 11 * 1024 * 1024, isInline: false }
+    ] })
+  ]);
+  const service = createMicrosoftGraphMailService({
+    tenantId: "tenant",
+    clientId: "client",
+    clientSecret: "secret",
+    mailboxUser: "updates@example.test",
+    folderName: "AI Investment Updates",
+    maxMessagesPerRun: 7,
+    fetchImpl,
+    graphBaseUrl: "https://graph.test/v1.0",
+    tokenBaseUrl: "https://login.test"
+  });
+
+  const result = await service.fetchIntakePreviewMessages();
+
+  assert.equal(result.maxMessagesPerRun, 7);
+  assert.equal(result.messages[0].attachmentCount, 2);
+  assert.equal(result.messages[0].attachmentPlan[0].disposition, "eligible");
+  assert.equal(result.messages[0].attachmentPlan[1].disposition, "blocked");
+  assert.match(result.messages[0].attachmentPlan[1].reason, /10 MB/);
+  assert.equal(fetchImpl.calls.length, 4);
+  assert.match(fetchImpl.calls[2].url, /\$top=7&\$orderby=receivedDateTime desc/);
+  assert.equal(fetchImpl.calls.some((call) => /attachments\/deck$/.test(call.url)), false);
+  assert.equal(JSON.stringify(result).includes("contentBytes"), false);
+});
+
 test("Microsoft Graph throttling returns a safe retry message", async () => {
   const fetchImpl = createFetchMock([
     graphResponse({ error: { message: "Too many requests" } }, 429, { "retry-after": "30" })

@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { DEFAULT_HOUSE_DOMAINS, isHouseDomainSender } = require("./investmentMatchService");
 
 function cleanString(value, maxLength = 2000) {
   return String(value || "").trim().slice(0, maxLength);
@@ -114,6 +115,51 @@ function senderAllowed(sender, allowedSenders, allowedDomains) {
   return true;
 }
 
+function senderAllowlistOutcome(sender, allowedSenders, allowedDomains) {
+  const email = cleanString(sender, 320).toLowerCase();
+  const domain = email.includes("@") ? email.split("@").pop() : "";
+  if (!email) {
+    return { allowed: false, email, domain, reason: "Message has no sender address." };
+  }
+  if (allowedSenders.length && !allowedSenders.includes(email)) {
+    return { allowed: false, email, domain, reason: "Sender is outside the configured sender allowlist." };
+  }
+  if (allowedDomains.length && !allowedDomains.includes(domain)) {
+    return { allowed: false, email, domain, reason: "Sender domain is outside the configured domain allowlist." };
+  }
+  return {
+    allowed: true,
+    email,
+    domain,
+    reason: allowedSenders.length || allowedDomains.length
+      ? "Sender satisfies the configured intake allowlist."
+      : "No sender or domain allowlist is configured."
+  };
+}
+
+function previewStateDecision(message, stateEntry, now = new Date()) {
+  if (!cleanString(message && (message.internetMessageId || message.id || message.graphMessageId), 500)) {
+    return { status: "blocked", reason: "Message has no stable Graph or Internet Message ID and cannot be reserved safely." };
+  }
+  if (!stateEntry) {
+    return { status: "eligible", reason: "Message is new and would be eligible for production intake analysis." };
+  }
+  if (["processed", "skipped"].includes(stateEntry.status)) {
+    return { status: "already-processed", reason: "Message is already recorded as processed or skipped and would not be analyzed again." };
+  }
+  if (stateEntry.status === "reserved") {
+    const reservedAt = new Date(stateEntry.reservedAt || stateEntry.processedAt || 0).getTime();
+    if (Number.isFinite(reservedAt) && now.getTime() - reservedAt < 15 * 60 * 1000) {
+      return { status: "reserved", reason: "Message has an active intake reservation and would not be analyzed concurrently." };
+    }
+    return { status: "eligible", reason: "The prior reservation is stale; production intake would be allowed to reclaim and analyze the message." };
+  }
+  if (stateEntry.status === "failed") {
+    return { status: "eligible", reason: "A prior attempt failed; production intake would retry this message." };
+  }
+  return { status: "eligible", reason: `State status '${cleanString(stateEntry.status, 80) || "unknown"}' does not block a production retry.` };
+}
+
 function createProposalPayload({ analysis, source, document }) {
   return {
     investmentId: analysis.investmentMatch && analysis.investmentMatch.investmentId,
@@ -166,7 +212,7 @@ function shouldCreateProposal(analysis) {
   );
 }
 
-function hasAutomatedExplicitInvestmentMatch(analysis) {
+function hasAutomatedExplicitInvestmentMatch(analysis, { sender = "", houseDomains = DEFAULT_HOUSE_DOMAINS } = {}) {
   const investmentMatch = analysis && analysis.investmentMatch ? analysis.investmentMatch : {};
   if (!investmentMatch.investmentId) {
     return false;
@@ -183,19 +229,23 @@ function hasAutomatedExplicitInvestmentMatch(analysis) {
     return false;
   }
 
+  const senderDomainEligible = !isHouseDomainSender(sender, houseDomains);
   const reason = cleanString(investmentMatch.reason, 1000).toLowerCase();
-  if (/exact .+ match for|sender domain .+ supports/.test(reason)) {
+  if (/exact .+ match for/.test(reason) || (senderDomainEligible && /sender domain .+ supports/.test(reason))) {
     return true;
   }
 
   return (Array.isArray(analysis.candidates) ? analysis.candidates : []).some((candidate) =>
     candidate &&
     candidate.investmentId === investmentMatch.investmentId &&
-    /exact .+ match for|sender domain .+ supports/i.test(cleanString(candidate.reason, 1000))
+    (
+      /exact .+ match for/i.test(cleanString(candidate.reason, 1000)) ||
+      (senderDomainEligible && /sender domain .+ supports/i.test(cleanString(candidate.reason, 1000)))
+    )
   );
 }
 
-function getDeterministicEvidenceTypes(analysis) {
+function getDeterministicEvidenceTypes(analysis, { sender = "", houseDomains = DEFAULT_HOUSE_DOMAINS } = {}) {
   const investmentId = analysis && analysis.investmentMatch && analysis.investmentMatch.investmentId;
   const reasons = [analysis && analysis.investmentMatch && analysis.investmentMatch.reason]
     .concat(
@@ -209,7 +259,7 @@ function getDeterministicEvidenceTypes(analysis) {
   if (reasons.some((reason) => reason.includes("exact subject match"))) {
     types.push("subject");
   }
-  if (reasons.some((reason) => reason.includes("sender domain"))) {
+  if (!isHouseDomainSender(sender, houseDomains) && reasons.some((reason) => reason.includes("sender domain"))) {
     types.push("senderDomain");
   }
   if (reasons.some((reason) => reason.includes("exact source body match"))) {
@@ -242,7 +292,7 @@ function safeWarningStrings(analysis) {
     .slice(0, 8);
 }
 
-function buildSkippedAnalysisAudit({ analysis, source, reason, shouldCreateProposalResult }) {
+function buildSkippedAnalysisAudit({ analysis, source, reason, shouldCreateProposalResult, houseDomains }) {
   const investmentMatch = analysis && analysis.investmentMatch ? analysis.investmentMatch : {};
   const entityMatch = analysis && analysis.entityMatch ? analysis.entityMatch : {};
   return {
@@ -259,8 +309,8 @@ function buildSkippedAnalysisAudit({ analysis, source, reason, shouldCreatePropo
       matchedEntity: cleanString(entityMatch.entityName || entityMatch.entityId, 120),
       matchConfidence: Number(investmentMatch.confidence) || 0,
       matchReason: cleanString(investmentMatch.reason, 1000),
-      explicitMatch: hasAutomatedExplicitInvestmentMatch(analysis),
-      deterministicEvidenceTypes: getDeterministicEvidenceTypes(analysis)
+      explicitMatch: hasAutomatedExplicitInvestmentMatch(analysis, { sender: source && source.sender, houseDomains }),
+      deterministicEvidenceTypes: getDeterministicEvidenceTypes(analysis, { sender: source && source.sender, houseDomains })
     },
     counts: {
       extractedFacts: countItems(analysis && analysis.extractedFacts),
@@ -292,7 +342,8 @@ function createAiEmailIntakeService({
   makeId = () => crypto.randomUUID(),
   saveUpload,
   allowedSenders = "",
-  allowedDomains = ""
+  allowedDomains = "",
+  houseDomains = DEFAULT_HOUSE_DOMAINS
 }) {
   const senderAllowlist = normalizeSenderList(allowedSenders);
   const domainAllowlist = normalizeSenderList(allowedDomains);
@@ -436,11 +487,12 @@ function createAiEmailIntakeService({
           analysis,
           source,
           reason,
-          shouldCreateProposalResult: createProposalEligible
+          shouldCreateProposalResult: createProposalEligible,
+          houseDomains
         })
       };
     }
-    if (!hasAutomatedExplicitInvestmentMatch(analysis)) {
+    if (!hasAutomatedExplicitInvestmentMatch(analysis, { sender: source.sender, houseDomains })) {
       const reason = "Automated email intake requires explicit investment name, alias, sender-domain, subject, or filename evidence before creating a pending proposal.";
       return {
         proposal: null,
@@ -450,7 +502,8 @@ function createAiEmailIntakeService({
           analysis,
           source,
           reason,
-          shouldCreateProposalResult: createProposalEligible
+          shouldCreateProposalResult: createProposalEligible,
+          houseDomains
         })
       };
     }
@@ -722,10 +775,72 @@ function createAiEmailIntakeService({
     };
   }
 
+  async function previewIntake() {
+    if (!graphMailService || !graphMailService.isConfigured()) {
+      return {
+        configured: false,
+        readOnly: true,
+        error: "Microsoft 365 email intake is not configured.",
+        results: []
+      };
+    }
+
+    let run;
+    try {
+      run = await graphMailService.fetchIntakePreviewMessages();
+    } catch (error) {
+      return {
+        configured: true,
+        readOnly: true,
+        error: error.message || "Microsoft 365 email intake preview failed.",
+        results: []
+      };
+    }
+
+    const now = new Date();
+    const results = run.messages.map((message) => {
+      const allowlist = senderAllowlistOutcome(message.sender, senderAllowlist, domainAllowlist);
+      const stateEntry = stateService.findByMessage(message);
+      const decision = allowlist.allowed
+        ? previewStateDecision(message, stateEntry, now)
+        : { status: "skipped", reason: allowlist.reason };
+      return {
+        ...resultSkeleton(message),
+        status: decision.status,
+        reason: decision.reason,
+        allowlist,
+        attachmentCount: Number(message.attachmentCount) || 0,
+        attachments: Array.isArray(message.attachmentPlan) ? message.attachmentPlan : [],
+        attachmentBudget: message.attachmentBudget || {},
+        state: stateEntry
+          ? {
+              status: stateEntry.status,
+              reservedAt: stateEntry.reservedAt,
+              processedAt: stateEntry.processedAt,
+              proposalIds: stateEntry.proposalIds,
+              error: stateEntry.error
+            }
+          : { status: "not-recorded", reservedAt: "", processedAt: "", proposalIds: [], error: "" }
+      };
+    });
+
+    return {
+      configured: true,
+      readOnly: true,
+      mailbox: run.mailbox,
+      folderName: run.folder && run.folder.displayName,
+      maxMessagesPerRun: run.maxMessagesPerRun,
+      attachmentBudget: run.attachmentBudget,
+      checked: results.length,
+      results
+    };
+  }
+
   return {
     checkForNewEmails,
     isMeaningfulBody,
-    normalizeEmailBody
+    normalizeEmailBody,
+    previewIntake
   };
 }
 

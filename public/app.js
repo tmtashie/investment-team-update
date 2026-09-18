@@ -280,6 +280,7 @@ const companyTasks = document.getElementById("companyTasks");
 const aiUpdateInboxSummary = document.getElementById("aiUpdateInboxSummary");
 const aiUpdateInboxMessage = document.getElementById("aiUpdateInboxMessage");
 const checkAiEmailIntakeButton = document.getElementById("checkAiEmailIntakeButton");
+const previewAiEmailIntakeButton = document.getElementById("previewAiEmailIntakeButton");
 const aiEmailIntakeResult = document.getElementById("aiEmailIntakeResult");
 const aiUpdateInboxList = document.getElementById("aiUpdateInboxList");
 const aiUpdateProposalDetail = document.getElementById("aiUpdateProposalDetail");
@@ -324,7 +325,8 @@ let aiEmailIntakeConfig = {
   enabled: false,
   configured: false,
   mailboxUser: "",
-  folderName: ""
+  folderName: "",
+  maxMessagesPerRun: 0
 };
 let selectedAiUpdateProposalId = "";
 let latestAiUpdateAnalysis = null;
@@ -674,6 +676,13 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function formatFileSize(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function normalizeMoneyString(value, decimalPlaces = 2) {
@@ -7464,15 +7473,18 @@ function renderAiEmailIntakeResult(result) {
     return;
   }
 
-  const rows = Array.isArray(result.results) ? result.results.slice(0, 8) : [];
+  const rows = Array.isArray(result.results) ? result.results : [];
+  const isPreview = Boolean(result.readOnly);
   aiEmailIntakeResult.classList.remove("hidden");
   aiEmailIntakeResult.innerHTML = `
     <div class="update-head">
       <div>
-        <p class="dashboard-label">Microsoft 365 intake</p>
-        <h3>${escapeHtml(String(result.proposalsCreated || 0))} proposal${Number(result.proposalsCreated || 0) === 1 ? "" : "s"} created</h3>
+        <p class="dashboard-label">Microsoft 365 ${isPreview ? "read-only preview" : "intake"}</p>
+        <h3>${isPreview ? `${escapeHtml(String(result.checked || 0))} message${Number(result.checked || 0) === 1 ? "" : "s"} considered` : `${escapeHtml(String(result.proposalsCreated || 0))} proposal${Number(result.proposalsCreated || 0) === 1 ? "" : "s"} created`}</h3>
         <p class="update-meta">
-          Checked ${escapeHtml(String(result.checked || 0))} • Processed ${escapeHtml(String(result.processed || 0))} • Skipped ${escapeHtml(String(result.skipped || 0))} • Failed ${escapeHtml(String(result.failed || 0))}
+          ${isPreview
+            ? `${escapeHtml(result.mailbox || aiEmailIntakeConfig.mailboxUser || "Configured mailbox")} • newest first • window ${escapeHtml(String(result.maxMessagesPerRun || aiEmailIntakeConfig.maxMessagesPerRun || 0))} • estimated run attachments ${escapeHtml(formatFileSize(result.attachmentBudget && result.attachmentBudget.estimatedRunBytes || 0))} of ${escapeHtml(formatFileSize(result.attachmentBudget && result.attachmentBudget.runBudgetBytes || 0))}`
+            : `Checked ${escapeHtml(String(result.checked || 0))} • Processed ${escapeHtml(String(result.processed || 0))} • Skipped ${escapeHtml(String(result.skipped || 0))} • Failed ${escapeHtml(String(result.failed || 0))}`}
         </p>
       </div>
       <span class="status-chip">${escapeHtml(result.folderName || aiEmailIntakeConfig.folderName || "Microsoft 365")}</span>
@@ -7484,7 +7496,15 @@ function renderAiEmailIntakeResult(result) {
               (row) => `
                 <article class="digest-preview-item">
                   <p class="highlight-value">${escapeHtml(row.subject || "No subject")}</p>
-                  <p class="update-meta">${escapeHtml([row.sender, row.status, row.reason].filter(Boolean).join(" • "))}</p>
+                  <p class="update-meta">${escapeHtml([row.sender, row.receivedDateTime, row.status].filter(Boolean).join(" • "))}</p>
+                  <p class="update-meta">${escapeHtml(row.reason || "")}</p>
+                  ${isPreview ? `
+                    <p class="update-meta">Graph ID: ${escapeHtml(row.graphMessageId || "Not available")} • Internet Message ID: ${escapeHtml(row.internetMessageId || "Not available")}</p>
+                    <p class="update-meta">Allowlist: ${escapeHtml(row.allowlist && row.allowlist.allowed ? "allowed" : "not allowed")} • domain ${escapeHtml(row.allowlist && row.allowlist.domain || "not available")} • ${escapeHtml(row.allowlist && row.allowlist.reason || "No allowlist result")}</p>
+                    <p class="update-meta">State: ${escapeHtml(row.state && row.state.status || "not-recorded")}${row.state && row.state.processedAt ? ` • processed ${escapeHtml(row.state.processedAt)}` : ""}${row.state && row.state.reservedAt ? ` • reserved ${escapeHtml(row.state.reservedAt)}` : ""}${row.state && Array.isArray(row.state.proposalIds) && row.state.proposalIds.length ? ` • proposals ${escapeHtml(row.state.proposalIds.join(", "))}` : ""}${row.state && row.state.error ? ` • ${escapeHtml(row.state.error)}` : ""}</p>
+                    <p class="update-meta">Attachments: ${escapeHtml(String(row.attachmentCount || 0))} • estimated budget ${escapeHtml(formatFileSize(row.attachmentBudget && row.attachmentBudget.estimatedMessageBytes || 0))} of ${escapeHtml(formatFileSize(row.attachmentBudget && row.attachmentBudget.messageBudgetBytes || 0))}</p>
+                    ${Array.isArray(row.attachments) && row.attachments.length ? `<div class="digest-preview-list">${row.attachments.map((attachment) => `<div><p class="update-meta">${escapeHtml(attachment.name || "Unnamed attachment")} • ${escapeHtml(attachment.contentType || "unknown type")} • ${escapeHtml(formatFileSize(attachment.size || 0))} • ${escapeHtml(attachment.disposition || "unknown")}</p><p class="update-meta">${escapeHtml(attachment.reason || "")}</p></div>`).join("")}</div>` : ""}
+                  ` : ""}
                 </article>
               `
             )
@@ -7506,6 +7526,14 @@ function syncAiEmailIntakeControls() {
     : aiEmailIntakeConfig.enabled
       ? "Microsoft 365 email intake needs Graph mailbox configuration."
       : "Microsoft 365 email intake is disabled.";
+  if (previewAiEmailIntakeButton) {
+    const previewAvailable = isMasterEditor() && aiEmailIntakeConfig.enabled && aiEmailIntakeConfig.configured;
+    previewAiEmailIntakeButton.classList.toggle("hidden", !isMasterEditor());
+    previewAiEmailIntakeButton.disabled = !previewAvailable;
+    previewAiEmailIntakeButton.title = previewAvailable
+      ? `Preview ${aiEmailIntakeConfig.mailboxUser || "configured mailbox"} / ${aiEmailIntakeConfig.folderName || "AI Investment Updates"} without reserving or analyzing messages`
+      : "Microsoft 365 email intake must be enabled and configured.";
+  }
 }
 
 function renderAiUpdateInbox() {
@@ -8778,13 +8806,15 @@ async function loadConfig() {
         enabled: Boolean(config.aiEmailIntake.enabled),
         configured: Boolean(config.aiEmailIntake.configured),
         mailboxUser: String(config.aiEmailIntake.mailboxUser || "").trim(),
-        folderName: String(config.aiEmailIntake.folderName || "").trim()
+        folderName: String(config.aiEmailIntake.folderName || "").trim(),
+        maxMessagesPerRun: Number(config.aiEmailIntake.maxMessagesPerRun) || 0
       }
     : {
         enabled: false,
         configured: false,
         mailboxUser: "",
-        folderName: ""
+        folderName: "",
+        maxMessagesPerRun: 0
       };
   renderConfiguredEntitySelects();
 
@@ -11213,6 +11243,39 @@ addListener(checkAiEmailIntakeButton, "click", async () => {
       error: error.message,
       results: []
     });
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = error.message;
+    }
+  } finally {
+    syncAiEmailIntakeControls();
+  }
+});
+
+addListener(previewAiEmailIntakeButton, "click", async () => {
+  if (!previewAiEmailIntakeButton) {
+    return;
+  }
+  previewAiEmailIntakeButton.disabled = true;
+  if (aiUpdateInboxMessage) {
+    aiUpdateInboxMessage.textContent = "Loading read-only Microsoft 365 intake preview...";
+  }
+  renderAiEmailIntakeResult(null);
+
+  try {
+    const result = await fetchJson("/api/ai-email-intake/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    renderAiEmailIntakeResult(result);
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = `Read-only preview complete. ${result.checked || 0} message${Number(result.checked || 0) === 1 ? "" : "s"} inspected without reservation or analysis.`;
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      return;
+    }
+    renderAiEmailIntakeResult({ readOnly: true, checked: 0, error: error.message, results: [] });
     if (aiUpdateInboxMessage) {
       aiUpdateInboxMessage.textContent = error.message;
     }
