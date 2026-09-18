@@ -82,6 +82,7 @@ const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
 const AI_EMAIL_INTAKE_ENABLED = String(process.env.AI_EMAIL_INTAKE_ENABLED || "")
   .trim()
   .toLowerCase() === "true";
+const AI_EMAIL_HOUSE_DOMAINS = process.env.AI_EMAIL_HOUSE_DOMAINS || "beamanventures.com";
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
@@ -1377,7 +1378,8 @@ async function callAiUpdateAnalysisModel(prompt) {
 
 const { analyzeInvestmentUpdate } = createAiUpdateAnalysisService({
   callModel: callAiUpdateAnalysisModel,
-  normalizeEntityName
+  normalizeEntityName,
+  houseDomains: AI_EMAIL_HOUSE_DOMAINS
 });
 
 const { analyzePotentialNewDeal } = createNewDealAnalysisService({
@@ -1447,7 +1449,8 @@ const aiEmailIntakeService = createAiEmailIntakeService({
   makeId,
   saveUpload: saveAiEmailIntakeUpload,
   allowedSenders: process.env.AI_EMAIL_ALLOWED_SENDERS || "",
-  allowedDomains: process.env.AI_EMAIL_ALLOWED_DOMAINS || ""
+  allowedDomains: process.env.AI_EMAIL_ALLOWED_DOMAINS || "",
+  houseDomains: AI_EMAIL_HOUSE_DOMAINS
 });
 
 function serializeAiUpdateProposal(proposal, investments) {
@@ -5003,6 +5006,34 @@ const server = http.createServer(async (request, response) => {
         failed: 1,
         proposalsCreated: 0,
         error: error.message || "Microsoft 365 email intake failed.",
+        results: []
+      });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-email-intake/preview") {
+    const user = requireMasterEditor(request, response);
+    if (!user) {
+      return;
+    }
+    if (!AI_EMAIL_INTAKE_ENABLED) {
+      sendJson(response, 400, {
+        error: "Microsoft 365 email intake is disabled. Set AI_EMAIL_INTAKE_ENABLED=true after configuring Microsoft Graph."
+      });
+      return;
+    }
+
+    try {
+      const result = await aiEmailIntakeService.previewIntake();
+      const status = result.configured === false ? 400 : 200;
+      sendJson(response, status, result);
+      return;
+    } catch (error) {
+      sendJson(response, error.statusCode || 500, {
+        configured: true,
+        readOnly: true,
+        error: error.message || "Microsoft 365 email intake preview failed.",
         results: []
       });
       return;

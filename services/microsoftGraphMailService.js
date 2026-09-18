@@ -56,6 +56,52 @@ function decodedByteLength(contentBytes) {
   }
 }
 
+function planAttachmentMetadata(attachments = [], startingRunBytes = 0) {
+  let messageBytes = 0;
+  let runBytes = Math.max(0, Number(startingRunBytes) || 0);
+  const planned = attachments.map((attachment) => {
+    const metadata = {
+      id: attachment.id,
+      name: attachment.name,
+      contentType: attachment.contentType,
+      size: attachment.size,
+      isInline: attachment.isInline,
+      isPdf: attachment.isPdf,
+      isSupported: attachment.isSupported,
+      disposition: "eligible",
+      reason: "Within configured attachment limits; production intake would download it for preservation.",
+      budgetImpactBytes: 0
+    };
+    if (attachment.isInline) {
+      return { ...metadata, disposition: "skipped", reason: "Inline attachment would be ignored." };
+    }
+    if (!attachment.isSupported) {
+      return { ...metadata, disposition: "blocked", reason: "Unsupported attachment type would not be downloaded." };
+    }
+    if (attachment.size > maxAttachmentBytes(attachment)) {
+      return { ...metadata, disposition: "blocked", reason: attachmentLimitReason(attachment) };
+    }
+    if (messageBytes + attachment.size > MAX_ATTACHMENT_MESSAGE_BYTES) {
+      return { ...metadata, disposition: "blocked", reason: "Attachment would exceed the 30 MB per-message limit." };
+    }
+    if (runBytes + attachment.size > MAX_ATTACHMENT_RUN_BYTES) {
+      return { ...metadata, disposition: "blocked", reason: "Attachment would exceed the 50 MB per-run limit." };
+    }
+    messageBytes += attachment.size;
+    runBytes += attachment.size;
+    return { ...metadata, budgetImpactBytes: attachment.size };
+  });
+  return {
+    attachments: planned,
+    messageBudgetBytes: MAX_ATTACHMENT_MESSAGE_BYTES,
+    estimatedMessageBytes: messageBytes,
+    runBudgetBytes: MAX_ATTACHMENT_RUN_BYTES,
+    estimatedRunBytes: runBytes,
+    attachmentCountLimit: MAX_ATTACHMENTS_PER_MESSAGE,
+    truncated: Boolean(attachments.truncated)
+  };
+}
+
 function createMicrosoftGraphMailService({
   tenantId,
   clientId,
@@ -354,7 +400,47 @@ function createMicrosoftGraphMailService({
     };
   }
 
+  async function fetchIntakePreviewMessages() {
+    const token = await getAccessToken();
+    const folder = await resolveFolder(token);
+    const messages = await listMessagesInFolder(token, folder.id);
+    const previewMessages = [];
+    let runAttachmentBytes = 0;
+    for (const message of messages) {
+      const attachments = message.hasAttachments ? await listAttachments(token, message.id) : [];
+      const plan = planAttachmentMetadata(attachments, runAttachmentBytes);
+      runAttachmentBytes = plan.estimatedRunBytes;
+      previewMessages.push({
+        ...message,
+        mailbox: config.mailboxUser,
+        folderId: folder.id,
+        folderName: folder.displayName,
+        attachmentCount: attachments.length,
+        attachmentPlan: plan.attachments,
+        attachmentBudget: {
+          messageBudgetBytes: plan.messageBudgetBytes,
+          estimatedMessageBytes: plan.estimatedMessageBytes,
+          runBudgetBytes: plan.runBudgetBytes,
+          estimatedRunBytes: plan.estimatedRunBytes,
+          attachmentCountLimit: plan.attachmentCountLimit,
+          truncated: plan.truncated
+        }
+      });
+    }
+    return {
+      mailbox: config.mailboxUser,
+      folder,
+      maxMessagesPerRun: config.maxMessagesPerRun,
+      attachmentBudget: {
+        estimatedRunBytes: runAttachmentBytes,
+        runBudgetBytes: MAX_ATTACHMENT_RUN_BYTES
+      },
+      messages: previewMessages
+    };
+  }
+
   return {
+    fetchIntakePreviewMessages,
     fetchIntakeMessages,
     getAccessToken,
     getSafeConfigStatus,
@@ -371,5 +457,6 @@ module.exports = {
   MAX_ATTACHMENT_MESSAGE_BYTES,
   MAX_ATTACHMENT_RUN_BYTES,
   MAX_ATTACHMENTS_PER_MESSAGE,
-  createMicrosoftGraphMailService
+  createMicrosoftGraphMailService,
+  planAttachmentMetadata
 };

@@ -1852,6 +1852,7 @@ function buildConsolidationPrompt({
 function createAiUpdateAnalysisService({
   callModel,
   normalizeEntityName,
+  houseDomains,
   getNow = () => new Date()
 }) {
   async function analyzeInvestmentUpdate({
@@ -1888,7 +1889,8 @@ function createAiUpdateAnalysisService({
     const selectedEntity = normalizeEntityOverride(entityOverrideId, entities, normalizeEntityName);
     const deterministicMatch = generateInvestmentMatchCandidates({
       source: cleanSource,
-      investments
+      investments,
+      houseDomains
     });
     const modelCandidateList = selectedInvestment
       ? [{ investment: selectedInvestment }]

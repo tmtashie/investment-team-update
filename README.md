@@ -56,12 +56,15 @@ node server.js
 - `AI_EMAIL_MAX_MESSAGES_PER_RUN`: maximum recent messages requested per manual check; defaults to `10` and is constrained to `1` through `50`
 - `AI_EMAIL_ALLOWED_SENDERS`: optional comma-separated list of exact sender email addresses accepted for analysis
 - `AI_EMAIL_ALLOWED_DOMAINS`: optional comma-separated list of sender domains accepted for analysis
+- `AI_EMAIL_HOUSE_DOMAINS`: comma-separated domains excluded from positive sender-domain match evidence; defaults to `beamanventures.com` and includes its subdomains
 
 ## Microsoft 365 investment email intake
 
 Microsoft 365 intake is disabled by default. Microsoft 365 tenant setup, application consent, and Graph permissions are operational prerequisites managed outside this repository. Configure those prerequisites and the environment variables above before setting `AI_EMAIL_INTAKE_ENABLED=true`.
 
 An editor starts each intake run manually from the AI Update Inbox by selecting `Check for new investment emails`. The app requests up to `AI_EMAIL_MAX_MESSAGES_PER_RUN` of the most recent messages in the configured mailbox folder and reports how many were processed, skipped, or failed.
+
+A master editor can select `Preview email intake` in the same view to inspect that mailbox window without reserving messages, writing intake state, creating proposals, downloading attachments, or invoking AI analysis. The preview lists message identifiers, sender, subject, received time, allowlist and state outcomes, attachment metadata, and estimated attachment-budget decisions.
 
 The intake accepts meaningful email-body text and non-inline PDF attachments. HTML email is normalized to text, and obvious signatures and quoted thread content are removed before analysis. Inline files and attachments other than PDFs are skipped.
 
@@ -70,6 +73,8 @@ Sender controls are optional. When `AI_EMAIL_ALLOWED_SENDERS` is populated, a me
 Processed messages are deduplicated using their Internet Message ID or Microsoft Graph message ID. PDF content is also deduplicated by a SHA-256 hash. Intake state and its analysis audit are stored in `ai-email-intake-state.json` under `DATA_DIR`, so later manual checks do not create duplicate proposals from previously processed sources.
 
 Automated intake must find explicit portfolio evidence before it creates a proposal, and the existing source-evidence safety checks still apply. Successful analysis creates a `pending` proposal only. It never approves or applies an investment update: an authorized human must review and approve or reject each proposal in the AI Update Inbox.
+
+Senders at `AI_EMAIL_HOUSE_DOMAINS` do not contribute positive sender-domain match evidence. This does not remove any company-name token or change legitimate external-domain matching; explicit company or alias evidence in the subject, body, or attachment filename can still match normally.
 
 ### Potential New Deal intake
 

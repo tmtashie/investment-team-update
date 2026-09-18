@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   buildUserFacingWarnings,
   getReportUpdatesEmptyMessage,
@@ -113,4 +115,15 @@ test("report update empty state distinguishes no rows from filtered-out rows", (
     getReportUpdatesEmptyMessage(2, 1),
     "No saved updates or reports yet. Add your first monthly report, quarterly letter, capital call, or call note above."
   );
+});
+
+test("intake preview is exposed as a master-editor-only read-only action", () => {
+  const serverSource = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  const appSource = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+
+  assert.match(serverSource, /\/api\/ai-email-intake\/preview[\s\S]{0,200}requireMasterEditor/);
+  assert.match(html, /id="previewAiEmailIntakeButton"[^>]*class="secondary-button hidden"/);
+  assert.match(appSource, /previewAiEmailIntakeButton\.classList\.toggle\("hidden", !isMasterEditor\(\)\)/);
+  assert.match(appSource, /fetchJson\("\/api\/ai-email-intake\/preview"/);
 });
