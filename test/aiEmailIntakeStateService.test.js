@@ -54,3 +54,22 @@ test("intake state upserts by message and merges proposal ids and attachment has
     "processed"
   );
 });
+
+test("message reservation prevents concurrent and completed reprocessing", () => {
+  const { service } = createMemoryStateService();
+  const message = { id: "graph-1", internetMessageId: "<mail-1@example.test>" };
+  assert.equal(service.claimMessage(message).claimed, true);
+  assert.equal(service.claimMessage(message).claimed, false);
+  service.upsertEntry({ ...message, graphMessageId: message.id, status: "skipped", processedAt: new Date().toISOString() });
+  assert.equal(service.claimMessage(message).claimed, false);
+});
+
+test("preserved attachment metadata is reusable by content hash", () => {
+  const { service } = createMemoryStateService();
+  service.upsertEntry({
+    graphMessageId: "graph-1",
+    attachments: [{ hash: "hash-1", name: "Deck.pdf", storedName: "deck.pdf", url: "/uploads/deck.pdf" }],
+    status: "processed"
+  });
+  assert.equal(service.findAttachmentByHash("hash-1").storedName, "deck.pdf");
+});

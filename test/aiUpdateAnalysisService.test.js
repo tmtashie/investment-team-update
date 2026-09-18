@@ -2057,3 +2057,4 @@ test("failed material development is absent from What Changed and not actionable
   assert.doesNotMatch(result.analysis.whatChanged.join(" "), /\$5M|line of credit|committed/i);
   assert.match(result.analysis.warnings.join(" "), /Removed unsupported material development/);
 });
+

@@ -70,8 +70,19 @@ test("enforces PDF upload size limit", () => {
 
   assert.throws(
     () => validatePdfUpload(asUpload(buffer, "large.pdf")),
-    /limited to 10 MB/
+    /limited to 25 MB/
   );
+});
+
+test("accepts a valid PDF at the 25 MB limit", () => {
+  const buffer = Buffer.concat([
+    Buffer.from("%PDF-", "latin1"),
+    Buffer.alloc(MAX_PDF_UPLOAD_BYTES - 5)
+  ]);
+
+  const validated = validatePdfUpload(asUpload(buffer, "investor-deck.pdf"));
+
+  assert.equal(validated.buffer.length, MAX_PDF_UPLOAD_BYTES);
 });
 
 test("flags sparse financial pages for future OCR instead of metric extraction", async () => {

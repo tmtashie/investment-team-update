@@ -40,8 +40,10 @@ function createMessage(overrides = {}) {
     bodyContentType: "html",
     body: "<p>Healing Innovations quarterly investor update with customer pipeline, units sold, cash runway, revenue commentary, product development milestones, operational risks, and board-level financial updates for Beaman Ventures.</p>",
     bodyPreview: "",
+    attachments: [],
     pdfAttachments: [],
     skippedAttachments: [],
+    unresolvedAttachments: [],
     ...overrides
   };
 }
@@ -49,6 +51,7 @@ function createMessage(overrides = {}) {
 function createHarness({
   messages = [createMessage()],
   analysisFactory,
+  analyzePotentialNewDeal,
   extractPdfTextFromUpload,
   allowedSenders = "",
   allowedDomains = "",
@@ -110,6 +113,7 @@ function createHarness({
           };
       return { source, analysis };
     },
+    analyzePotentialNewDeal,
     extractPdfTextFromUpload: extractPdfTextFromUpload || (async ({ filename, fileData }) => ({
       filename,
       buffer: Buffer.from(fileData, "base64"),
@@ -730,3 +734,44 @@ test("attachment hash is stable for dedupe", () => {
   assert.equal(attachmentHash(PDF_BYTES), attachmentHash(PDF_BYTES));
   assert.notEqual(attachmentHash(PDF_BYTES), attachmentHash(Buffer.from("different").toString("base64")));
 });
+
+test("potential new deal creates one pending proposal with preserved and unresolved attachments", async () => {
+  const message = createMessage({
+    subject: "NewCo seed opportunity",
+    bodyContentType: "text",
+    body: "NewCo is raising $5 million. Beaman Ventures proposed check size is $250,000.",
+    attachments: [{
+      id: "deck", name: "NewCo Deck.pdf", contentType: "application/pdf", size: 18,
+      contentBytes: PDF_BYTES, isPdf: true, preservationStatus: "preserved"
+    }],
+    pdfAttachments: [{ id: "deck", name: "NewCo Deck.pdf", contentType: "application/pdf", contentBytes: PDF_BYTES }],
+    unresolvedAttachments: [{ id: "model", name: "Model.pages", reason: "Unsupported attachment type was not parsed or downloaded." }]
+  });
+  const harness = createHarness({
+    messages: [message],
+    investments: [],
+    analyzePotentialNewDeal: async () => ({
+      route: "new-deal",
+      analysis: {
+        classificationReason: "Inbound financing opportunity.",
+        opportunityFingerprint: "fingerprint-newco",
+        matchResult: { status: "no-match", confidence: 0, reason: "No deterministic match.", candidates: [] },
+        dealData: {
+          companyName: { value: "NewCo", evidenceStatus: "verified", authoritativeValue: "NewCo" },
+          dealSummary: { value: "Seed opportunity", evidenceStatus: "verified", authoritativeValue: "Seed opportunity" },
+          proposedCheckSize: { value: "$250,000", evidenceStatus: "verified", authoritativeValue: "$250,000" }
+        }
+      }
+    })
+  });
+  const first = await harness.service.checkForNewEmails({ user: { email: "editor@example.test" } });
+  const second = await harness.service.checkForNewEmails({ user: { email: "editor@example.test" } });
+  assert.equal(first.proposalsCreated, 1);
+  assert.equal(second.proposalsCreated, 0);
+  assert.equal(harness.savedProposals.length, 1);
+  assert.equal(harness.savedProposals[0].proposalType, "new-deal");
+  assert.equal(harness.savedProposals[0].documents.length, 2);
+  assert.equal(harness.savedProposals[0].documents[0].storedName, "NewCo Deck.pdf");
+  assert.equal(harness.savedProposals[0].documents[1].preservationStatus, "unresolved");
+});
+

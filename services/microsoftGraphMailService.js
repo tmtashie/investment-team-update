@@ -1,5 +1,13 @@
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 const TOKEN_BASE_URL = "https://login.microsoftonline.com";
+const MAX_ATTACHMENT_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_PDF_BYTES = 25 * 1024 * 1024;
+const MAX_ATTACHMENT_MESSAGE_BYTES = 30 * 1024 * 1024;
+const MAX_ATTACHMENT_RUN_BYTES = 50 * 1024 * 1024;
+const MAX_ATTACHMENTS_PER_MESSAGE = 20;
+const SUPPORTED_ATTACHMENT_EXTENSIONS = new Set([
+  ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".csv", ".txt", ".jpg", ".jpeg", ".png"
+]);
 
 function cleanString(value, maxLength = 2000) {
   return String(value || "").trim().slice(0, maxLength);
@@ -20,6 +28,32 @@ function isPdfAttachment(attachment) {
   const name = cleanString(attachment && attachment.name, 500).toLowerCase();
   const contentType = cleanString(attachment && attachment.contentType, 200).toLowerCase();
   return name.endsWith(".pdf") || contentType === "application/pdf";
+}
+
+function attachmentExtension(name) {
+  const match = cleanString(name, 500).toLowerCase().match(/(\.[a-z0-9]+)$/);
+  return match ? match[1] : "";
+}
+
+function isSupportedAttachment(attachment) {
+  return SUPPORTED_ATTACHMENT_EXTENSIONS.has(attachmentExtension(attachment && attachment.name));
+}
+
+function maxAttachmentBytes(attachment) {
+  return isPdfAttachment(attachment) ? MAX_ATTACHMENT_PDF_BYTES : MAX_ATTACHMENT_FILE_BYTES;
+}
+
+function attachmentLimitReason(attachment) {
+  const limitMb = maxAttachmentBytes(attachment) / (1024 * 1024);
+  return `Attachment exceeds the ${limitMb} MB per-file limit.`;
+}
+
+function decodedByteLength(contentBytes) {
+  try {
+    return Buffer.from(String(contentBytes || ""), "base64").length;
+  } catch (error) {
+    return 0;
+  }
 }
 
 function createMicrosoftGraphMailService({
@@ -183,24 +217,27 @@ function createMicrosoftGraphMailService({
   }
 
   async function listAttachments(token, messageId) {
-    const attachments = parseGraphCollection(
-      await graphGet(
-        `${mailboxMailApiPath()}/messages/${encodeURIComponent(messageId)}/attachments?$top=50`,
-        token
-      )
+    const payload = await graphGet(
+      `${mailboxMailApiPath()}/messages/${encodeURIComponent(messageId)}/attachments?$top=${MAX_ATTACHMENTS_PER_MESSAGE + 1}&$select=id,name,contentType,size,isInline`,
+      token
     );
-    return attachments.map((attachment) => ({
+    const allAttachments = parseGraphCollection(payload);
+    const attachments = allAttachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE).map((attachment) => ({
       id: cleanString(attachment.id, 500),
       name: cleanString(attachment.name, 500),
       contentType: cleanString(attachment.contentType, 200),
       size: Number(attachment.size) || 0,
       isInline: Boolean(attachment.isInline),
-      contentBytes: cleanString(attachment.contentBytes, 20 * 1024 * 1024),
-      isPdf: isPdfAttachment(attachment)
+      contentBytes: "",
+      attachmentType: cleanString(attachment["@odata.type"], 120),
+      isPdf: isPdfAttachment(attachment),
+      isSupported: isSupportedAttachment(attachment)
     }));
+    attachments.truncated = Boolean(payload["@odata.nextLink"] || allAttachments.length > MAX_ATTACHMENTS_PER_MESSAGE);
+    return attachments;
   }
 
-  async function fetchPdfAttachment(token, messageId, attachment) {
+  async function fetchAttachment(token, messageId, attachment) {
     let fullAttachment = attachment;
     if (!fullAttachment.contentBytes && attachment.id) {
       const payload = await graphGet(
@@ -209,24 +246,27 @@ function createMicrosoftGraphMailService({
       );
       fullAttachment = {
         ...attachment,
-        contentBytes: cleanString(payload.contentBytes, 20 * 1024 * 1024),
+        contentBytes: String(payload.contentBytes || ""),
         contentType: cleanString(payload.contentType, 200),
         name: cleanString(payload.name, 500),
         size: Number(payload.size) || attachment.size || 0,
         isInline: Boolean(payload.isInline),
-        isPdf: isPdfAttachment(payload)
+        isPdf: isPdfAttachment(payload),
+        isSupported: isSupportedAttachment(payload)
       };
     }
     if (!fullAttachment.contentBytes) {
-      throw graphError(`PDF attachment data was not available for ${attachment.name || "attachment"}.`, 502);
+      throw graphError(`Attachment data was not available for ${attachment.name || "attachment"}.`, 502);
     }
     return {
       id: fullAttachment.id,
       name: fullAttachment.name,
-      contentType: fullAttachment.contentType || "application/pdf",
+      contentType: fullAttachment.contentType || "application/octet-stream",
       size: fullAttachment.size,
       contentBytes: fullAttachment.contentBytes,
-      isInline: fullAttachment.isInline
+      isInline: fullAttachment.isInline,
+      isPdf: Boolean(fullAttachment.isPdf),
+      isSupported: Boolean(fullAttachment.isSupported)
     };
   }
 
@@ -235,28 +275,76 @@ function createMicrosoftGraphMailService({
     const folder = await resolveFolder(token);
     const messages = await listMessagesInFolder(token, folder.id);
     const messagesWithAttachments = [];
+    let runAttachmentBytes = 0;
     for (const message of messages) {
       const attachments = message.hasAttachments ? await listAttachments(token, message.id) : [];
+      const preservedAttachments = [];
       const pdfAttachments = [];
       const skippedAttachments = [];
+      const unresolvedAttachments = [];
+      let messageAttachmentBytes = 0;
+      if (attachments.truncated) {
+        unresolvedAttachments.push({
+          name: "Additional attachments",
+          contentType: "",
+          preservationStatus: "unresolved",
+          reason: `Message attachment count exceeds the ${MAX_ATTACHMENTS_PER_MESSAGE}-file limit.`
+        });
+      }
       for (const attachment of attachments) {
         if (attachment.isInline) {
           skippedAttachments.push({ name: attachment.name, contentType: attachment.contentType, reason: "Inline attachment ignored." });
           continue;
         }
-        if (!attachment.isPdf) {
-          skippedAttachments.push({ name: attachment.name, contentType: attachment.contentType, reason: "Unsupported attachment type." });
+        if (!attachment.isSupported) {
+          unresolvedAttachments.push({
+            id: attachment.id,
+            name: attachment.name,
+            contentType: attachment.contentType,
+            size: attachment.size,
+            attachmentType: attachment.attachmentType,
+            preservationStatus: "unresolved",
+            reason: "Unsupported attachment type was not parsed or downloaded."
+          });
           continue;
         }
-        pdfAttachments.push(await fetchPdfAttachment(token, message.id, attachment));
+        if (attachment.size > maxAttachmentBytes(attachment)) {
+          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: attachmentLimitReason(attachment) });
+          continue;
+        }
+        if (messageAttachmentBytes + attachment.size > MAX_ATTACHMENT_MESSAGE_BYTES) {
+          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment exceeds the 30 MB per-message limit." });
+          continue;
+        }
+        if (runAttachmentBytes + attachment.size > MAX_ATTACHMENT_RUN_BYTES) {
+          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment exceeds the 50 MB per-run limit." });
+          continue;
+        }
+        try {
+          const fetched = await fetchAttachment(token, message.id, attachment);
+          const actualSize = decodedByteLength(fetched.contentBytes);
+          if (!actualSize || actualSize > maxAttachmentBytes(fetched) || messageAttachmentBytes + actualSize > MAX_ATTACHMENT_MESSAGE_BYTES || runAttachmentBytes + actualSize > MAX_ATTACHMENT_RUN_BYTES) {
+            unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment data exceeded a configured preservation limit." });
+            continue;
+          }
+          const preserved = { ...fetched, size: actualSize, preservationStatus: "preserved", extractionStatus: fetched.isPdf ? "pending" : "not-parsed" };
+          messageAttachmentBytes += actualSize;
+          runAttachmentBytes += actualSize;
+          preservedAttachments.push(preserved);
+          if (fetched.isPdf) pdfAttachments.push(preserved);
+        } catch (error) {
+          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: error.message || "Attachment could not be preserved." });
+        }
       }
       messagesWithAttachments.push({
         ...message,
         mailbox: config.mailboxUser,
         folderId: folder.id,
         folderName: folder.displayName,
+        attachments: preservedAttachments,
         pdfAttachments,
-        skippedAttachments
+        skippedAttachments,
+        unresolvedAttachments
       });
     }
     return {
@@ -278,5 +366,10 @@ function createMicrosoftGraphMailService({
 }
 
 module.exports = {
+  MAX_ATTACHMENT_FILE_BYTES,
+  MAX_ATTACHMENT_PDF_BYTES,
+  MAX_ATTACHMENT_MESSAGE_BYTES,
+  MAX_ATTACHMENT_RUN_BYTES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
   createMicrosoftGraphMailService
 };

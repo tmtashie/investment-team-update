@@ -6766,6 +6766,7 @@ function renderTasks() {
 function getAiProposalInvestmentName(proposal) {
   return (
     (proposal && proposal.investment && proposal.investment.company) ||
+    (proposal && proposal.proposalType === "new-deal" && proposal.dealData && proposal.dealData.companyName && proposal.dealData.companyName.value) ||
     "Unmatched investment"
   );
 }
@@ -6773,9 +6774,108 @@ function getAiProposalInvestmentName(proposal) {
 function getAiProposalEntity(proposal) {
   return (
     (proposal && proposal.investment && proposal.investment.entity) ||
+    (proposal && proposal.proposedEntity) ||
     (proposal && proposal.entityId) ||
     "No entity"
   );
+}
+
+function getAiProposalTypeLabel(proposal) {
+  if (!proposal || proposal.proposalType !== "new-deal") {
+    return "Existing Investment Update";
+  }
+  return proposal.matchResult && proposal.matchResult.status === "ambiguous"
+    ? "Ambiguous Review"
+    : "Potential New Deal";
+}
+
+function dealClaimValue(proposal, field) {
+  const claim = proposal && proposal.dealData && proposal.dealData[field];
+  return claim && typeof claim === "object" ? String(claim.value || "") : "";
+}
+
+function dealClaimStatus(proposal, field) {
+  const claim = proposal && proposal.dealData && proposal.dealData[field];
+  return claim && claim.evidenceStatus ? String(claim.evidenceStatus) : "unresolved";
+}
+
+function renderDealClaimList(proposal, field, emptyMessage) {
+  const claims = proposal && proposal.dealData && Array.isArray(proposal.dealData[field])
+    ? proposal.dealData[field]
+    : [];
+  return claims.length
+    ? `<ul class="ai-change-list">${claims.map((claim) => `<li>${escapeHtml(claim.value || "")}${claim.evidenceStatus ? ` <span class="status-chip">${escapeHtml(claim.evidenceStatus)}</span>` : ""}</li>`).join("")}</ul>`
+    : `<p class="update-meta">${escapeHtml(emptyMessage)}</p>`;
+}
+
+function dealClaimListText(proposal, field) {
+  const claims = proposal && proposal.dealData && Array.isArray(proposal.dealData[field])
+    ? proposal.dealData[field]
+    : [];
+  return claims.map((claim) => claim.value || "").filter(Boolean).join("\n");
+}
+
+function renderNewDealProposalDetail(proposal) {
+  const match = proposal.matchResult || {};
+  const candidates = Array.isArray(match.candidates) ? match.candidates : [];
+  const documents = Array.isArray(proposal.documents) ? proposal.documents : [];
+  const entityOptions = configuredEntities.map((entity) =>
+    `<option value="${escapeHtml(entity)}" ${entity === proposal.proposedEntity ? "selected" : ""}>${escapeHtml(entity)}</option>`
+  ).join("");
+  return `
+    <div class="panel-header">
+      <div><p class="feature-kicker">${escapeHtml(getAiProposalTypeLabel(proposal))}</p><h3>${escapeHtml(getAiProposalInvestmentName(proposal))}</h3><p class="section-copy">Review source evidence before creating a pipeline record.</p></div>
+      <button class="secondary-button" type="button" data-action="close-ai-proposal">Close</button>
+    </div>
+    <section class="ai-detail-section">
+      <h4>Source and match</h4>
+      <p class="update-meta">${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")} • ${escapeHtml(proposal.sourceDate || "Date not set")}</p>
+      <p class="update-meta">${escapeHtml(match.status || "no-match")} • ${escapeHtml(match.reason || proposal.matchReason || "No match reason")}</p>
+      ${candidates.length ? `<div class="document-pill-row">${candidates.map((candidate) => `<span class="document-pill">${escapeHtml(candidate.investmentName)} (${escapeHtml(String(candidate.score || 0))})</span>`).join("")}</div>` : '<p class="update-meta">No deterministic existing-investment candidates.</p>'}
+    </section>
+    <section class="ai-detail-section">
+      <h4>Proposed fields</h4>
+      <div class="company-summary-grid new-deal-edit-grid">
+        <label>Company / deal name (${escapeHtml(dealClaimStatus(proposal, "companyName"))})<input id="newDealCompanyName" value="${escapeHtml(dealClaimValue(proposal, "companyName"))}"></label>
+        <label>Contact name (${escapeHtml(dealClaimStatus(proposal, "contactName"))})<input id="newDealContactName" value="${escapeHtml(dealClaimValue(proposal, "contactName"))}"></label>
+        <label>Contact email (${escapeHtml(dealClaimStatus(proposal, "contactEmail"))})<input id="newDealContactEmail" type="email" value="${escapeHtml(dealClaimValue(proposal, "contactEmail"))}"></label>
+        <label>Entity<select id="newDealEntity">${entityOptions}</select></label>
+        <label>Round type (${escapeHtml(dealClaimStatus(proposal, "roundType"))})<input id="newDealRoundType" value="${escapeHtml(dealClaimValue(proposal, "roundType"))}"></label>
+        <label>Stage (${escapeHtml(dealClaimStatus(proposal, "stage"))})<input id="newDealStage" value="${escapeHtml(dealClaimValue(proposal, "stage"))}"></label>
+        <label>Amount being raised (${escapeHtml(dealClaimStatus(proposal, "amountBeingRaised"))})<input id="newDealAmountRaised" value="${escapeHtml(dealClaimValue(proposal, "amountBeingRaised"))}"></label>
+        <label>Amount committed (${escapeHtml(dealClaimStatus(proposal, "amountCommitted"))})<input id="newDealAmountCommitted" value="${escapeHtml(dealClaimValue(proposal, "amountCommitted"))}"></label>
+        <label>Amount remaining (${escapeHtml(dealClaimStatus(proposal, "amountRemaining"))})<input id="newDealAmountRemaining" value="${escapeHtml(dealClaimValue(proposal, "amountRemaining"))}"></label>
+        <label>Proposed check size (${escapeHtml(dealClaimStatus(proposal, "proposedCheckSize"))})<input id="newDealCheckSize" value="${escapeHtml(dealClaimValue(proposal, "proposedCheckSize"))}"></label>
+        <label>Valuation / cap (${escapeHtml(dealClaimStatus(proposal, "valuationCap"))})<input id="newDealValuationCap" value="${escapeHtml(dealClaimValue(proposal, "valuationCap"))}"></label>
+        <label>Security type (${escapeHtml(dealClaimStatus(proposal, "securityType"))})<input id="newDealSecurityType" value="${escapeHtml(dealClaimValue(proposal, "securityType"))}"></label>
+        <label>Lead investor (${escapeHtml(dealClaimStatus(proposal, "leadInvestor"))})<input id="newDealLeadInvestor" value="${escapeHtml(dealClaimValue(proposal, "leadInvestor"))}"></label>
+      </div>
+      <label>AI summary<textarea id="newDealSummary" rows="4">${escapeHtml(dealClaimValue(proposal, "dealSummary"))}</textarea></label>
+      <label>What the company does<textarea id="newDealWhatCompanyDoes" rows="3">${escapeHtml(dealClaimValue(proposal, "whatCompanyDoes"))}</textarea></label>
+      <label>Product / business model<textarea id="newDealBusinessModel" rows="3">${escapeHtml(dealClaimValue(proposal, "businessModel"))}</textarea></label>
+      <label>Traction / revenue<textarea id="newDealTractionRevenue" rows="3">${escapeHtml(dealClaimValue(proposal, "tractionRevenue"))}</textarea></label>
+      <label>Customers / contracts / deployments<textarea id="newDealCustomers" rows="3">${escapeHtml(dealClaimValue(proposal, "customersContractsDeployments"))}</textarea></label>
+      <label>Financing terms<textarea id="newDealFinancingTerms" rows="3">${escapeHtml(dealClaimValue(proposal, "financingTerms"))}</textarea></label>
+      <label>Use of proceeds<textarea id="newDealUseOfProceeds" rows="3">${escapeHtml(dealClaimValue(proposal, "useOfProceeds"))}</textarea></label>
+      <label>Key investment points<textarea id="newDealPoints" rows="4">${escapeHtml(dealClaimListText(proposal, "keyInvestmentPoints"))}</textarea></label>
+      <label>Key risks<textarea id="newDealRisks" rows="4">${escapeHtml(dealClaimListText(proposal, "keyRisks"))}</textarea></label>
+      <label>Next steps<textarea id="newDealNextSteps" rows="3">${escapeHtml(dealClaimListText(proposal, "nextSteps"))}</textarea></label>
+      <label>Deadlines / dates<textarea id="newDealDeadlines" rows="3">${escapeHtml(dealClaimListText(proposal, "deadlines"))}</textarea></label>
+      <label>Relevant URLs<textarea id="newDealUrls" rows="3">${escapeHtml(dealClaimListText(proposal, "relevantUrls"))}</textarea></label>
+      <div class="checkbox-grid"><label class="checkbox-row"><input id="newDealEntityConfirmed" type="checkbox" ${proposal.entityConfirmed ? "checked" : ""}> Entity confirmed</label>
+      ${isMasterEditor() ? `<label class="checkbox-row"><input id="newDealNoMatchConfirmed" type="checkbox" ${proposal.noExistingMatchConfirmed ? "checked" : ""}> Confirm no existing investment match</label><label class="checkbox-row"><input id="newDealAmountConfirmed" type="checkbox" ${proposal.amountConfirmed ? "checked" : ""} ${proposal.dealData && proposal.dealData.proposedCheckSize && proposal.dealData.proposedCheckSize.evidenceStatus === "verified" ? "" : "disabled"}> Accept verified check size as pipeline amount</label>` : ""}</div>
+      ${proposal.status === "pending" && canEditWorkspace() ? `<button class="secondary-button" type="button" data-action="save-new-deal" data-id="${escapeHtml(proposal.id)}">Save corrections</button>` : ""}
+    </section>
+    <section class="ai-detail-section"><h4>Key investment points</h4>${renderDealClaimList(proposal, "keyInvestmentPoints", "No investment points extracted.")}</section>
+    <section class="ai-detail-section"><h4>Key risks</h4>${renderDealClaimList(proposal, "keyRisks", "No risks extracted.")}</section>
+    <section class="ai-detail-section"><h4>Next steps and deadlines</h4>${renderDealClaimList(proposal, "nextSteps", "No next steps extracted.")}${renderDealClaimList(proposal, "deadlines", "No deadlines extracted.")}</section>
+    <section class="ai-detail-section"><h4>Attachments</h4>${documents.length ? `<div class="digest-preview-list">${documents.map((document) => `<article class="digest-preview-item"><p class="highlight-value">${document.url ? `<a href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>` : escapeHtml(document.name || "Attachment")}</p><p class="update-meta">${escapeHtml(document.preservationStatus || "unresolved")} • ${escapeHtml(document.extractionStatus || "not-parsed")}${document.reason ? ` • ${escapeHtml(document.reason)}` : ""}</p></article>`).join("")}</div>` : '<p class="update-meta">No attachments.</p>'}</section>
+    <section class="ai-detail-section"><h4>Review</h4><p class="update-meta">Status: ${escapeHtml(proposal.status)}</p>
+      ${proposal.status === "pending" && canEditWorkspace() ? `<div class="card-actions">
+        ${isMasterEditor() ? `<button type="button" data-action="approve-new-deal" data-id="${escapeHtml(proposal.id)}">Approve as New Pipeline Deal</button><select id="newDealExistingInvestment"><option value="">Select existing investment</option>${allInvestments.map((investment) => `<option value="${escapeHtml(investment.id)}">${escapeHtml(investment.company)} • ${escapeHtml(investment.entity)}</option>`).join("")}</select><button class="secondary-button" type="button" data-action="match-new-deal-existing" data-id="${escapeHtml(proposal.id)}">Match to Existing Investment</button>` : ""}
+        <button class="secondary-button danger-button" type="button" data-action="reject-ai-proposal" data-id="${escapeHtml(proposal.id)}">Reject</button>
+      </div>` : ""}
+    </section>`;
 }
 
 function formatConfidence(value) {
@@ -7434,6 +7534,7 @@ function renderAiUpdateInbox() {
         .map(
           (proposal) => `
             <article class="update-card ai-update-card ${proposal.id === selectedAiUpdateProposalId ? "is-selected" : ""}">
+              <p class="feature-kicker">${escapeHtml(getAiProposalTypeLabel(proposal))}</p>
               <div class="update-head">
                 <button class="link-button company-link" type="button" data-action="view-ai-proposal" data-id="${escapeHtml(proposal.id)}">
                   ${escapeHtml(getAiProposalInvestmentName(proposal))}
@@ -7470,9 +7571,14 @@ function renderAiUpdateProposalDetail() {
   }
 
   aiUpdateProposalDetail.classList.remove("hidden");
+  if (proposal.proposalType === "new-deal") {
+    aiUpdateProposalDetail.innerHTML = renderNewDealProposalDetail(proposal);
+    return;
+  }
   aiUpdateProposalDetail.innerHTML = `
     <div class="panel-header">
       <div>
+        <p class="feature-kicker">Existing Investment Update</p>
         <h3>${escapeHtml(getAiProposalInvestmentName(proposal))}</h3>
         <p class="section-copy">Proposed update staged ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
       </div>
@@ -11321,6 +11427,98 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
       beginEditInvestment(investmentId);
     } else if (aiUpdateInboxMessage) {
       aiUpdateInboxMessage.textContent = "No matched live investment is attached to edit.";
+    }
+    return;
+  }
+
+  if (action === "save-new-deal" && proposalId) {
+    target.disabled = true;
+    try {
+      const payload = {
+        proposedEntity: document.getElementById("newDealEntity").value,
+        entityConfirmed: document.getElementById("newDealEntityConfirmed").checked,
+        dealData: {
+          companyName: document.getElementById("newDealCompanyName").value,
+          contactName: document.getElementById("newDealContactName").value,
+          contactEmail: document.getElementById("newDealContactEmail").value,
+          dealSummary: document.getElementById("newDealSummary").value,
+          whatCompanyDoes: document.getElementById("newDealWhatCompanyDoes").value,
+          businessModel: document.getElementById("newDealBusinessModel").value,
+          stage: document.getElementById("newDealStage").value,
+          tractionRevenue: document.getElementById("newDealTractionRevenue").value,
+          customersContractsDeployments: document.getElementById("newDealCustomers").value,
+          roundType: document.getElementById("newDealRoundType").value,
+          amountBeingRaised: document.getElementById("newDealAmountRaised").value,
+          amountCommitted: document.getElementById("newDealAmountCommitted").value,
+          amountRemaining: document.getElementById("newDealAmountRemaining").value,
+          proposedCheckSize: document.getElementById("newDealCheckSize").value,
+          valuationCap: document.getElementById("newDealValuationCap").value,
+          securityType: document.getElementById("newDealSecurityType").value,
+          financingTerms: document.getElementById("newDealFinancingTerms").value,
+          leadInvestor: document.getElementById("newDealLeadInvestor").value,
+          useOfProceeds: document.getElementById("newDealUseOfProceeds").value,
+          keyInvestmentPoints: document.getElementById("newDealPoints").value,
+          keyRisks: document.getElementById("newDealRisks").value,
+          nextSteps: document.getElementById("newDealNextSteps").value,
+          deadlines: document.getElementById("newDealDeadlines").value,
+          relevantUrls: document.getElementById("newDealUrls").value
+        }
+      };
+      const noMatchField = document.getElementById("newDealNoMatchConfirmed");
+      const amountField = document.getElementById("newDealAmountConfirmed");
+      if (noMatchField) payload.noExistingMatchConfirmed = noMatchField.checked;
+      if (amountField) payload.amountConfirmed = amountField.checked;
+      await fetchJson(`/api/ai-update-proposals/${proposalId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      await loadAiUpdateProposals();
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = "Potential New Deal corrections saved.";
+    } catch (error) {
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
+    } finally {
+      target.disabled = false;
+    }
+    return;
+  }
+
+  if (action === "match-new-deal-existing" && proposalId) {
+    const investmentId = document.getElementById("newDealExistingInvestment").value;
+    if (!investmentId) {
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = "Select an existing investment first.";
+      return;
+    }
+    target.disabled = true;
+    try {
+      await fetchJson(`/api/ai-update-proposals/${proposalId}/match-existing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ investmentId })
+      });
+      await loadAiUpdateProposals();
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = "Proposal matched to the existing investment update workflow.";
+    } catch (error) {
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
+    } finally {
+      target.disabled = false;
+    }
+    return;
+  }
+
+  if (action === "approve-new-deal" && proposalId) {
+    target.disabled = true;
+    try {
+      const result = await fetchJson(`/api/ai-update-proposals/${proposalId}/approve-new-deal`, { method: "POST" });
+      await loadAiUpdateProposals();
+      await loadUpdates();
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = result.idempotent
+        ? "Pipeline deal was already created; no duplicate was added."
+        : "New pipeline deal created.";
+    } catch (error) {
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
+    } finally {
+      target.disabled = false;
     }
     return;
   }

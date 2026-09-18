@@ -255,6 +255,7 @@ function createAiEmailIntakeService({
   graphMailService,
   stateService,
   analyzeInvestmentUpdate,
+  analyzePotentialNewDeal,
   extractPdfTextFromUpload,
   finalizeAnalysisForResponse,
   enforceProposalSafetyInvariant,
@@ -270,6 +271,127 @@ function createAiEmailIntakeService({
 }) {
   const senderAllowlist = normalizeSenderList(allowedSenders);
   const domainAllowlist = normalizeSenderList(allowedDomains);
+
+  async function prepareNewDealSource(message, bodyText) {
+    const textParts = [
+      message.subject ? `Subject: ${message.subject}` : "",
+      message.senderName ? `Sender name: ${message.senderName}` : "",
+      message.sender ? `Sender email: ${message.sender}` : "",
+      bodyText
+    ].filter(Boolean);
+    const pdfExtractions = new Map();
+    for (const attachment of message.pdfAttachments || []) {
+      try {
+        const extracted = await extractPdfTextFromUpload({
+          filename: attachment.name,
+          mimeType: attachment.contentType || "application/pdf",
+          fileData: attachment.contentBytes
+        });
+        pdfExtractions.set(attachment.id || attachment.name, extracted);
+        textParts.push(`Attachment ${attachment.name}:\n${extracted.combinedText}`);
+      } catch (error) {
+        pdfExtractions.set(attachment.id || attachment.name, { error: error.message || "PDF could not be parsed." });
+      }
+    }
+    return {
+      source: {
+        sourceType: "Email",
+        sender: message.sender,
+        senderName: message.senderName,
+        subject: message.subject,
+        sourceDate: message.receivedDateTime,
+        sourceIdentifier: ["Microsoft 365", message.sender, message.subject, message.receivedDateTime]
+          .map((item) => cleanString(item, 500)).filter(Boolean).join(" | "),
+        filename: (message.attachments || []).map((attachment) => attachment.name).filter(Boolean).join(" | "),
+        sourceText: textParts.join("\n\n").slice(0, 60000),
+        graphMessageId: message.id,
+        internetMessageId: message.internetMessageId
+      },
+      pdfExtractions
+    };
+  }
+
+  function preserveNewDealAttachments(message, analyzedAt, pdfExtractions) {
+    const documents = [];
+    const attachmentHashes = [];
+    for (const attachment of message.attachments || []) {
+      const hash = attachmentHash(attachment.contentBytes);
+      if (hash) attachmentHashes.push(hash);
+      const existing = hash && typeof stateService.findAttachmentByHash === "function"
+        ? stateService.findAttachmentByHash(hash)
+        : null;
+      let document = existing;
+      if (!document && typeof saveUpload === "function") {
+        document = saveUpload({
+          filename: attachment.name,
+          buffer: Buffer.from(attachment.contentBytes, "base64"),
+          uploadedAt: analyzedAt,
+          source: "microsoft-365-email"
+        });
+      }
+      const extraction = pdfExtractions.get(attachment.id || attachment.name);
+      documents.push({
+        ...(document || {}),
+        name: attachment.name,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        hash,
+        preservationStatus: document ? "preserved" : "unresolved",
+        extractionStatus: attachment.isPdf
+          ? extraction && !extraction.error ? "parsed" : "unresolved"
+          : "not-parsed",
+        reason: extraction && extraction.error ? extraction.error : "",
+        graphAttachmentId: attachment.id,
+        sourceMessageKey: stateService.messageDedupeKey(message)
+      });
+    }
+    for (const attachment of message.unresolvedAttachments || []) {
+      documents.push({
+        id: attachment.id || makeId(),
+        name: attachment.name || "Unresolved attachment",
+        contentType: attachment.contentType || "",
+        size: attachment.size || 0,
+        preservationStatus: "unresolved",
+        extractionStatus: "not-parsed",
+        reason: attachment.reason || "Attachment could not be preserved.",
+        graphAttachmentId: attachment.id || "",
+        sourceMessageKey: stateService.messageDedupeKey(message)
+      });
+    }
+    return { documents, attachmentHashes };
+  }
+
+  async function processPotentialNewDeal({ message, bodyText, investments, analyzedAt }) {
+    const prepared = await prepareNewDealSource(message, bodyText);
+    const result = await analyzePotentialNewDeal({ source: prepared.source, investments });
+    if (result.route === "existing-investment") return { route: result.route, prepared, result };
+    if (result.route === "not-a-deal") return { route: result.route, prepared, result };
+    const preserved = preserveNewDealAttachments(message, analyzedAt, prepared.pdfExtractions);
+    const analysis = result.analysis;
+    const proposal = saveAiUpdateProposal({
+      proposalType: "new-deal",
+      sourceType: "Email",
+      sourceIdentifier: prepared.source.sourceIdentifier,
+      sourceDate: message.receivedDateTime,
+      sender: message.sender,
+      subject: message.subject,
+      confidenceScore: analysis.matchResult.confidence,
+      matchReason: analysis.matchResult.reason,
+      summary: analysis.dealData.dealSummary.value || analysis.classificationReason || "Potential new deal from Microsoft 365 email.",
+      dealData: analysis.dealData,
+      matchResult: analysis.matchResult,
+      opportunityFingerprint: analysis.opportunityFingerprint,
+      sourceMessageKey: stateService.messageDedupeKey(message),
+      sourceMessageKeys: [stateService.messageDedupeKey(message)],
+      proposedEntity: "Beaman Ventures",
+      entityConfirmed: false,
+      noExistingMatchConfirmed: analysis.matchResult.status === "no-match",
+      amountConfirmed: false,
+      documents: preserved.documents,
+      status: "pending"
+    });
+    return { route: result.route, prepared, result, proposal, ...preserved };
+  }
 
   async function analyzeSource({ source, investments, entitiesForUser, document }) {
     const result = await analyzeInvestmentUpdate({
@@ -423,9 +545,16 @@ function createAiEmailIntakeService({
           results.push({ ...base, status: "skipped", reason: "Sender is outside the configured intake allowlist." });
           continue;
         }
-        const existing = stateService.findByMessage(message);
-        if (existing && existing.status === "processed") {
-          results.push({ ...base, status: "skipped", reason: "Duplicate message already processed.", proposalIds: existing.proposalIds });
+        const reservation = typeof stateService.claimMessage === "function"
+          ? stateService.claimMessage(message)
+          : { claimed: !stateService.findByMessage(message), entry: stateService.findByMessage(message) };
+        if (!reservation.claimed) {
+          results.push({
+            ...base,
+            status: "skipped",
+            reason: reservation.reason || "Duplicate message already processed.",
+            proposalIds: reservation.entry && reservation.entry.proposalIds || []
+          });
           continue;
         }
 
@@ -435,6 +564,39 @@ function createAiEmailIntakeService({
         const attachmentHashes = [];
         const analysisAudits = [];
         const childResults = [];
+
+        if (typeof analyzePotentialNewDeal === "function") {
+          const newDealResult = await processPotentialNewDeal({ message, bodyText, investments, analyzedAt });
+          if (newDealResult.route !== "existing-investment") {
+            if (newDealResult.proposal) {
+              proposalIds.push(newDealResult.proposal.id);
+              attachmentHashes.push(...newDealResult.attachmentHashes);
+              childResults.push({ type: "new-deal", status: "processed", proposalId: newDealResult.proposal.id });
+            } else {
+              childResults.push({ type: "new-deal", status: "skipped", reason: "Email was not classified as a potential new deal." });
+            }
+            const status = newDealResult.proposal ? "processed" : "skipped";
+            const reason = newDealResult.proposal ? "" : "Email was not classified as a potential new deal.";
+            stateService.upsertEntry({
+              graphMessageId: message.id,
+              internetMessageId: message.internetMessageId,
+              conversationId: message.conversationId,
+              mailbox: message.mailbox,
+              folderId: message.folderId,
+              subject: message.subject,
+              sender: message.sender,
+              receivedDateTime: message.receivedDateTime,
+              attachmentHashes,
+              attachments: newDealResult.documents || [],
+              processedAt: analyzedAt,
+              proposalIds,
+              status,
+              error: ""
+            });
+            results.push({ ...base, status, reason, proposalIds, attachmentHashes, children: childResults });
+            continue;
+          }
+        }
 
         if (isMeaningfulBody(bodyText)) {
           try {
@@ -552,3 +714,4 @@ module.exports = {
   isMeaningfulBody,
   normalizeEmailBody
 };
+
