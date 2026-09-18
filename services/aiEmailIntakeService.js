@@ -100,18 +100,50 @@ function normalizeSenderList(value) {
 }
 
 function senderAllowed(sender, allowedSenders, allowedDomains) {
+  return senderAllowlistOutcome(sender, allowedSenders, allowedDomains).allowed;
+}
+
+function senderAllowlistOutcome(sender, allowedSenders, allowedDomains) {
   const email = cleanString(sender, 320).toLowerCase();
-  if (!email) {
-    return false;
-  }
-  if (allowedSenders.length && !allowedSenders.includes(email)) {
-    return false;
-  }
   const domain = email.includes("@") ? email.split("@").pop() : "";
-  if (allowedDomains.length && !allowedDomains.includes(domain)) {
-    return false;
+  const senderMatch = Boolean(email) && (!allowedSenders.length || allowedSenders.includes(email));
+  const domainMatch = Boolean(email) && (!allowedDomains.length || allowedDomains.includes(domain));
+  return {
+    allowed: senderMatch && domainMatch,
+    senderRuleConfigured: allowedSenders.length > 0,
+    senderMatch,
+    domainRuleConfigured: allowedDomains.length > 0,
+    domainMatch
+  };
+}
+
+function previewMessageEligibility(message, stateEntry, allowlist, now = new Date()) {
+  if (!allowlist.allowed) {
+    return { status: "skipped", reason: "Sender is outside the configured intake allowlist." };
   }
-  return true;
+  if (!cleanString(message && (message.internetMessageId || message.graphMessageId || message.id), 500)) {
+    return { status: "blocked", reason: "Message has no stable Internet Message ID or Graph ID." };
+  }
+  if (!stateEntry) {
+    return { status: "eligible", reason: "No prior intake state exists for this source message." };
+  }
+  if (stateEntry.status === "processed") {
+    return { status: "already-processed", reason: "Message has already been processed." };
+  }
+  if (stateEntry.status === "skipped") {
+    return { status: "already-skipped", reason: "Message has terminal skipped intake state." };
+  }
+  if (stateEntry.status === "reserved") {
+    const reservedAt = new Date(stateEntry.reservedAt || stateEntry.processedAt || 0).getTime();
+    if (Number.isFinite(reservedAt) && now.getTime() - reservedAt < 15 * 60 * 1000) {
+      return { status: "reserved", reason: "Message intake is already reserved and still within the 15-minute reservation window." };
+    }
+    return { status: "eligible", reason: "The previous reservation is stale and intake would reclaim this message." };
+  }
+  if (stateEntry.status === "failed") {
+    return { status: "eligible", reason: "The previous intake attempt failed and this message is eligible for retry." };
+  }
+  return { status: "eligible", reason: `State '${stateEntry.status || "unknown"}' is not terminal and would be reclaimed.` };
 }
 
 function createProposalPayload({ analysis, source, document }) {
@@ -722,10 +754,65 @@ function createAiEmailIntakeService({
     };
   }
 
+  async function previewEmails({ now = new Date() } = {}) {
+    if (!graphMailService || !graphMailService.isConfigured() || typeof graphMailService.previewIntakeMessages !== "function") {
+      return {
+        configured: false,
+        error: "Microsoft 365 email intake preview is not configured.",
+        messages: []
+      };
+    }
+    let run;
+    try {
+      run = await graphMailService.previewIntakeMessages();
+    } catch (error) {
+      return {
+        configured: true,
+        error: error.message || "Microsoft 365 email intake preview failed.",
+        messages: []
+      };
+    }
+    const messages = run.messages.map((message) => {
+      const lookupMessage = {
+        id: message.graphMessageId,
+        graphMessageId: message.graphMessageId,
+        internetMessageId: message.internetMessageId
+      };
+      const stateEntry = stateService.findByMessage(lookupMessage);
+      const allowlist = senderAllowlistOutcome(message.sender, senderAllowlist, domainAllowlist);
+      const eligibility = previewMessageEligibility(lookupMessage, stateEntry, allowlist, now);
+      return {
+        ...message,
+        allowlist,
+        eligibilityStatus: eligibility.status,
+        eligibilityReason: eligibility.reason,
+        state: stateEntry
+          ? {
+              found: true,
+              status: stateEntry.status,
+              reservedAt: stateEntry.reservedAt,
+              processedAt: stateEntry.processedAt,
+              proposalIds: stateEntry.proposalIds,
+              error: stateEntry.error
+            }
+          : { found: false, status: "", reservedAt: "", processedAt: "", proposalIds: [], error: "" }
+      };
+    });
+    return {
+      configured: true,
+      mailbox: run.mailbox,
+      folderName: run.folder.displayName,
+      maxMessagesPerRun: run.maxMessagesPerRun,
+      limits: run.limits,
+      messages
+    };
+  }
+
   return {
     checkForNewEmails,
     isMeaningfulBody,
-    normalizeEmailBody
+    normalizeEmailBody,
+    previewEmails
   };
 }
 
@@ -737,5 +824,7 @@ module.exports = {
   hasAutomatedExplicitInvestmentMatch,
   htmlToText,
   isMeaningfulBody,
-  normalizeEmailBody
+  normalizeEmailBody,
+  previewMessageEligibility,
+  senderAllowlistOutcome
 };

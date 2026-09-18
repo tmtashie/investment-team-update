@@ -73,6 +73,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-before-productio
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_BODY_SIZE_BYTES = 20 * 1024 * 1024;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const AI_EMAIL_HOUSE_DOMAINS = process.env.AI_EMAIL_HOUSE_DOMAINS || "beamanventures.com";
 const AI_ANALYST_SYSTEM_PROMPT =
   "You are an internal investment analyst for Beaman Ventures. Your job is to produce concise, Lee-ready investment analysis. Be clear, practical, and decision-oriented. Do not make up facts. If data is missing, say what is missing and suggest what to ask for.";
 const DATA_SCHEMA_VERSION = 2;
@@ -103,6 +104,7 @@ const ENTITY_ALIASES = {
   "Katherine Trust": "Katherine Trust",
   "Natalie Trust": "Natalie Trust"
 };
+
 
 const DEFAULT_RECIPIENTS = splitCsv(process.env.TEAM_EMAILS || "");
 const DEFAULT_UPDATE_REQUEST_EMAIL = "Tyler@Beamanventures.com";
@@ -1377,11 +1379,13 @@ async function callAiUpdateAnalysisModel(prompt) {
 
 const { analyzeInvestmentUpdate } = createAiUpdateAnalysisService({
   callModel: callAiUpdateAnalysisModel,
-  normalizeEntityName
+  normalizeEntityName,
+  houseDomains: AI_EMAIL_HOUSE_DOMAINS
 });
 
 const { analyzePotentialNewDeal } = createNewDealAnalysisService({
-  callModel: callAiUpdateAnalysisModel
+  callModel: callAiUpdateAnalysisModel,
+  houseDomains: AI_EMAIL_HOUSE_DOMAINS
 });
 
 const {
@@ -4803,7 +4807,8 @@ const server = http.createServer(async (request, response) => {
           ? microsoftGraphMailService.getSafeConfigStatus().maxMessagesPerRun
           : 0,
         allowedSendersConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_SENDERS),
-        allowedDomainsConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_DOMAINS)
+        allowedDomainsConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_DOMAINS),
+        houseDomains: AI_EMAIL_HOUSE_DOMAINS.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
       },
       entities: INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity)),
       familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
@@ -5004,6 +5009,33 @@ const server = http.createServer(async (request, response) => {
         proposalsCreated: 0,
         error: error.message || "Microsoft 365 email intake failed.",
         results: []
+      });
+      return;
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ai-email-intake/preview") {
+    const user = requireMasterEditor(request, response);
+    if (!user) {
+      return;
+    }
+    if (!AI_EMAIL_INTAKE_ENABLED) {
+      sendJson(response, 400, {
+        error: "Microsoft 365 email intake is disabled. Set AI_EMAIL_INTAKE_ENABLED=true after configuring Microsoft Graph."
+      });
+      return;
+    }
+
+    try {
+      const result = await aiEmailIntakeService.previewEmails();
+      const status = result.configured === false ? 400 : 200;
+      sendJson(response, status, result);
+      return;
+    } catch (error) {
+      sendJson(response, error.statusCode || 500, {
+        configured: true,
+        error: error.message || "Microsoft 365 email intake preview failed.",
+        messages: []
       });
       return;
     }

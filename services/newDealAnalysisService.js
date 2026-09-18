@@ -207,9 +207,9 @@ function buildNewDealPrompt(source) {
   ].join("\n");
 }
 
-function createNewDealAnalysisService({ callModel }) {
+function createNewDealAnalysisService({ callModel, houseDomains = [] }) {
   async function analyzePotentialNewDeal({ source, investments = [] }) {
-    const matchResult = generateInvestmentMatchCandidates({ source, investments });
+    const matchResult = generateInvestmentMatchCandidates({ source, investments, houseDomains });
     if (matchResult.status === "existing-confident") {
       return { route: "existing-investment", matchResult, analysis: null };
     }

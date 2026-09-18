@@ -56,6 +56,29 @@ function decodedByteLength(contentBytes) {
   }
 }
 
+function attachmentPreviewOutcome(attachment, messageBytes, runBytes) {
+  if (attachment.isInline) {
+    return { status: "skipped", reason: "Inline attachment would be ignored.", countedBytes: 0 };
+  }
+  if (!attachment.isSupported) {
+    return { status: "unresolved", reason: "Unsupported attachment type would not be downloaded.", countedBytes: 0 };
+  }
+  if (attachment.size > maxAttachmentBytes(attachment)) {
+    return { status: "unresolved", reason: attachmentLimitReason(attachment), countedBytes: 0 };
+  }
+  if (messageBytes + attachment.size > MAX_ATTACHMENT_MESSAGE_BYTES) {
+    return { status: "unresolved", reason: "Attachment would exceed the 30 MB per-message limit.", countedBytes: 0 };
+  }
+  if (runBytes + attachment.size > MAX_ATTACHMENT_RUN_BYTES) {
+    return { status: "unresolved", reason: "Attachment would exceed the 50 MB per-run limit.", countedBytes: 0 };
+  }
+  return {
+    status: "eligible",
+    reason: "Attachment metadata is within configured limits; actual decoded bytes would be validated during intake.",
+    countedBytes: attachment.size
+  };
+}
+
 function createMicrosoftGraphMailService({
   tenantId,
   clientId,
@@ -270,6 +293,62 @@ function createMicrosoftGraphMailService({
     };
   }
 
+  async function previewIntakeMessages() {
+    const token = await getAccessToken();
+    const folder = await resolveFolder(token);
+    const messages = await listMessagesInFolder(token, folder.id);
+    const previews = [];
+    let projectedRunBytes = 0;
+    for (const message of messages) {
+      const attachments = message.hasAttachments ? await listAttachments(token, message.id) : [];
+      let projectedMessageBytes = 0;
+      const attachmentPreviews = attachments.map((attachment) => {
+        const outcome = attachmentPreviewOutcome(attachment, projectedMessageBytes, projectedRunBytes);
+        projectedMessageBytes += outcome.countedBytes;
+        projectedRunBytes += outcome.countedBytes;
+        return {
+          id: attachment.id,
+          name: attachment.name,
+          contentType: attachment.contentType,
+          size: attachment.size,
+          isInline: attachment.isInline,
+          isPdf: attachment.isPdf,
+          isSupported: attachment.isSupported,
+          status: outcome.status,
+          reason: outcome.reason,
+          projectedCountedBytes: outcome.countedBytes
+        };
+      });
+      previews.push({
+        graphMessageId: message.id,
+        internetMessageId: message.internetMessageId,
+        conversationId: message.conversationId,
+        sender: message.sender,
+        senderName: message.senderName,
+        subject: message.subject,
+        receivedDateTime: message.receivedDateTime,
+        attachmentCount: attachments.length,
+        attachmentCountTruncated: Boolean(attachments.truncated),
+        attachments: attachmentPreviews,
+        projectedMessageAttachmentBytes: projectedMessageBytes,
+        projectedRunAttachmentBytesAfterMessage: projectedRunBytes
+      });
+    }
+    return {
+      mailbox: config.mailboxUser,
+      folder,
+      maxMessagesPerRun: config.maxMessagesPerRun,
+      limits: {
+        maxPdfBytes: MAX_ATTACHMENT_PDF_BYTES,
+        maxOtherFileBytes: MAX_ATTACHMENT_FILE_BYTES,
+        maxMessageBytes: MAX_ATTACHMENT_MESSAGE_BYTES,
+        maxRunBytes: MAX_ATTACHMENT_RUN_BYTES,
+        maxAttachmentsPerMessage: MAX_ATTACHMENTS_PER_MESSAGE
+      },
+      messages: previews
+    };
+  }
+
   async function fetchIntakeMessages() {
     const token = await getAccessToken();
     const folder = await resolveFolder(token);
@@ -361,6 +440,7 @@ function createMicrosoftGraphMailService({
     isConfigured,
     listAttachments,
     listMessagesInFolder,
+    previewIntakeMessages,
     resolveFolder
   };
 }
@@ -371,5 +451,6 @@ module.exports = {
   MAX_ATTACHMENT_MESSAGE_BYTES,
   MAX_ATTACHMENT_RUN_BYTES,
   MAX_ATTACHMENTS_PER_MESSAGE,
+  attachmentPreviewOutcome,
   createMicrosoftGraphMailService
 };

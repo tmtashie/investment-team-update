@@ -56,6 +56,7 @@ node server.js
 - `AI_EMAIL_MAX_MESSAGES_PER_RUN`: maximum recent messages requested per manual check; defaults to `10` and is constrained to `1` through `50`
 - `AI_EMAIL_ALLOWED_SENDERS`: optional comma-separated list of exact sender email addresses accepted for analysis
 - `AI_EMAIL_ALLOWED_DOMAINS`: optional comma-separated list of sender domains accepted for analysis
+- `AI_EMAIL_HOUSE_DOMAINS`: comma-separated house domains that cannot provide positive company-domain match evidence; defaults to `beamanventures.com` and includes its subdomains
 
 ## Microsoft 365 investment email intake
 
@@ -63,9 +64,13 @@ Microsoft 365 intake is disabled by default. Microsoft 365 tenant setup, applica
 
 An editor starts each intake run manually from the AI Update Inbox by selecting `Check for new investment emails`. The app requests up to `AI_EMAIL_MAX_MESSAGES_PER_RUN` of the most recent messages in the configured mailbox folder and reports how many were processed, skipped, or failed.
 
+A master editor can select `Preview intake window` to inspect that same ordered Graph message window without running intake. The preview shows message identifiers, sender and subject metadata, allowlist and intake-state outcomes, attachment metadata, and projected message/run attachment budgets. It does not reserve messages, write intake state, download attachment content, invoke analysis, or create proposals.
+
 The intake accepts meaningful email-body text and non-inline PDF attachments. HTML email is normalized to text, and obvious signatures and quoted thread content are removed before analysis. Inline files and attachments other than PDFs are skipped.
 
 Sender controls are optional. When `AI_EMAIL_ALLOWED_SENDERS` is populated, a message must come from one of those exact addresses. When `AI_EMAIL_ALLOWED_DOMAINS` is populated, its sender domain must be listed. When both settings are populated, both checks must pass. Leaving both empty permits any sender whose message is present in the configured folder.
+
+House domains are separate from sender allowlists. A sender from `AI_EMAIL_HOUSE_DOMAINS` can still match an investment through explicit company or alias evidence in the subject, body, or attachment filename, but its email domain alone is never positive match evidence.
 
 Processed messages are deduplicated using their Internet Message ID or Microsoft Graph message ID. PDF content is also deduplicated by a SHA-256 hash. Intake state and its analysis audit are stored in `ai-email-intake-state.json` under `DATA_DIR`, so later manual checks do not create duplicate proposals from previously processed sources.
 
