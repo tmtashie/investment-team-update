@@ -5,7 +5,8 @@ const {
   createAiEmailIntakeService,
   hasAutomatedExplicitInvestmentMatch,
   isMeaningfulBody,
-  normalizeEmailBody
+  normalizeEmailBody,
+  previewMessageEligibility
 } = require("../services/aiEmailIntakeService");
 const { createAiUpdateAnalysisService } = require("../services/aiUpdateAnalysisService");
 const { createAiEmailIntakeStateService } = require("../services/aiEmailIntakeStateService");
@@ -356,6 +357,43 @@ test("automated email intake rejects semantic-only model matches even at confide
   assert.equal(harness.getStored()[0].analysisAudits[0].shouldCreateProposal, true);
   assert.equal(harness.getStored()[0].analysisAudits[0].counts.extractedFacts, 1);
   assert.match(harness.getStored()[0].analysisAudits[0].skipReason, /requires explicit investment name/);
+});
+
+test("house-domain-only model match cannot pass automated proposal eligibility", async () => {
+  const analysisService = createAiUpdateAnalysisService({
+    normalizeEntityName: (value) => String(value || "").trim(),
+    houseDomains: "beamanventures.com",
+    callModel: async () => ({
+      investmentMatch: {
+        investmentId: "company-ventures",
+        investmentName: "Company Ventures",
+        confidence: 78,
+        reason: "Sender domain 'beamanventures' supports 'Company Ventures'."
+      },
+      entityMatch: {},
+      extractedFacts: [{ field: "company", value: "CHRP", sourceEvidence: "CHRP introduction" }],
+      materialDevelopments: [],
+      proposedChanges: [],
+      warnings: [],
+      unresolved: [],
+      whatChanged: []
+    })
+  });
+
+  const result = await analysisService.analyzeInvestmentUpdate({
+    source: {
+      sourceType: "Email",
+      sender: "tyler@beamanventures.com",
+      subject: "Test CHRP",
+      sourceText: "CHRP introduction and investment opportunity."
+    },
+    investments: [{ id: "company-ventures", company: "Company Ventures", entity: "Beaman Ventures" }],
+    entities: ["Beaman Ventures"]
+  });
+
+  assert.equal(result.analysis.candidates.length, 0);
+  assert.equal(hasAutomatedExplicitInvestmentMatch(result.analysis), false);
+  assert.equal(result.analysis.warnings.some((warning) => /lacks explicit/i.test(String(warning))), true);
 });
 
 test("valid deterministic FINSYNC match with no actionable content stores safe skipped audit", async () => {
@@ -738,4 +776,70 @@ test("potential new deal creates one pending proposal with preserved and unresol
   assert.equal(harness.savedProposals[0].documents.length, 2);
   assert.equal(harness.savedProposals[0].documents[0].storedName, "NewCo Deck.pdf");
   assert.equal(harness.savedProposals[0].documents[1].preservationStatus, "unresolved");
+});
+
+test("read-only intake preview reports allowlist and terminal state without invoking mutation or analysis", async () => {
+  const calls = { claim: 0, upsert: 0, analysis: 0, proposals: 0 };
+  const service = createAiEmailIntakeService({
+    graphMailService: {
+      isConfigured: () => true,
+      previewIntakeMessages: async () => ({
+        mailbox: "updates@example.test",
+        folder: { id: "folder-1", displayName: "AI Investment Updates" },
+        maxMessagesPerRun: 10,
+        limits: { maxMessageBytes: 30, maxRunBytes: 50 },
+        messages: [
+          {
+            graphMessageId: "attainable-graph-id", internetMessageId: "<attainable@example.test>",
+            sender: "cleseberg@thesignatry.com", subject: "Attainable Living LLC", receivedDateTime: "2026-09-18T16:00:00Z",
+            attachmentCount: 1, attachments: [], projectedMessageAttachmentBytes: 20, projectedRunAttachmentBytesAfterMessage: 20
+          },
+          {
+            graphMessageId: "processed-graph-id", internetMessageId: "<processed@example.test>",
+            sender: "founder@portfolio.example", subject: "Processed", receivedDateTime: "2026-09-18T15:00:00Z",
+            attachmentCount: 0, attachments: [], projectedMessageAttachmentBytes: 0, projectedRunAttachmentBytesAfterMessage: 20
+          }
+        ]
+      })
+    },
+    stateService: {
+      findByMessage: (message) => message.graphMessageId === "processed-graph-id"
+        ? { status: "processed", processedAt: "2026-09-18T15:05:00Z", proposalIds: ["proposal-1"], error: "" }
+        : null,
+      claimMessage: () => { calls.claim += 1; throw new Error("preview must not claim"); },
+      upsertEntry: () => { calls.upsert += 1; throw new Error("preview must not write"); }
+    },
+    analyzeInvestmentUpdate: async () => { calls.analysis += 1; throw new Error("preview must not analyze"); },
+    analyzePotentialNewDeal: async () => { calls.analysis += 1; throw new Error("preview must not analyze"); },
+    saveAiUpdateProposal: () => { calls.proposals += 1; throw new Error("preview must not save proposals"); },
+    readInvestments: () => [],
+    filterInvestmentsForUser: (investments) => investments,
+    allowedDomains: "thesignatry.com,portfolio.example"
+  });
+
+  const result = await service.previewEmails({ now: new Date("2026-09-18T16:10:00Z") });
+
+  assert.equal(result.messages[0].eligibilityStatus, "eligible");
+  assert.equal(result.messages[0].allowlist.domainMatch, true);
+  assert.equal(result.messages[0].state.found, false);
+  assert.equal(result.messages[1].eligibilityStatus, "already-processed");
+  assert.deepEqual(calls, { claim: 0, upsert: 0, analysis: 0, proposals: 0 });
+});
+
+test("intake preview explains blocked, reserved, terminal, and retryable state", () => {
+  const message = { graphMessageId: "graph-1", internetMessageId: "<message@example.test>" };
+  const allowed = { allowed: true };
+  const now = new Date("2026-09-18T16:10:00Z");
+
+  assert.equal(previewMessageEligibility({}, null, allowed, now).status, "blocked");
+  assert.equal(previewMessageEligibility(message, { status: "processed" }, allowed, now).status, "already-processed");
+  assert.equal(previewMessageEligibility(message, { status: "skipped" }, allowed, now).status, "already-skipped");
+  assert.equal(previewMessageEligibility(message, {
+    status: "reserved", reservedAt: "2026-09-18T16:05:00Z"
+  }, allowed, now).status, "reserved");
+  assert.equal(previewMessageEligibility(message, {
+    status: "reserved", reservedAt: "2026-09-18T15:30:00Z"
+  }, allowed, now).status, "eligible");
+  assert.equal(previewMessageEligibility(message, { status: "failed" }, allowed, now).status, "eligible");
+  assert.equal(previewMessageEligibility(message, null, { allowed: false }, now).status, "skipped");
 });
