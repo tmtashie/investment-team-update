@@ -126,6 +126,12 @@ test("an allowlisted conversation can be read with normalized output", (t) => {
   assert.equal(JSON.stringify(result).includes(THREAD_ONE_GUID), false);
 });
 
+test("recent-message limiting uses normalized Apple timestamps", (t) => {
+  const { service } = withService(t);
+  const result = service.readRecentMessages({ threadId: THREAD_ONE, limit: 1 });
+  assert.deepEqual(result.messages.map((message) => message.messageId), ["message-later"]);
+});
+
 test("a non-allowlisted conversation is rejected before message access", (t) => {
   const { service } = withService(t);
   assert.throws(
