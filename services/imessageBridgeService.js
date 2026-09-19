@@ -147,6 +147,7 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
       rows = database.prepare(`
         SELECT * FROM (
           SELECT
+            m.ROWID AS source_rowid,
             m.guid AS message_id,
             m.thread_originator_guid AS reply_to_message_id,
             m.text AS text,
@@ -168,10 +169,10 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
             AND coalesce(m.date_retracted, 0) = 0
             AND NOT (coalesce(m.is_empty, 0) = 1 AND coalesce(m.date_edited, 0) != 0)
             ${searchClause}
-          ORDER BY m.date DESC, m.ROWID DESC
+          ORDER BY apple_seconds DESC, m.ROWID DESC
           LIMIT ?
         ) AS recent
-        ORDER BY apple_seconds ASC, message_id ASC
+        ORDER BY apple_seconds ASC, source_rowid ASC
       `).all(...parameters);
     } catch {
       throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
