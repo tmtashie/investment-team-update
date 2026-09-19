@@ -289,17 +289,102 @@ test("the MCP surface contains only three annotated read-only tools", () => {
   assert.equal(TOOL_DEFINITIONS.some((tool) => /send|reply|react|edit|delete|attachment|mark/i.test(tool.name)), false);
 });
 
-test("the MCP handler completes the read-only handshake and ignores notifications", async (t) => {
+test("undeclared inherited property names cannot be invoked as MCP tools", async () => {
+  const calls = [];
+  const service = {
+    listAllowedMessageThreads(input) { calls.push(["list", input]); },
+    readRecentMessages(input) { calls.push(["read", input]); },
+    searchAllowedMessages(input) { calls.push(["search", input]); }
+  };
+  const handle = createMcpRequestHandler(service);
+
+  for (const name of ["constructor", "toString", "__proto__"]) {
+    const response = await handle({
+      jsonrpc: "2.0",
+      id: name,
+      method: "tools/call",
+      params: { name, arguments: { databasePath: "/tmp/other.db", sql: "SELECT * FROM message" } }
+    });
+    assert.deepEqual(response.error, { code: -32601, message: "Tool not found" });
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("malformed falsy MCP tool arguments are rejected instead of treated as an empty object", async (t) => {
   const { service } = withService(t);
   const handle = createMcpRequestHandler(service);
-  const initialized = await handle({ jsonrpc: "2.0", method: "notifications/initialized" });
-  assert.equal(initialized, null);
+
+  for (const value of [null, false, 0, ""]) {
+    const response = await handle({
+      jsonrpc: "2.0",
+      id: String(value),
+      method: "tools/call",
+      params: { name: "list_allowed_message_threads", arguments: value }
+    });
+    assert.equal(response.result.isError, true);
+    assert.equal(response.result.structuredContent.code, "INVALID_REQUEST");
+  }
+
+  const omitted = await handle({
+    jsonrpc: "2.0",
+    id: "omitted",
+    method: "tools/call",
+    params: { name: "list_allowed_message_threads" }
+  });
+  assert.equal(omitted.result.isError, false);
+});
+
+test("server/discover returns Method not found for legacy fallback", async (t) => {
+  const { service } = withService(t);
+  const handle = createMcpRequestHandler(service);
   const discovered = await handle({ jsonrpc: "2.0", id: 0, method: "server/discover" });
-  assert.deepEqual(discovered.result.supportedVersions, ["2025-11-25"]);
+  assert.deepEqual(discovered, {
+    jsonrpc: "2.0",
+    id: 0,
+    error: { code: -32601, message: "Method not found" }
+  });
+});
+
+test("legacy initialize and tool discovery preserve the exact read-only surface", async (t) => {
+  const { service } = withService(t);
+  const handle = createMcpRequestHandler(service);
+  const initialized = await handle({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+      clientInfo: { name: "synthetic-legacy-client", version: "1.0.0" }
+    }
+  });
+  assert.deepEqual(initialized.result, {
+    protocolVersion: "2025-11-25",
+    capabilities: { tools: { listChanged: false } },
+    serverInfo: { name: "beaman-imessage-readonly", version: "0.1.0" }
+  });
+  assert.equal(await handle({ jsonrpc: "2.0", method: "notifications/initialized" }), null);
   const listed = await handle({ jsonrpc: "2.0", id: 1, method: "tools/list" });
   assert.deepEqual(listed.result.tools, TOOL_DEFINITIONS);
   const ping = await handle({ jsonrpc: "2.0", id: 2, method: "ping" });
   assert.deepEqual(ping.result, {});
+});
+
+test("legacy fallback remains confined to the synthetic fixture path", async (t) => {
+  const { fixture, service } = withService(t);
+  assert.equal(fixture.databasePath.includes(path.join("Library", "Messages")), false);
+  const handle = createMcpRequestHandler(service);
+  const response = await handle({
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: { name: "list_allowed_message_threads", arguments: {} }
+  });
+  assert.equal(response.result.isError, false);
+  assert.deepEqual(response.result.structuredContent.threads.map((thread) => thread.threadId), [
+    THREAD_ONE,
+    THREAD_GROUP
+  ]);
 });
 
 test("database access is enforced as read-only and query-only", (t) => {
