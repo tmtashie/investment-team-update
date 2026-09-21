@@ -96,6 +96,31 @@ test("fund opportunity keeps concrete terms and does not force target investors 
   assert.doesNotMatch(points, /Strong projected returns for investors/);
 });
 
+test("later-numbered fund names activate fund-specific target-investor handling", () => {
+  const fundSource = {
+    sender: "sponsor@example.com",
+    sourceText: "Growth Fund VI targets family offices. The vehicle invests in software companies."
+  };
+  const analysis = normalizeDealAnalysis(
+    {
+      isPotentialNewDeal: true,
+      companyName: { value: "Growth Fund VI", sourceEvidence: "Growth Fund VI" },
+      customersContractsDeployments: {
+        value: "Family offices",
+        sourceEvidence: "targets family offices"
+      }
+    },
+    fundSource,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+
+  assert.equal(analysis.dealData.customersContractsDeployments.value, "");
+  assert.equal(
+    analysis.dealData.keyInvestmentPoints.some((item) => item.value === "Target investors: Family offices"),
+    true
+  );
+});
+
 test("fund target, minimum, committed, and remaining amounts cannot become Beaman proposed check size", () => {
   const invalidCheckClaims = [
     { value: "$1M", sourceEvidence: "the minimum investment is $1M" },

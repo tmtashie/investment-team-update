@@ -76,7 +76,7 @@ function isFundOpportunity(raw, sourceText) {
     raw && raw.roundType && (raw.roundType.value || raw.roundType),
     raw && raw.securityType && (raw.securityType.value || raw.securityType)
   ].map((item) => cleanString(item, MAX_SOURCE_TEXT_LENGTH)).join(" ");
-  return /\b(investment fund|real estate fund|private equity fund|venture fund|credit fund|fund i{1,3}|fund iv|fund v|investment vehicle|limited partnership|lp interests?|reit)\b/i.test(context);
+  return /\b(investment fund|real estate fund|private equity fund|venture fund|credit fund|fund (?:i{1,3}|iv|v|vi{1,3}|ix|x|[1-9]\d?)|investment vehicle|limited partnership|lp interests?|reit)\b/i.test(context);
 }
 
 function isTargetInvestorClaim(claim) {
