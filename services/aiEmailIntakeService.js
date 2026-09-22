@@ -146,7 +146,7 @@ function previewMessageEligibility(message, stateEntry, allowlist, now = new Dat
   return { status: "eligible", reason: `State '${stateEntry.status || "unknown"}' is not terminal and would be reclaimed.` };
 }
 
-function createProposalPayload({ analysis, source, document }) {
+function createProposalPayload({ analysis, source, document, documents }) {
   return {
     investmentId: analysis.investmentMatch && analysis.investmentMatch.investmentId,
     entityId: analysis.entityMatch && (analysis.entityMatch.entityId || analysis.entityMatch.entityName),
@@ -155,6 +155,10 @@ function createProposalPayload({ analysis, source, document }) {
     sourceDate: source.sourceDate,
     sender: source.sender,
     subject: source.subject,
+    opportunityName: source.opportunityName || "",
+    opportunityId: source.opportunityId || "",
+    sourceMessageKey: source.sourceMessageKey || "",
+    sourceMessageKeys: source.sourceMessageKey ? [source.sourceMessageKey] : [],
     confidenceScore: analysis.investmentMatch ? analysis.investmentMatch.confidence : 0,
     matchReason: [
       analysis.investmentMatch && analysis.investmentMatch.reason,
@@ -180,7 +184,7 @@ function createProposalPayload({ analysis, source, document }) {
       analyzedAt: source.analyzedAt
     },
     proposedChanges: analysis.proposedChanges || [],
-    documents: document ? [document] : [],
+    documents: Array.isArray(documents) ? documents : document ? [document] : [],
     status: "pending"
   };
 }
@@ -313,6 +317,7 @@ function createAiEmailIntakeService({
   stateService,
   analyzeInvestmentUpdate,
   analyzePotentialNewDeal,
+  analyzePotentialNewDeals,
   extractPdfTextFromUpload,
   finalizeAnalysisForResponse,
   enforceProposalSafetyInvariant,
@@ -345,7 +350,6 @@ function createAiEmailIntakeService({
           fileData: attachment.contentBytes
         });
         pdfExtractions.set(attachment.id || attachment.name, extracted);
-        textParts.push(`Attachment ${attachment.name}:\n${extracted.combinedText}`);
       } catch (error) {
         pdfExtractions.set(attachment.id || attachment.name, { error: error.message || "PDF could not be parsed." });
       }
@@ -361,6 +365,15 @@ function createAiEmailIntakeService({
           .map((item) => cleanString(item, 500)).filter(Boolean).join(" | "),
         filename: (message.attachments || []).map((attachment) => attachment.name).filter(Boolean).join(" | "),
         sourceText: textParts.join("\n\n").slice(0, 60000),
+        emailBodyText: bodyText,
+        attachments: (message.pdfAttachments || []).map((attachment) => {
+          const extraction = pdfExtractions.get(attachment.id || attachment.name);
+          return {
+            id: attachment.id || attachment.name,
+            name: attachment.name,
+            text: extraction && !extraction.error ? extraction.combinedText : ""
+          };
+        }).filter((attachment) => attachment.text),
         graphMessageId: message.id,
         internetMessageId: message.internetMessageId
       },
@@ -418,39 +431,92 @@ function createAiEmailIntakeService({
     return { documents, attachmentHashes };
   }
 
-  async function processPotentialNewDeal({ message, bodyText, investments, analyzedAt }) {
+  async function processPotentialNewDeals({ message, bodyText, investments, entitiesForUser, analyzedAt }) {
     const prepared = await prepareNewDealSource(message, bodyText);
-    const result = await analyzePotentialNewDeal({ source: prepared.source, investments });
-    if (result.route === "existing-investment") return { route: result.route, prepared, result };
-    if (result.route === "not-a-deal") return { route: result.route, prepared, result };
     const preserved = preserveNewDealAttachments(message, analyzedAt, prepared.pdfExtractions);
-    const analysis = result.analysis;
-    const proposal = saveAiUpdateProposal({
-      proposalType: "new-deal",
-      sourceType: "Email",
-      sourceIdentifier: prepared.source.sourceIdentifier,
-      sourceDate: message.receivedDateTime,
-      sender: message.sender,
-      subject: message.subject,
-      confidenceScore: analysis.matchResult.confidence,
-      matchReason: analysis.matchResult.reason,
-      summary: analysis.dealData.dealSummary.value || analysis.classificationReason || "Potential new deal from Microsoft 365 email.",
-      dealData: analysis.dealData,
-      matchResult: analysis.matchResult,
-      opportunityFingerprint: analysis.opportunityFingerprint,
-      sourceMessageKey: stateService.messageDedupeKey(message),
-      sourceMessageKeys: [stateService.messageDedupeKey(message)],
-      proposedEntity: "Beaman Ventures",
-      entityConfirmed: false,
-      noExistingMatchConfirmed: analysis.matchResult.status === "no-match",
-      amountConfirmed: false,
-      documents: preserved.documents,
-      status: "pending"
-    });
-    return { route: result.route, prepared, result, proposal, ...preserved };
+    const analyzeMany = typeof analyzePotentialNewDeals === "function"
+      ? analyzePotentialNewDeals
+      : async ({ source, investments: availableInvestments }) => [{
+          opportunity: { name: source.subject || "Opportunity", opportunityId: "" },
+          source,
+          result: await analyzePotentialNewDeal({ source, investments: availableInvestments })
+        }];
+    const partitions = await analyzeMany({ source: prepared.source, investments });
+    const proposals = [];
+    const children = [];
+    const sourceMessageKey = stateService.messageDedupeKey(message);
+    for (const partition of partitions) {
+      const opportunityDocuments = preserved.documents.filter((document) =>
+        !partition.opportunity.attachmentIds || partition.opportunity.attachmentIds.includes(document.graphAttachmentId)
+      );
+      if (partition.result.route === "existing-investment") {
+        const updateResult = await analyzeSource({
+          source: {
+            ...partition.source,
+            analyzedAt,
+            sourceMessageKey,
+            opportunityName: partition.opportunity.name,
+            opportunityId: partition.opportunity.opportunityId
+          },
+          investments,
+          entitiesForUser,
+          documents: opportunityDocuments
+        });
+        if (updateResult.proposal) proposals.push(updateResult.proposal);
+        children.push({
+          type: "opportunity",
+          opportunityId: partition.opportunity.opportunityId,
+          opportunityName: partition.opportunity.name,
+          route: "existing-investment",
+          status: updateResult.proposal ? "processed" : "skipped",
+          proposalId: updateResult.proposal && updateResult.proposal.id,
+          reason: updateResult.reason
+        });
+        continue;
+      }
+      if (!partition.result.analysis || partition.result.route === "not-a-deal") {
+        children.push({ type: "opportunity", opportunityId: partition.opportunity.opportunityId, opportunityName: partition.opportunity.name, route: partition.result.route, status: "skipped", reason: "Partition was not classified as an investment opportunity." });
+        continue;
+      }
+      const analysis = partition.result.analysis;
+      const proposal = saveAiUpdateProposal({
+        proposalType: "new-deal",
+        sourceType: "Email",
+        sourceIdentifier: prepared.source.sourceIdentifier,
+        sourceDate: message.receivedDateTime,
+        sender: message.sender,
+        subject: message.subject,
+        confidenceScore: analysis.matchResult.confidence,
+        matchReason: analysis.matchResult.reason,
+        summary: analysis.dealData.dealSummary.value || analysis.classificationReason || "Potential new deal from Microsoft 365 email.",
+        dealData: analysis.dealData,
+        matchResult: analysis.matchResult,
+        opportunityName: partition.opportunity.name,
+        opportunityId: partition.opportunity.opportunityId,
+        opportunityFingerprint: analysis.opportunityFingerprint,
+        sourceMessageKey,
+        sourceMessageKeys: [sourceMessageKey],
+        proposedEntity: "Beaman Ventures",
+        entityConfirmed: false,
+        noExistingMatchConfirmed: analysis.matchResult.status === "no-match",
+        amountConfirmed: false,
+        documents: opportunityDocuments,
+        status: "pending"
+      });
+      proposals.push(proposal);
+      children.push({
+        type: "opportunity",
+        opportunityId: partition.opportunity.opportunityId,
+        opportunityName: partition.opportunity.name,
+        route: partition.result.route,
+        status: "processed",
+        proposalId: proposal.id
+      });
+    }
+    return { prepared, partitions, proposals, children, ...preserved };
   }
 
-  async function analyzeSource({ source, investments, entitiesForUser, document }) {
+  async function analyzeSource({ source, investments, entitiesForUser, document, documents }) {
     const result = await analyzeInvestmentUpdate({
       source,
       investments,
@@ -490,7 +556,7 @@ function createAiEmailIntakeService({
       (investment) => investment.id === (analysis.investmentMatch && analysis.investmentMatch.investmentId)
     ) || null;
     const proposal = enforceProposalSafetyInvariant(
-      createProposalPayload({ analysis, source: { ...result.source, ...source }, document }),
+      createProposalPayload({ analysis, source: { ...result.source, ...source }, document, documents }),
       matchedInvestment
     );
     const saved = saveAiUpdateProposal(proposal);
@@ -622,37 +688,33 @@ function createAiEmailIntakeService({
         const analysisAudits = [];
         const childResults = [];
 
-        if (typeof analyzePotentialNewDeal === "function") {
-          const newDealResult = await processPotentialNewDeal({ message, bodyText, investments, analyzedAt });
-          if (newDealResult.route !== "existing-investment") {
-            if (newDealResult.proposal) {
-              proposalIds.push(newDealResult.proposal.id);
-              attachmentHashes.push(...newDealResult.attachmentHashes);
-              childResults.push({ type: "new-deal", status: "processed", proposalId: newDealResult.proposal.id });
-            } else {
-              childResults.push({ type: "new-deal", status: "skipped", reason: "Email was not classified as a potential new deal." });
-            }
-            const status = newDealResult.proposal ? "processed" : "skipped";
-            const reason = newDealResult.proposal ? "" : "Email was not classified as a potential new deal.";
-            stateService.upsertEntry({
-              graphMessageId: message.id,
-              internetMessageId: message.internetMessageId,
-              conversationId: message.conversationId,
-              mailbox: message.mailbox,
-              folderId: message.folderId,
-              subject: message.subject,
-              sender: message.sender,
-              receivedDateTime: message.receivedDateTime,
-              attachmentHashes,
-              attachments: newDealResult.documents || [],
-              processedAt: analyzedAt,
-              proposalIds,
-              status,
-              error: ""
-            });
-            results.push({ ...base, status, reason, proposalIds, attachmentHashes, children: childResults });
-            continue;
-          }
+        if (typeof analyzePotentialNewDeals === "function" || typeof analyzePotentialNewDeal === "function") {
+          const newDealResult = await processPotentialNewDeals({ message, bodyText, investments, entitiesForUser, analyzedAt });
+          proposalIds.push(...newDealResult.proposals.map((proposal) => proposal.id));
+          attachmentHashes.push(...newDealResult.attachmentHashes);
+          childResults.push(...newDealResult.children);
+          const failedOpportunity = newDealResult.children.some((child) => child.status === "failed");
+          const processedOpportunity = newDealResult.children.some((child) => child.status === "processed");
+          const status = processedOpportunity ? "processed" : failedOpportunity ? "failed" : "skipped";
+          const reason = processedOpportunity ? "" : newDealResult.children.map((child) => child.reason).filter(Boolean).join("; ") || "Email was not classified as an investment opportunity.";
+          stateService.upsertEntry({
+            graphMessageId: message.id,
+            internetMessageId: message.internetMessageId,
+            conversationId: message.conversationId,
+            mailbox: message.mailbox,
+            folderId: message.folderId,
+            subject: message.subject,
+            sender: message.sender,
+            receivedDateTime: message.receivedDateTime,
+            attachmentHashes,
+            attachments: newDealResult.documents || [],
+            processedAt: analyzedAt,
+            proposalIds,
+            status,
+            error: status === "failed" ? reason : ""
+          });
+          results.push({ ...base, status, reason, proposalIds, attachmentHashes, children: childResults });
+          continue;
         }
 
         if (isMeaningfulBody(bodyText)) {
@@ -808,11 +870,66 @@ function createAiEmailIntakeService({
     };
   }
 
+  async function reanalyzeMessage({ user, graphMessageId, expectedInternetMessageId = "" }) {
+    if (!graphMailService || !graphMailService.isConfigured() || typeof graphMailService.fetchIntakeMessageById !== "function") {
+      const error = new Error("Microsoft 365 exact-message reanalysis is not configured.");
+      error.statusCode = 400;
+      throw error;
+    }
+    const message = await graphMailService.fetchIntakeMessageById(graphMessageId);
+    if (expectedInternetMessageId && message.internetMessageId !== expectedInternetMessageId) {
+      const error = new Error("The fetched source message does not match the preserved Internet Message ID.");
+      error.statusCode = 409;
+      throw error;
+    }
+    if (!senderAllowed(message.sender, senderAllowlist, domainAllowlist)) {
+      const error = new Error("The source sender is outside the configured intake allowlist.");
+      error.statusCode = 403;
+      throw error;
+    }
+    const investments = filterInvestmentsForUser(readInvestments(), user);
+    const entitiesForUser = entities.filter((entity) => canViewEntity(user, entity));
+    const analyzedAt = new Date().toISOString();
+    const bodyText = normalizeEmailBody(message);
+    const processed = await processPotentialNewDeals({ message, bodyText, investments, entitiesForUser, analyzedAt });
+    const proposalIds = processed.proposals.map((proposal) => proposal.id);
+    if (!proposalIds.length) {
+      const error = new Error("Reanalysis did not produce any separately reviewable proposals.");
+      error.statusCode = 422;
+      throw error;
+    }
+    stateService.upsertEntry({
+      graphMessageId: message.id,
+      internetMessageId: message.internetMessageId,
+      conversationId: message.conversationId,
+      mailbox: message.mailbox,
+      folderId: message.folderId,
+      subject: message.subject,
+      sender: message.sender,
+      receivedDateTime: message.receivedDateTime,
+      attachmentHashes: processed.attachmentHashes,
+      attachments: processed.documents,
+      processedAt: analyzedAt,
+      proposalIds,
+      status: "processed",
+      error: ""
+    });
+    return {
+      graphMessageId: message.id,
+      internetMessageId: message.internetMessageId,
+      subject: message.subject,
+      proposalIds,
+      proposalsCreated: proposalIds.length,
+      children: processed.children
+    };
+  }
+
   return {
     checkForNewEmails,
     isMeaningfulBody,
     normalizeEmailBody,
-    previewEmails
+    previewEmails,
+    reanalyzeMessage
   };
 }
 

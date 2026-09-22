@@ -6826,6 +6826,11 @@ function renderNewDealProposalDetail(proposal) {
   const entityOptions = configuredEntities.map((entity) =>
     `<option value="${escapeHtml(entity)}" ${entity === proposal.proposedEntity ? "selected" : ""}>${escapeHtml(entity)}</option>`
   ).join("");
+  const sourceSiblings = allAiUpdateProposals.filter((item) =>
+    proposal.sourceMessageKey && item.sourceMessageKey === proposal.sourceMessageKey &&
+      (proposal.opportunityId ? Boolean(item.opportunityId) : !item.opportunityId)
+  );
+  const opportunityLabel = proposal.opportunityName || dealClaimValue(proposal, "companyName") || "Unpartitioned source";
   return `
     <div class="panel-header">
       <div><p class="feature-kicker">${escapeHtml(getAiProposalTypeLabel(proposal))}</p><h3>${escapeHtml(getAiProposalInvestmentName(proposal))}</h3><p class="section-copy">Review source evidence before creating a pipeline record.</p></div>
@@ -6833,7 +6838,10 @@ function renderNewDealProposalDetail(proposal) {
     </div>
     <section class="ai-detail-section">
       <h4>Source and match</h4>
+      <p class="highlight-value">${escapeHtml(opportunityLabel)}</p>
       <p class="update-meta">${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")} • ${escapeHtml(proposal.sourceDate || "Date not set")}</p>
+      <p class="update-meta">Same source email • ${escapeHtml(String(sourceSiblings.length))} separately reviewable opportunit${sourceSiblings.length === 1 ? "y" : "ies"}</p>
+      ${sourceSiblings.length > 1 ? `<div class="document-pill-row">${sourceSiblings.map((item) => `<span class="document-pill">${escapeHtml(item.opportunityName || getAiProposalInvestmentName(item))}</span>`).join("")}</div>` : ""}
       <p class="update-meta">${escapeHtml(match.status || "no-match")} • ${escapeHtml(match.reason || proposal.matchReason || "No match reason")}</p>
       ${candidates.length ? `<div class="document-pill-row">${candidates.map((candidate) => `<span class="document-pill">${escapeHtml(candidate.investmentName)} (${escapeHtml(String(candidate.score || 0))})</span>`).join("")}</div>` : '<p class="update-meta">No deterministic existing-investment candidates.</p>'}
     </section>
@@ -6847,6 +6855,9 @@ function renderNewDealProposalDetail(proposal) {
         <label>Round type (${escapeHtml(dealClaimStatus(proposal, "roundType"))})<input id="newDealRoundType" value="${escapeHtml(dealClaimValue(proposal, "roundType"))}"></label>
         <label>Stage (${escapeHtml(dealClaimStatus(proposal, "stage"))})<input id="newDealStage" value="${escapeHtml(dealClaimValue(proposal, "stage"))}"></label>
         <label>Amount being raised (${escapeHtml(dealClaimStatus(proposal, "amountBeingRaised"))})<input id="newDealAmountRaised" value="${escapeHtml(dealClaimValue(proposal, "amountBeingRaised"))}"></label>
+        <label>Target fund size (${escapeHtml(dealClaimStatus(proposal, "targetFundSize"))})<input id="newDealTargetFundSize" value="${escapeHtml(dealClaimValue(proposal, "targetFundSize"))}"></label>
+        <label>Minimum LP commitment (${escapeHtml(dealClaimStatus(proposal, "minimumLpCommitment"))})<input id="newDealMinimumLpCommitment" value="${escapeHtml(dealClaimValue(proposal, "minimumLpCommitment"))}"></label>
+        <label>Co-investment availability (${escapeHtml(dealClaimStatus(proposal, "coInvestmentAvailability"))})<input id="newDealCoInvestmentAvailability" value="${escapeHtml(dealClaimValue(proposal, "coInvestmentAvailability"))}"></label>
         <label>Amount committed (${escapeHtml(dealClaimStatus(proposal, "amountCommitted"))})<input id="newDealAmountCommitted" value="${escapeHtml(dealClaimValue(proposal, "amountCommitted"))}"></label>
         <label>Amount remaining (${escapeHtml(dealClaimStatus(proposal, "amountRemaining"))})<input id="newDealAmountRemaining" value="${escapeHtml(dealClaimValue(proposal, "amountRemaining"))}"></label>
         <label>Proposed check size (${escapeHtml(dealClaimStatus(proposal, "proposedCheckSize"))})<input id="newDealCheckSize" value="${escapeHtml(dealClaimValue(proposal, "proposedCheckSize"))}"></label>
@@ -6876,6 +6887,7 @@ function renderNewDealProposalDetail(proposal) {
     <section class="ai-detail-section"><h4>Attachments</h4>${documents.length ? `<div class="digest-preview-list">${documents.map((document) => `<article class="digest-preview-item"><p class="highlight-value">${document.url ? `<a href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>` : escapeHtml(document.name || "Attachment")}</p><p class="update-meta">${escapeHtml(document.preservationStatus || "unresolved")} • ${escapeHtml(document.extractionStatus || "not-parsed")}${document.reason ? ` • ${escapeHtml(document.reason)}` : ""}</p></article>`).join("")}</div>` : '<p class="update-meta">No attachments.</p>'}</section>
     <section class="ai-detail-section"><h4>Review</h4><p class="update-meta">Status: ${escapeHtml(proposal.status)}</p>
       ${proposal.status === "pending" && canEditWorkspace() ? `<div class="card-actions">
+        ${isMasterEditor() && proposal.sourceMessageKey && !proposal.opportunityId ? `<button class="secondary-button" type="button" data-action="reanalyze-source-message" data-id="${escapeHtml(proposal.id)}">Reanalyze source into opportunities</button>` : ""}
         ${isMasterEditor() ? `<button type="button" data-action="approve-new-deal" data-id="${escapeHtml(proposal.id)}">Approve as New Pipeline Deal</button><select id="newDealExistingInvestment"><option value="">Select existing investment</option>${allInvestments.map((investment) => `<option value="${escapeHtml(investment.id)}">${escapeHtml(investment.company)} • ${escapeHtml(investment.entity)}</option>`).join("")}</select><button class="secondary-button" type="button" data-action="match-new-deal-existing" data-id="${escapeHtml(proposal.id)}">Match to Existing Investment</button>` : ""}
         <button class="secondary-button danger-button" type="button" data-action="reject-ai-proposal" data-id="${escapeHtml(proposal.id)}">Reject</button>
       </div>` : ""}
@@ -7595,7 +7607,7 @@ function renderAiUpdateInbox() {
   }
   syncAiEmailIntakeControls();
 
-  aiUpdateInboxSummary.innerHTML = ["pending", "approved", "rejected"]
+  aiUpdateInboxSummary.innerHTML = ["pending", "approved", "rejected", "superseded"]
     .map(
       (status) => `
         <article class="dashboard-card">
@@ -7628,6 +7640,7 @@ function renderAiUpdateInbox() {
               <p class="update-meta">
                 ${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")}
               </p>
+              ${proposal.opportunityName ? `<p class="update-meta">Opportunity: ${escapeHtml(proposal.opportunityName)} • Same source email: ${escapeHtml(String(allAiUpdateProposals.filter((item) => item.opportunityId && item.sourceMessageKey === proposal.sourceMessageKey).length))}</p>` : ""}
               <p class="update-notes">${escapeHtml(summarizeText(proposal.summary || "No summary staged.", ""))}</p>
               <p class="update-meta">Created ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
             </article>
@@ -11556,6 +11569,9 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
           tractionRevenue: document.getElementById("newDealTractionRevenue").value,
           customersContractsDeployments: document.getElementById("newDealCustomers").value,
           roundType: document.getElementById("newDealRoundType").value,
+          targetFundSize: document.getElementById("newDealTargetFundSize").value,
+          minimumLpCommitment: document.getElementById("newDealMinimumLpCommitment").value,
+          coInvestmentAvailability: document.getElementById("newDealCoInvestmentAvailability").value,
           amountBeingRaised: document.getElementById("newDealAmountRaised").value,
           amountCommitted: document.getElementById("newDealAmountCommitted").value,
           amountRemaining: document.getElementById("newDealAmountRemaining").value,
@@ -11623,6 +11639,28 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
       if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = result.idempotent
         ? "Pipeline deal was already created; no duplicate was added."
         : "New pipeline deal created.";
+    } catch (error) {
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
+    } finally {
+      target.disabled = false;
+    }
+    return;
+  }
+
+  if (action === "reanalyze-source-message" && proposalId) {
+    const confirmed = window.confirm("Reanalyze this preserved source email into separate pending opportunities? The current proposal will be superseded only after replacements are created. No investment will be created.");
+    if (!confirmed) return;
+    target.disabled = true;
+    try {
+      const result = await fetchJson("/api/ai-email-intake/reanalyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proposalId })
+      });
+      await loadAiUpdateProposals();
+      selectedAiUpdateProposalId = result.replacementProposalIds && result.replacementProposalIds[0] || "";
+      renderAiUpdateProposalDetail();
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis created ${result.proposalsCreated || 0} separately reviewable proposals. No investment was created.`;
     } catch (error) {
       if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
     } finally {

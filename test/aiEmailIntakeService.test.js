@@ -53,6 +53,8 @@ function createHarness({
   messages = [createMessage()],
   analysisFactory,
   analyzePotentialNewDeal,
+  analyzePotentialNewDeals,
+  exactMessage,
   extractPdfTextFromUpload,
   allowedSenders = "",
   allowedDomains = "",
@@ -72,7 +74,8 @@ function createHarness({
       mailbox: "updates@example.test",
       folder: { id: "folder-1", displayName: "AI Investment Updates" },
       messages
-    })
+    }),
+    fetchIntakeMessageById: exactMessage ? async () => exactMessage : undefined
   };
   const service = createAiEmailIntakeService({
     graphMailService,
@@ -111,6 +114,7 @@ function createHarness({
       return { source, analysis };
     },
     analyzePotentialNewDeal,
+    analyzePotentialNewDeals,
     extractPdfTextFromUpload: extractPdfTextFromUpload || (async ({ filename, fileData }) => ({
       filename,
       buffer: Buffer.from(fileData, "base64"),
@@ -776,6 +780,80 @@ test("potential new deal creates one pending proposal with preserved and unresol
   assert.equal(harness.savedProposals[0].documents.length, 2);
   assert.equal(harness.savedProposals[0].documents[0].storedName, "NewCo Deck.pdf");
   assert.equal(harness.savedProposals[0].documents[1].preservationStatus, "unresolved");
+});
+
+test("one sanitized source email creates three idempotent proposals with partitioned attachments", async () => {
+  const names = ["BEP Core Fund VIII", "Project Pure", "Project Care"];
+  const message = createMessage({
+    subject: "BEP background and teasers",
+    bodyContentType: "text",
+    body: "BEP Core Fund VIII fundraising is closed. Project Pure is oversubscribed. Project Care is under LOI.",
+    attachments: names.map((name, index) => ({ id: `attachment-${index + 1}`, name: `${name}.pdf`, contentType: "application/pdf", size: 18, contentBytes: Buffer.from(name).toString("base64"), isPdf: true })),
+    pdfAttachments: names.map((name, index) => ({ id: `attachment-${index + 1}`, name: `${name}.pdf`, contentType: "application/pdf", contentBytes: Buffer.from(name).toString("base64") }))
+  });
+  const harness = createHarness({
+    messages: [message],
+    investments: [],
+    extractPdfTextFromUpload: async ({ filename, fileData }) => ({ filename, buffer: Buffer.from(fileData, "base64"), pageCount: 1, pages: [], combinedText: filename, diagnostics: {} }),
+    analyzePotentialNewDeals: async ({ source }) => source.attachments.map((attachment, index) => ({
+      opportunity: { name: names[index], opportunityId: `opportunity-${index + 1}`, attachmentIds: [attachment.id] },
+      source: { ...source, filename: attachment.name, sourceText: attachment.text },
+      result: {
+        route: "new-deal",
+        analysis: {
+          classificationReason: "Separately reviewable opportunity.",
+          opportunityFingerprint: `fingerprint-${index + 1}`,
+          matchResult: { status: "no-match", confidence: 0, reason: "No deterministic match.", candidates: [] },
+          dealData: {
+            companyName: { value: names[index], evidenceStatus: "verified", authoritativeValue: names[index] },
+            dealSummary: { value: names[index], evidenceStatus: "verified", authoritativeValue: names[index] },
+            proposedCheckSize: { value: "", evidenceStatus: "unresolved", authoritativeValue: "" }
+          }
+        }
+      }
+    }))
+  });
+
+  const first = await harness.service.checkForNewEmails({ user: { email: "editor@example.test" } });
+  const second = await harness.service.checkForNewEmails({ user: { email: "editor@example.test" } });
+  assert.equal(first.proposalsCreated, 3);
+  assert.equal(second.proposalsCreated, 0);
+  assert.deepEqual(harness.savedProposals.map((proposal) => proposal.opportunityName), names);
+  assert.deepEqual(harness.savedProposals.map((proposal) => proposal.documents.map((document) => document.name)), names.map((name) => [`${name}.pdf`]));
+  assert.equal(new Set(harness.savedProposals.map((proposal) => `${proposal.sourceMessageKey}:${proposal.opportunityId}`)).size, 3);
+  assert.deepEqual(harness.getStored()[0].proposalIds, ["proposal-1", "proposal-2", "proposal-3"]);
+});
+
+test("explicit reanalysis fetches the exact preserved source and only stages pending proposals", async () => {
+  const names = ["BEP Core Fund VIII", "Project Pure", "Project Care"];
+  const exactMessage = createMessage({
+    id: "bep-graph-id",
+    internetMessageId: "<bep-source@example.test>",
+    subject: "BEP background and teasers",
+    bodyContentType: "text",
+    body: "Core closed. Pure oversubscribed. Care under LOI.",
+    attachments: names.map((name, index) => ({ id: `attachment-${index}`, name: `${name}.pdf`, contentType: "application/pdf", size: 10, contentBytes: Buffer.from(name).toString("base64"), isPdf: true })),
+    pdfAttachments: names.map((name, index) => ({ id: `attachment-${index}`, name: `${name}.pdf`, contentType: "application/pdf", contentBytes: Buffer.from(name).toString("base64") }))
+  });
+  const harness = createHarness({
+    messages: [],
+    exactMessage,
+    investments: [],
+    extractPdfTextFromUpload: async ({ filename, fileData }) => ({ filename, buffer: Buffer.from(fileData, "base64"), pageCount: 1, pages: [], combinedText: filename, diagnostics: {} }),
+    analyzePotentialNewDeals: async ({ source }) => source.attachments.map((attachment, index) => ({
+      opportunity: { name: names[index], opportunityId: `opp-${index}`, attachmentIds: [attachment.id] },
+      source: { ...source, sourceText: attachment.text },
+      result: { route: "new-deal", analysis: { classificationReason: "Opportunity", opportunityFingerprint: `fp-${index}`, matchResult: { status: "no-match", confidence: 0, reason: "No match", candidates: [] }, dealData: { companyName: { value: names[index] }, dealSummary: { value: names[index] }, proposedCheckSize: { value: "", evidenceStatus: "unresolved", authoritativeValue: "" } } } }
+    }))
+  });
+  const result = await harness.service.reanalyzeMessage({
+    user: { email: "master@example.test" },
+    graphMessageId: "bep-graph-id",
+    expectedInternetMessageId: "<bep-source@example.test>"
+  });
+  assert.equal(result.proposalsCreated, 3);
+  assert.deepEqual(harness.savedProposals.map((proposal) => proposal.status), ["pending", "pending", "pending"]);
+  assert.deepEqual(harness.getStored()[0].proposalIds, ["proposal-1", "proposal-2", "proposal-3"]);
 });
 
 test("read-only intake preview reports allowlist and terminal state without invoking mutation or analysis", async () => {

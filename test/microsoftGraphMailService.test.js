@@ -331,3 +331,27 @@ test("intake preview reads message and attachment metadata without downloading a
   assert.equal(Object.prototype.hasOwnProperty.call(result.messages[0], "body"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(result.messages[0].attachments[0], "contentBytes"), false);
 });
+
+test("exact-message reanalysis fetches by Graph ID and requires the configured intake folder", async () => {
+  const fetchImpl = createFetchMock([
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({
+      id: "bep-graph-id", parentFolderId: "folder-1", internetMessageId: "<bep@example.test>",
+      subject: "BEP background and teasers", from: { emailAddress: { address: "sender@example.test" } },
+      receivedDateTime: "2026-09-22T12:00:00Z", hasAttachments: true,
+      body: { contentType: "text", content: "Current status evidence." }
+    }),
+    graphResponse({ value: [{ id: "deck", name: "BEP Core Fund VIII.pdf", contentType: "application/pdf", size: 3, isInline: false }] }),
+    graphResponse({ id: "deck", name: "BEP Core Fund VIII.pdf", contentType: "application/pdf", size: 3, isInline: false, contentBytes: Buffer.from("pdf").toString("base64") })
+  ]);
+  const service = createMicrosoftGraphMailService({
+    tenantId: "tenant", clientId: "client", clientSecret: "secret", mailboxUser: "updates@example.test",
+    fetchImpl, graphBaseUrl: "https://graph.test/v1.0", tokenBaseUrl: "https://login.test"
+  });
+  const message = await service.fetchIntakeMessageById("bep-graph-id");
+  assert.equal(message.internetMessageId, "<bep@example.test>");
+  assert.equal(message.pdfAttachments.length, 1);
+  assert.match(fetchImpl.calls[2].url, /messages\/bep-graph-id\?\$select=/);
+  assert.equal(fetchImpl.calls.every((call) => !call.options.method || call.options.method === "GET" || call.url.includes("oauth2")), true);
+});
