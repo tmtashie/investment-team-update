@@ -101,6 +101,69 @@ test("explicit reanalysis never overwrites an approved or rejected source opport
   }
 });
 
+test("transactional source reconciliation aborts when a pending sibling changes after the snapshot", () => {
+  const harness = createHarness();
+  const pending = harness.service.saveAiUpdateProposal({
+    id: "pure-canonical",
+    proposalType: "new-deal",
+    sourceMessageKey: "message-1",
+    opportunityName: "Project Pure",
+    opportunityId: "pure-id",
+    opportunityIdentityKeys: ["pure-id"],
+    summary: "Original",
+    status: "pending"
+  });
+  const snapshot = harness.service.sourceProposalSnapshot("message-1");
+  harness.service.updateAiUpdateProposal(pending.id, { status: "rejected", summary: "Human reviewed" });
+  assert.throws(() => harness.service.reconcileSourceProposals({
+    sourceMessageKey: "message-1",
+    expectedSnapshot: snapshot,
+    reviewer: "master@example.test",
+    proposals: [{
+      proposalType: "new-deal",
+      sourceMessageKey: "message-1",
+      opportunityName: "Project Pure",
+      opportunityId: "pure-id",
+      opportunityIdentityKeys: ["pure-id"],
+      summary: "AI replacement",
+      status: "pending"
+    }]
+  }), /changed during reanalysis/);
+  assert.equal(harness.getStored().length, 1);
+  assert.equal(harness.getStored()[0].status, "rejected");
+  assert.equal(harness.getStored()[0].summary, "Human reviewed");
+});
+
+test("transactional reconciliation supersedes a legacy unpartitioned source instead of reusing it as a canonical identity", () => {
+  const harness = createHarness();
+  harness.service.saveAiUpdateProposal({
+    id: "legacy-source",
+    proposalType: "new-deal",
+    sourceMessageKey: "message-1",
+    opportunityId: "",
+    documents: [{ graphAttachmentId: "pure-attachment" }],
+    status: "pending"
+  });
+  const result = harness.service.reconcileSourceProposals({
+    sourceMessageKey: "message-1",
+    expectedSnapshot: harness.service.sourceProposalSnapshot("message-1"),
+    reviewer: "master@example.test",
+    proposals: [{
+      id: "pure-canonical",
+      proposalType: "new-deal",
+      sourceMessageKey: "message-1",
+      opportunityName: "Project Pure",
+      opportunityId: "pure-id",
+      opportunityIdentityKeys: ["pure-id"],
+      documents: [{ graphAttachmentId: "pure-attachment" }],
+      status: "pending"
+    }]
+  });
+  assert.deepEqual(result.refreshedProposalIds, ["pure-canonical"]);
+  assert.deepEqual(result.supersededProposalIds, ["legacy-source"]);
+  assert.equal(harness.getStored().find((proposal) => proposal.id === "legacy-source").status, "superseded");
+});
+
 test("multiple emails for one opportunity coalesce attachments by hash", () => {
   const harness = createHarness();
   const first = harness.service.saveAiUpdateProposal({
