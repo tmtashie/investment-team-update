@@ -323,6 +323,8 @@ function createAiEmailIntakeService({
   finalizeAnalysisForResponse,
   enforceProposalSafetyInvariant,
   saveAiUpdateProposal,
+  sourceProposalSnapshot,
+  reconcileSourceProposals,
   readInvestments,
   filterInvestmentsForUser,
   entities = [],
@@ -432,7 +434,16 @@ function createAiEmailIntakeService({
     return { documents, attachmentHashes };
   }
 
-  async function processPotentialNewDeals({ message, bodyText, investments, entitiesForUser, analyzedAt, replacePendingSourceOpportunities = false }) {
+  async function processPotentialNewDeals({
+    message,
+    bodyText,
+    investments,
+    entitiesForUser,
+    analyzedAt,
+    replacePendingSourceOpportunities = false,
+    expectedSourceSnapshot = [],
+    reviewer = ""
+  }) {
     const prepared = await prepareNewDealSource(message, bodyText);
     const preserved = preserveNewDealAttachments(message, analyzedAt, prepared.pdfExtractions);
     const analyzeMany = typeof analyzePotentialNewDeals === "function"
@@ -463,7 +474,8 @@ function createAiEmailIntakeService({
           investments,
           entitiesForUser,
           documents: opportunityDocuments,
-          proposalSaveOptions: { replacePendingSourceOpportunity: replacePendingSourceOpportunities }
+          proposalSaveOptions: { replacePendingSourceOpportunity: replacePendingSourceOpportunities },
+          stageOnly: replacePendingSourceOpportunities
         });
         if (updateResult.proposal) proposals.push(updateResult.proposal);
         children.push({
@@ -482,7 +494,7 @@ function createAiEmailIntakeService({
         continue;
       }
       const analysis = partition.result.analysis;
-      const proposal = saveAiUpdateProposal({
+      const proposalEntry = {
         proposalType: "new-deal",
         sourceType: "Email",
         sourceIdentifier: prepared.source.sourceIdentifier,
@@ -506,7 +518,10 @@ function createAiEmailIntakeService({
         amountConfirmed: false,
         documents: opportunityDocuments,
         status: "pending"
-      }, { replacePendingSourceOpportunity: replacePendingSourceOpportunities });
+      };
+      const proposal = replacePendingSourceOpportunities
+        ? proposalEntry
+        : saveAiUpdateProposal(proposalEntry);
       proposals.push(proposal);
       children.push({
         type: "opportunity",
@@ -517,10 +532,30 @@ function createAiEmailIntakeService({
         proposalId: proposal.id
       });
     }
+    if (replacePendingSourceOpportunities) {
+      if (typeof reconcileSourceProposals !== "function") {
+        const error = new Error("Transactional source-proposal reconciliation is not configured.");
+        error.statusCode = 500;
+        throw error;
+      }
+      const reconciliation = reconcileSourceProposals({
+        sourceMessageKey,
+        proposals,
+        expectedSnapshot: expectedSourceSnapshot,
+        reviewer,
+        reconciledAt: analyzedAt
+      });
+      const byOpportunityId = new Map(reconciliation.proposals.map((proposal) => [proposal.opportunityId, proposal]));
+      children.forEach((child) => {
+        const reconciled = byOpportunityId.get(child.opportunityId);
+        if (reconciled) child.proposalId = reconciled.id;
+      });
+      return { prepared, partitions, proposals: reconciliation.proposals, children, reconciliation, ...preserved };
+    }
     return { prepared, partitions, proposals, children, ...preserved };
   }
 
-  async function analyzeSource({ source, investments, entitiesForUser, document, documents, proposalSaveOptions }) {
+  async function analyzeSource({ source, investments, entitiesForUser, document, documents, proposalSaveOptions, stageOnly = false }) {
     const result = await analyzeInvestmentUpdate({
       source,
       investments,
@@ -563,7 +598,7 @@ function createAiEmailIntakeService({
       createProposalPayload({ analysis, source: { ...result.source, ...source }, document, documents }),
       matchedInvestment
     );
-    const saved = saveAiUpdateProposal(proposal, proposalSaveOptions);
+    const saved = stageOnly ? proposal : saveAiUpdateProposal(proposal, proposalSaveOptions);
     return { proposal: saved, analysis, reason: "" };
   }
 
@@ -895,13 +930,19 @@ function createAiEmailIntakeService({
     const entitiesForUser = entities.filter((entity) => canViewEntity(user, entity));
     const analyzedAt = new Date().toISOString();
     const bodyText = normalizeEmailBody(message);
+    const sourceMessageKey = stateService.messageDedupeKey(message);
+    const expectedSourceSnapshot = typeof sourceProposalSnapshot === "function"
+      ? sourceProposalSnapshot(sourceMessageKey)
+      : [];
     const processed = await processPotentialNewDeals({
       message,
       bodyText,
       investments,
       entitiesForUser,
       analyzedAt,
-      replacePendingSourceOpportunities: true
+      replacePendingSourceOpportunities: true,
+      expectedSourceSnapshot,
+      reviewer: user && user.email
     });
     const proposalIds = processed.proposals.map((proposal) => proposal.id);
     if (!proposalIds.length) {
@@ -924,13 +965,15 @@ function createAiEmailIntakeService({
       proposalIds,
       status: "processed",
       error: ""
-    });
+    }, { replaceProposalIds: true });
     return {
       graphMessageId: message.id,
       internetMessageId: message.internetMessageId,
       subject: message.subject,
       proposalIds,
       proposalsCreated: proposalIds.length,
+      refreshedProposalIds: processed.reconciliation.refreshedProposalIds,
+      supersededProposalIds: processed.reconciliation.supersededProposalIds,
       children: processed.children
     };
   }
