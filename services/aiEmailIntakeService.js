@@ -431,7 +431,7 @@ function createAiEmailIntakeService({
     return { documents, attachmentHashes };
   }
 
-  async function processPotentialNewDeals({ message, bodyText, investments, entitiesForUser, analyzedAt }) {
+  async function processPotentialNewDeals({ message, bodyText, investments, entitiesForUser, analyzedAt, replacePendingSourceOpportunities = false }) {
     const prepared = await prepareNewDealSource(message, bodyText);
     const preserved = preserveNewDealAttachments(message, analyzedAt, prepared.pdfExtractions);
     const analyzeMany = typeof analyzePotentialNewDeals === "function"
@@ -460,7 +460,8 @@ function createAiEmailIntakeService({
           },
           investments,
           entitiesForUser,
-          documents: opportunityDocuments
+          documents: opportunityDocuments,
+          proposalSaveOptions: { replacePendingSourceOpportunity: replacePendingSourceOpportunities }
         });
         if (updateResult.proposal) proposals.push(updateResult.proposal);
         children.push({
@@ -502,7 +503,7 @@ function createAiEmailIntakeService({
         amountConfirmed: false,
         documents: opportunityDocuments,
         status: "pending"
-      });
+      }, { replacePendingSourceOpportunity: replacePendingSourceOpportunities });
       proposals.push(proposal);
       children.push({
         type: "opportunity",
@@ -516,7 +517,7 @@ function createAiEmailIntakeService({
     return { prepared, partitions, proposals, children, ...preserved };
   }
 
-  async function analyzeSource({ source, investments, entitiesForUser, document, documents }) {
+  async function analyzeSource({ source, investments, entitiesForUser, document, documents, proposalSaveOptions }) {
     const result = await analyzeInvestmentUpdate({
       source,
       investments,
@@ -559,7 +560,7 @@ function createAiEmailIntakeService({
       createProposalPayload({ analysis, source: { ...result.source, ...source }, document, documents }),
       matchedInvestment
     );
-    const saved = saveAiUpdateProposal(proposal);
+    const saved = saveAiUpdateProposal(proposal, proposalSaveOptions);
     return { proposal: saved, analysis, reason: "" };
   }
 
@@ -891,7 +892,14 @@ function createAiEmailIntakeService({
     const entitiesForUser = entities.filter((entity) => canViewEntity(user, entity));
     const analyzedAt = new Date().toISOString();
     const bodyText = normalizeEmailBody(message);
-    const processed = await processPotentialNewDeals({ message, bodyText, investments, entitiesForUser, analyzedAt });
+    const processed = await processPotentialNewDeals({
+      message,
+      bodyText,
+      investments,
+      entitiesForUser,
+      analyzedAt,
+      replacePendingSourceOpportunities: true
+    });
     const proposalIds = processed.proposals.map((proposal) => proposal.id);
     if (!proposalIds.length) {
       const error = new Error("Reanalysis did not produce any separately reviewable proposals.");

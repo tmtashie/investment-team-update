@@ -52,6 +52,22 @@ test("source-opportunity idempotency also protects an existing-investment propos
   assert.equal(harness.getStored().length, 1);
 });
 
+test("explicit reanalysis may refresh a pending source-opportunity proposal in place", () => {
+  const harness = createHarness();
+  const first = harness.service.saveAiUpdateProposal({
+    proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1",
+    opportunityFingerprint: "fp-1", summary: "Stale analysis"
+  });
+  const refreshed = harness.service.saveAiUpdateProposal({
+    proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1",
+    opportunityFingerprint: "fp-1", summary: "Corrected analysis"
+  }, { replacePendingSourceOpportunity: true });
+  assert.equal(refreshed.id, first.id);
+  assert.equal(refreshed.summary, "Corrected analysis");
+  assert.equal(refreshed.status, "pending");
+  assert.equal(harness.getStored().length, 1);
+});
+
 test("multiple emails for one opportunity coalesce attachments by hash", () => {
   const harness = createHarness();
   const first = harness.service.saveAiUpdateProposal({

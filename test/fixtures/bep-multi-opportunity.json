@@ -1,10 +1,10 @@
 {
-  "emailBody": "BEP Core Fund VIII fundraising is closed. Project Pure is oversubscribed. Project Care is under LOI.",
+  "emailBody": "BEP Core Fund VIII fundraising memo is now close. Project Pure is oversubscribed. Project Care is under LOI.",
   "attachments": [
     {
       "id": "core-fund-viii",
       "name": "BEP Core Fund VIII.pdf",
-      "text": "BEP Core Fund VIII is a private equity fund. The target fund size is $350M. The minimum LP commitment is $5M. The deck describes the fund as currently fundraising."
+      "text": "BEP Core Fund VIII is a private equity fund. The target fund size is $350MM. The minimum LP commitment is $5MM. The fund held an initial close on $94.5MM in historical commitments. The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck. The deck says the fund is open for new commitments. The portfolio includes control investments in business services and industrial companies. The term is ten years with extension options. Management fee is 2% during the investment period."
     },
     {
       "id": "project-pure",
@@ -22,8 +22,8 @@
       {
         "name": "BEP Core Fund VIII",
         "attachmentIds": ["core-fund-viii"],
-        "emailEvidence": ["BEP Core Fund VIII fundraising is closed."],
-        "currentStatus": { "value": "Fundraising closed", "sourceEvidence": "BEP Core Fund VIII fundraising is closed.", "sourceLocation": "Email body" }
+        "emailEvidence": ["BEP Core Fund VIII fundraising memo is now close."],
+        "currentStatus": { "value": "Fundraising closed", "sourceEvidence": "fundraising memo is now close", "sourceLocation": "Email body" }
       },
       {
         "name": "Project Pure",
@@ -45,11 +45,22 @@
       "classificationReason": "Fund opportunity.",
       "companyName": { "value": "BEP Core Fund VIII", "sourceEvidence": "BEP Core Fund VIII is a private equity fund." },
       "whatCompanyDoes": { "value": "Private equity fund", "sourceEvidence": "BEP Core Fund VIII is a private equity fund." },
-      "stage": { "value": "Currently fundraising", "sourceEvidence": "The deck describes the fund as currently fundraising." },
-      "targetFundSize": { "value": "$350M", "sourceEvidence": "The target fund size is $350M." },
-      "minimumLpCommitment": { "value": "$5M", "sourceEvidence": "The minimum LP commitment is $5M." },
-      "amountRemaining": { "value": "$350M", "sourceEvidence": "The target fund size is $350M." },
-      "proposedCheckSize": { "value": "$5M", "sourceEvidence": "The minimum LP commitment is $5M." }
+      "stage": { "value": "Open for new commitments", "sourceEvidence": "The deck says the fund is open for new commitments." },
+      "tractionRevenue": [
+        { "value": "$94.5MM in historical commitments", "sourceEvidence": "The fund held an initial close on $94.5MM in historical commitments." }
+      ],
+      "customersContractsDeployments": [
+        { "value": "Control investments in business services and industrial companies", "sourceEvidence": "The portfolio includes control investments in business services and industrial companies." }
+      ],
+      "targetFundSize": { "value": "$350MM", "sourceEvidence": "The target fund size is $350MM." },
+      "minimumLpCommitment": { "value": "$5MM", "sourceEvidence": "The minimum LP commitment is $5MM." },
+      "amountCommitted": { "value": "$94.5MM", "sourceEvidence": "The fund held an initial close on $94.5MM in historical commitments." },
+      "amountRemaining": { "value": "$255.5MM", "sourceEvidence": "The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck." },
+      "proposedCheckSize": { "value": "$5MM", "sourceEvidence": "The minimum LP commitment is $5MM." },
+      "financingTerms": [
+        { "value": "Ten-year term with extension options", "sourceEvidence": "The term is ten years with extension options." },
+        { "value": "2% management fee during the investment period", "sourceEvidence": "Management fee is 2% during the investment period." }
+      ]
     },
     {
       "isPotentialNewDeal": true,
