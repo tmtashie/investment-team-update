@@ -174,6 +174,23 @@ test("fund risk extraction keeps source-disclosed categories and drops unsupport
   assert.doesNotMatch(risks, /Generic investment risk/);
 });
 
+test("fund risk extraction rejects generic risk claims backed only by unrelated source text", () => {
+  const analysis = normalizeDealAnalysis(
+    {
+      ...attainableLivingFundFixture.modelResponse,
+      keyRisks: [{
+        value: "Loss of principal",
+        sourceEvidence: "The Fund has a $450M target",
+        sourceLocation: "Email body"
+      }]
+    },
+    attainableLivingFundFixture.source,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+
+  assert.deepEqual(analysis.dealData.keyRisks, []);
+});
+
 test("issuer fundraising stays separate from supported Beaman follow-up", () => {
   const analysis = normalizeDealAnalysis(
     attainableLivingFundFixture.modelResponse,

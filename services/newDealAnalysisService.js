@@ -141,7 +141,8 @@ function normalizeRiskList(value, sourceText) {
       if (claim.evidenceStatus !== "verified") return false;
       const claimCategories = riskCategories(claim.value);
       const evidenceCategories = riskCategories(claim.sourceEvidence);
-      return !claimCategories.length || !evidenceCategories.length || claimCategories.some((category) => evidenceCategories.includes(category)) || sourceContainsEvidence(sourceText, claim.value);
+      return sourceContainsEvidence(sourceText, claim.value)
+        || claimCategories.some((category) => evidenceCategories.includes(category));
     });
 }
 
