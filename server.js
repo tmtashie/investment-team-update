@@ -1230,6 +1230,7 @@ function normalizeAiUpdateProposal(entry) {
     createdInvestmentId: String((entry && entry.createdInvestmentId) || "").trim(),
     supersededByProposalIds: normalizeStringList(entry && entry.supersededByProposalIds),
     supersededReason: String((entry && entry.supersededReason) || "").trim(),
+    supersededAt: String((entry && entry.supersededAt) || "").trim(),
     status: normalizeProposalStatus(entry && entry.status),
     reviewedBy: String((entry && (entry.reviewedBy || entry.reviewed_by)) || "").trim(),
     reviewedAt: String((entry && (entry.reviewedAt || entry.reviewed_at)) || "").trim(),
@@ -1410,6 +1411,8 @@ const { analyzePotentialNewDeal, analyzePotentialNewDeals } = createNewDealAnaly
 const {
   readAiUpdateProposals,
   saveAiUpdateProposal,
+  sourceProposalSnapshot,
+  reconcileSourceProposals,
   updateAiUpdateProposal,
   approveAiUpdateProposal,
   rejectAiUpdateProposal
@@ -1464,6 +1467,8 @@ const aiEmailIntakeService = createAiEmailIntakeService({
   finalizeAnalysisForResponse,
   enforceProposalSafetyInvariant,
   saveAiUpdateProposal,
+  sourceProposalSnapshot,
+  reconcileSourceProposals,
   readInvestments,
   filterInvestmentsForUser,
   entities: INVESTMENT_ENTITIES,
@@ -5092,30 +5097,9 @@ const server = http.createServer(async (request, response) => {
         graphMessageId: sourceState.graphMessageId,
         expectedInternetMessageId: sourceState.internetMessageId
       });
-      if (existing.opportunityId) {
-        sendJson(response, 200, {
-          ...result,
-          refreshedProposalIds: result.proposalIds,
-          replacementProposalIds: []
-        });
-        return;
-      }
-      const replacementIds = result.proposalIds.filter((id) => id !== proposalId);
-      if (!replacementIds.length) {
-        sendJson(response, 422, { error: "Reanalysis did not create a replacement opportunity proposal." });
-        return;
-      }
-      const superseded = updateAiUpdateProposal(proposalId, {
-        status: "superseded",
-        supersededByProposalIds: replacementIds,
-        supersededReason: "Explicit master-editor source-message reanalysis produced decomposed opportunity proposals.",
-        reviewedBy: user.email,
-        reviewedAt: new Date().toISOString()
-      });
       sendJson(response, 200, {
         ...result,
-        supersededProposalId: superseded.id,
-        replacementProposalIds: replacementIds
+        replacementProposalIds: result.refreshedProposalIds
       });
       return;
     } catch (error) {
