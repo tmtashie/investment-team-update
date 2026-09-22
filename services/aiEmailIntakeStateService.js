@@ -165,7 +165,7 @@ function createAiEmailIntakeStateService({
     return { claimed: true, entry };
   }
 
-  function upsertEntry(entry) {
+  function upsertEntry(entry, { replaceProposalIds = false } = {}) {
     const normalized = normalizeStateEntry(entry);
     const entries = readState();
     const key = normalized.internetMessageId || normalized.graphMessageId;
@@ -185,7 +185,9 @@ function createAiEmailIntakeStateService({
           attachment.hash || attachment.storedName || attachment.name,
           attachment
         ])).values()),
-        proposalIds: Array.from(new Set(entries[index].proposalIds.concat(normalized.proposalIds))),
+        proposalIds: replaceProposalIds
+          ? normalized.proposalIds
+          : Array.from(new Set(entries[index].proposalIds.concat(normalized.proposalIds))),
         analysisAudits: entries[index].analysisAudits.concat(normalized.analysisAudits)
       };
     }
