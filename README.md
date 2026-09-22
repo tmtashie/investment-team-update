@@ -74,6 +74,10 @@ House domains are separate from sender allowlists. A sender from `AI_EMAIL_HOUSE
 
 Processed messages are deduplicated using their Internet Message ID or Microsoft Graph message ID. PDF content is also deduplicated by a SHA-256 hash. Intake state and its analysis audit are stored in `ai-email-intake-state.json` under `DATA_DIR`, so later manual checks do not create duplicate proposals from previously processed sources.
 
+One source email may describe multiple investment opportunities. Intake first partitions the email body and parsed PDFs into evidence-isolated opportunities, then runs deterministic matching and proposal analysis independently for each partition. Each pending proposal retains the common source-message key plus its own stable opportunity ID; that pair is the idempotency key for source reprocessing. The Proposal Inbox labels sibling opportunities from the same source email.
+
+For a legacy pending proposal created before opportunity partitioning, a master editor can explicitly select `Reanalyze source into opportunities`. The server fetches the exact preserved Graph message, verifies its Internet Message ID and configured intake folder, reuses attachment hashes, and creates only pending replacement proposals. The legacy proposal is marked `superseded` only after replacements exist. Reanalysis never approves a proposal or creates an investment.
+
 Automated intake must find explicit portfolio evidence before it creates a proposal, and the existing source-evidence safety checks still apply. Successful analysis creates a `pending` proposal only. It never approves or applies an investment update: an authorized human must review and approve or reject each proposal in the AI Update Inbox.
 
 ### Potential New Deal intake
@@ -81,6 +85,8 @@ Automated intake must find explicit portfolio evidence before it creates a propo
 When deterministic company and alias matching finds one confident existing investment, email content stays in the existing investment-update workflow. Competing deterministic matches create an ambiguous `Potential New Deal` review that cannot be approved until a master editor selects an existing investment or explicitly confirms that no existing match exists. The AI cannot override deterministic conflicts.
 
 Potential New Deal proposals default to `Beaman Ventures`, but the entity must be confirmed before approval. Only a `master-editor` can approve a proposal as a new pipeline deal. Approval creates a `Private Investment` with status `New Lead`; it does not create capital activity, valuations, distributions, or ownership history. A proposed check size becomes the pipeline `amount` only when source-verified and explicitly confirmed. Total round size is never mapped to `amount`.
+
+Target fund size, amount being raised, amount committed, amount remaining, minimum LP commitment, total co-investment availability, and Beaman Ventures proposed check size are separate evidence fields. Fund minimums, fund targets, and total co-investment capacity never populate the proposed check field. When the email body supplies a newer explicit opportunity status than an attached deck, the email status is current and the superseded deck evidence remains attached to that status claim.
 
 Microsoft 365 attachments are bounded to 25 MB per PDF, 10 MB per other supported file, 30 MB per message, 50 MB per run, and 20 attachments per message. Supported non-inline PDF, Office, text, CSV, and common image files are preserved in `DATA_DIR/uploads`. Only PDFs are parsed. Unsupported, excessive, or unavailable attachments remain visible on the proposal as unresolved records and are not described as parsed. Approval associates preserved files with the existing company-document vault without copying the binary.
 

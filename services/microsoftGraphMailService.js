@@ -183,6 +183,30 @@ function createMicrosoftGraphMailService({
     return `/users/${encodeURIComponent(config.mailboxUser)}`;
   }
 
+  function normalizeGraphMessage(message) {
+    return {
+      id: cleanString(message.id, 500),
+      internetMessageId: cleanString(message.internetMessageId, 500),
+      conversationId: cleanString(message.conversationId, 500),
+      subject: cleanString(message.subject, 500),
+      sender: cleanString(
+        (message.from && message.from.emailAddress && message.from.emailAddress.address) ||
+          (message.sender && message.sender.emailAddress && message.sender.emailAddress.address),
+        320
+      ),
+      senderName: cleanString(
+        (message.from && message.from.emailAddress && message.from.emailAddress.name) ||
+          (message.sender && message.sender.emailAddress && message.sender.emailAddress.name),
+        320
+      ),
+      receivedDateTime: cleanString(message.receivedDateTime, 80),
+      hasAttachments: Boolean(message.hasAttachments),
+      bodyContentType: cleanString(message.body && message.body.contentType, 40),
+      body: cleanString(message.body && message.body.content, 60000),
+      bodyPreview: cleanString(message.bodyPreview, 1000)
+    };
+  }
+
   async function resolveFolder(token) {
     const folders = parseGraphCollection(
       await graphGet(
@@ -216,27 +240,7 @@ function createMicrosoftGraphMailService({
       "bodyPreview"
     ].join(",");
     const path = `${mailboxMailApiPath()}/mailFolders/${encodeURIComponent(folderId)}/messages?$top=${config.maxMessagesPerRun}&$orderby=receivedDateTime desc&$select=${select}`;
-    return parseGraphCollection(await graphGet(path, token)).map((message) => ({
-      id: cleanString(message.id, 500),
-      internetMessageId: cleanString(message.internetMessageId, 500),
-      conversationId: cleanString(message.conversationId, 500),
-      subject: cleanString(message.subject, 500),
-      sender: cleanString(
-        (message.from && message.from.emailAddress && message.from.emailAddress.address) ||
-          (message.sender && message.sender.emailAddress && message.sender.emailAddress.address),
-        320
-      ),
-      senderName: cleanString(
-        (message.from && message.from.emailAddress && message.from.emailAddress.name) ||
-          (message.sender && message.sender.emailAddress && message.sender.emailAddress.name),
-        320
-      ),
-      receivedDateTime: cleanString(message.receivedDateTime, 80),
-      hasAttachments: Boolean(message.hasAttachments),
-      bodyContentType: cleanString(message.body && message.body.contentType, 40),
-      body: cleanString(message.body && message.body.content, 60000),
-      bodyPreview: cleanString(message.bodyPreview, 1000)
-    }));
+    return parseGraphCollection(await graphGet(path, token)).map(normalizeGraphMessage);
   }
 
   async function listAttachments(token, messageId) {
@@ -433,8 +437,71 @@ function createMicrosoftGraphMailService({
     };
   }
 
+  async function fetchIntakeMessageById(messageId) {
+    const cleanMessageId = cleanString(messageId, 500);
+    if (!cleanMessageId) throw graphError("A Graph message ID is required for reanalysis.", 400);
+    const token = await getAccessToken();
+    const folder = await resolveFolder(token);
+    const select = [
+      "id", "internetMessageId", "conversationId", "subject", "from", "sender",
+      "receivedDateTime", "hasAttachments", "body", "bodyPreview", "parentFolderId"
+    ].join(",");
+    const payload = await graphGet(
+      `${mailboxMailApiPath()}/messages/${encodeURIComponent(cleanMessageId)}?$select=${select}`,
+      token
+    );
+    if (cleanString(payload.parentFolderId, 500) !== folder.id) {
+      throw graphError("The source message is no longer in the configured intake folder.", 409);
+    }
+    const message = normalizeGraphMessage(payload);
+    const attachments = message.hasAttachments ? await listAttachments(token, message.id) : [];
+    const preservedAttachments = [];
+    const pdfAttachments = [];
+    const skippedAttachments = [];
+    const unresolvedAttachments = [];
+    let messageAttachmentBytes = 0;
+    if (attachments.truncated) {
+      unresolvedAttachments.push({ name: "Additional attachments", preservationStatus: "unresolved", reason: `Message attachment count exceeds the ${MAX_ATTACHMENTS_PER_MESSAGE}-file limit.` });
+    }
+    for (const attachment of attachments) {
+      if (attachment.isInline) {
+        skippedAttachments.push({ name: attachment.name, contentType: attachment.contentType, reason: "Inline attachment ignored." });
+        continue;
+      }
+      if (!attachment.isSupported) {
+        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Unsupported attachment type was not parsed or downloaded." });
+        continue;
+      }
+      if (attachment.size > maxAttachmentBytes(attachment) || messageAttachmentBytes + attachment.size > MAX_ATTACHMENT_MESSAGE_BYTES) {
+        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: attachment.size > maxAttachmentBytes(attachment) ? attachmentLimitReason(attachment) : "Attachment exceeds the 30 MB per-message limit." });
+        continue;
+      }
+      const fetched = await fetchAttachment(token, message.id, attachment);
+      const actualSize = decodedByteLength(fetched.contentBytes);
+      if (!actualSize || actualSize > maxAttachmentBytes(fetched) || messageAttachmentBytes + actualSize > MAX_ATTACHMENT_MESSAGE_BYTES) {
+        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment data exceeded a configured preservation limit." });
+        continue;
+      }
+      const preserved = { ...fetched, size: actualSize, preservationStatus: "preserved", extractionStatus: fetched.isPdf ? "pending" : "not-parsed" };
+      messageAttachmentBytes += actualSize;
+      preservedAttachments.push(preserved);
+      if (fetched.isPdf) pdfAttachments.push(preserved);
+    }
+    return {
+      ...message,
+      mailbox: config.mailboxUser,
+      folderId: folder.id,
+      folderName: folder.displayName,
+      attachments: preservedAttachments,
+      pdfAttachments,
+      skippedAttachments,
+      unresolvedAttachments
+    };
+  }
+
   return {
     fetchIntakeMessages,
+    fetchIntakeMessageById,
     getAccessToken,
     getSafeConfigStatus,
     isConfigured,

@@ -33,11 +33,18 @@ function createAiUpdateProposalService({
       ...entry,
       updatedAt: new Date().toISOString()
     });
+    const exactSourceOpportunity = normalized.sourceMessageKey && normalized.opportunityId && proposals.find(
+      (proposal) => proposal.sourceMessageKey === normalized.sourceMessageKey &&
+        proposal.opportunityId === normalized.opportunityId
+    );
+    if (exactSourceOpportunity) return exactSourceOpportunity;
     if (normalized.proposalType === "new-deal") {
-      const exactSource = normalized.sourceMessageKey && proposals.find(
-        (proposal) => proposal.proposalType === "new-deal" && proposal.sourceMessageKey === normalized.sourceMessageKey
+      const legacyExactSource = normalized.sourceMessageKey && !normalized.opportunityId && proposals.find(
+        (proposal) => proposal.proposalType === "new-deal" &&
+          proposal.sourceMessageKey === normalized.sourceMessageKey &&
+          !proposal.opportunityId
       );
-      if (exactSource) return exactSource;
+      if (legacyExactSource) return legacyExactSource;
       const sameOpportunity = normalized.opportunityFingerprint && proposals.find(
         (proposal) => proposal.proposalType === "new-deal" &&
           proposal.opportunityFingerprint === normalized.opportunityFingerprint &&
