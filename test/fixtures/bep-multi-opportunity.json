@@ -4,7 +4,7 @@
     {
       "id": "core-fund-viii",
       "name": "BEP Core Fund VIII.pdf",
-      "text": "BEP Core Fund VIII is a private equity fund. The target fund size is $350MM. The minimum LP commitment is $5MM. The fund held an initial close on $94.5MM in historical commitments. The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck. The deck says the fund is open for new commitments. The portfolio includes a $15.0MM investment in Alpha Services, a $7.5MM investment in Beta Industrial, and a $22.0MM investment in Gamma Business Services. The fund term is 10 years. Management fee is 1.75%. Performance fee/carry is 17.5%."
+      "text": "BEP Core Fund VIII is a private equity fund. The target fund size is $350MM. The minimum LP commitment is $5MM. The fund held an initial close with $94.5MM committed and deployed across six investments. The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck. That difference is historical and is not current availability. The deck says the fund is open for new commitments. The six historical investments were Alpha Services, Beta Industrial, Gamma Business Services, Delta Logistics, Epsilon Manufacturing, and Zeta Distribution. The fund term is 10 years with two one-year extensions. Management fee is 1.75%. Performance fee/carry is 17.5% carried interest above an 8% preferred return. Upcoming investments."
     },
     {
       "id": "project-pure",
@@ -16,6 +16,13 @@
       "name": "Project Care Co-Investment.pdf",
       "text": "Project Care is an adult day health and HCBS co-investment. The business operates 54 centers serving 8,000 members. Total co-investment availability is approximately $150M-$165M. The deck describes the transaction as in diligence."
     }
+  ],
+  "legacyProposals": [
+    { "id": "bep-core-canonical", "opportunityName": "BEP Core Fund VIII", "attachmentId": "core-fund-viii" },
+    { "id": "bep-pure-canonical", "opportunityName": "Project Pure", "attachmentId": "project-pure" },
+    { "id": "bep-care-canonical", "opportunityName": "Project Care", "attachmentId": "project-care" },
+    { "id": "bep-pure-alias", "opportunityName": "Project Pure Co-Investment", "attachmentId": "project-pure" },
+    { "id": "bep-care-alias", "opportunityName": "Project Care Co-Investment", "attachmentId": "project-care" }
   ],
   "decomposition": {
     "opportunities": [
@@ -47,23 +54,29 @@
       "whatCompanyDoes": { "value": "Private equity fund", "sourceEvidence": "BEP Core Fund VIII is a private equity fund." },
       "stage": { "value": "Open for new commitments", "sourceEvidence": "The deck says the fund is open for new commitments." },
       "tractionRevenue": [
-        { "value": "$94.5MM in historical commitments", "sourceEvidence": "The fund held an initial close on $94.5MM in historical commitments." }
+        { "value": "$94.5MM committed and deployed across six investments", "sourceEvidence": "The fund held an initial close with $94.5MM committed and deployed across six investments." }
       ],
       "customersContractsDeployments": [
-        { "value": "$15.0MM", "companyName": "Alpha Services", "sourceEvidence": "The portfolio includes a $15.0MM investment in Alpha Services" },
-        { "value": "$7.5MM", "companyName": "Beta Industrial", "sourceEvidence": "a $7.5MM investment in Beta Industrial" },
-        { "value": "$22.0MM", "companyName": "Gamma Business Services", "sourceEvidence": "a $22.0MM investment in Gamma Business Services" }
+        { "value": "Alpha Services", "companyName": "Alpha Services", "sourceEvidence": "The six historical investments were Alpha Services, Beta Industrial, Gamma Business Services, Delta Logistics, Epsilon Manufacturing, and Zeta Distribution." },
+        { "value": "Beta Industrial", "companyName": "Beta Industrial", "sourceEvidence": "The six historical investments were Alpha Services, Beta Industrial, Gamma Business Services, Delta Logistics, Epsilon Manufacturing, and Zeta Distribution." },
+        { "value": "Gamma Business Services", "companyName": "Gamma Business Services", "sourceEvidence": "The six historical investments were Alpha Services, Beta Industrial, Gamma Business Services, Delta Logistics, Epsilon Manufacturing, and Zeta Distribution." },
+        { "value": "Delta Logistics", "companyName": "Delta Logistics", "sourceEvidence": "The six historical investments were Alpha Services, Beta Industrial, Gamma Business Services, Delta Logistics, Epsilon Manufacturing, and Zeta Distribution." },
+        { "value": "Epsilon Manufacturing", "companyName": "Epsilon Manufacturing", "sourceEvidence": "The six historical investments were Alpha Services, Beta Industrial, Gamma Business Services, Delta Logistics, Epsilon Manufacturing, and Zeta Distribution." },
+        { "value": "Zeta Distribution", "companyName": "Zeta Distribution", "sourceEvidence": "The six historical investments were Alpha Services, Beta Industrial, Gamma Business Services, Delta Logistics, Epsilon Manufacturing, and Zeta Distribution." }
       ],
       "targetFundSize": { "value": "$350MM", "sourceEvidence": "The target fund size is $350MM." },
       "minimumLpCommitment": { "value": "$5MM", "sourceEvidence": "The minimum LP commitment is $5MM." },
-      "amountCommitted": { "value": "$94.5MM", "sourceEvidence": "The fund held an initial close on $94.5MM in historical commitments." },
+      "amountCommitted": { "value": "$94.5MM", "sourceEvidence": "The fund held an initial close with $94.5MM committed and deployed across six investments." },
       "amountRemaining": { "value": "", "sourceEvidence": "" },
       "historicalTargetDifference": { "value": "$255.5MM", "sourceEvidence": "The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck." },
       "proposedCheckSize": { "value": "$5MM", "sourceEvidence": "The minimum LP commitment is $5MM." },
       "financingTerms": [
         { "value": "1.75%", "sourceEvidence": "Management fee is 1.75%." },
-        { "value": "17.5%", "sourceEvidence": "Performance fee/carry is 17.5%." },
-        { "value": "10 years", "sourceEvidence": "The fund term is 10 years." }
+        { "value": "17.5% carried interest above 8% preferred return", "sourceEvidence": "Performance fee/carry is 17.5% carried interest above an 8% preferred return." },
+        { "value": "10 years with two one-year extensions", "sourceEvidence": "The fund term is 10 years with two one-year extensions." }
+      ],
+      "deadlines": [
+        { "value": "Upcoming investments", "sourceEvidence": "Upcoming investments." }
       ]
     },
     {
