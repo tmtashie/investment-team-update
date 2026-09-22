@@ -12,6 +12,24 @@ function cleanString(value, maxLength = 2000) {
   return String(value || "").trim().slice(0, maxLength);
 }
 
+function canonicalOpportunityName(value) {
+  let name = cleanString(value, 300)
+    .replace(/\.[a-z0-9]{2,5}$/i, "")
+    .replace(/[\s_-]+/g, " ")
+    .trim();
+  for (let index = 0; index < 3; index += 1) {
+    const previous = name;
+    name = name
+      .replace(/^\s*(?:investment\s+)?(?:opportunity|deal|transaction|co[- ]?invest(?:ment)?)(?:\s*[:\-\u2013\u2014]\s*|\s+)/i, "")
+      .replace(/\s*[\(\[]\s*(?:investment\s+)?(?:opportunity|deal|transaction|co[- ]?invest(?:ment)?)\s*[\)\]]\s*$/i, "")
+      .replace(/\s*[-\u2013\u2014,:]?\s*(?:investment\s+)?(?:opportunity|deal|transaction|co[- ]?invest(?:ment)?)\s*$/i, "")
+      .trim();
+    if (name === previous) break;
+  }
+  if (/^(?:opportunity|deal|transaction|co[- ]?invest(?:ment)?)$/i.test(name)) name = "";
+  return name;
+}
+
 function sourceContainsEvidence(sourceText, evidence) {
   const source = cleanString(sourceText, MAX_SOURCE_TEXT_LENGTH).toLowerCase().replace(/\s+/g, " ");
   const snippet = cleanString(evidence, 1000).toLowerCase().replace(/\s+/g, " ");
@@ -22,13 +40,13 @@ function numericTokens(value) {
   return cleanString(value, 500).toLowerCase().match(/[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?/g) || [];
 }
 
-function normalizeClaim(value, sourceText, { financial = false, metadata = false, skipConflicts = false } = {}) {
+function normalizeClaim(value, sourceText, { financial = false, metadata = false, skipConflicts = false, field = "" } = {}) {
   const input = value && typeof value === "object" && !Array.isArray(value) ? value : { value };
   if (!skipConflicts) {
     const rawConflicts = input.conflictingEvidence || input.competingEvidence || input.alternatives;
     const conflictingEvidence = (Array.isArray(rawConflicts) ? rawConflicts : [])
       .slice(0, 6)
-      .map((item) => normalizeClaim(item, sourceText, { financial, skipConflicts: true }))
+      .map((item) => normalizeClaim(item, sourceText, { financial, field, skipConflicts: true }))
       .filter((item) => item.value && item.evidenceStatus === "verified");
     const numericSignatures = new Set(
       conflictingEvidence.map((item) => numericTokens(item.value).join("|")).filter(Boolean)
@@ -58,13 +76,51 @@ function normalizeClaim(value, sourceText, { financial = false, metadata = false
     : claimValue && (sourceEvidence || metadata)
       ? "probable"
       : "unresolved";
+  const semanticLabel = deriveStructuredClaimLabel(input, field, sourceEvidence);
   return {
     value: claimValue,
     sourceEvidence: evidencePresent ? sourceEvidence : "",
     sourceLocation: cleanString(input.sourceLocation || input.location, 200),
     evidenceStatus,
-    authoritativeValue: evidenceStatus === "verified" ? claimValue : ""
+    authoritativeValue: evidenceStatus === "verified" ? claimValue : "",
+    ...(semanticLabel ? { semanticLabel } : {})
   };
+}
+
+function sourceBacksLabel(label, sourceEvidence) {
+  const labelTokens = normalizeMatchText(label).split(" ").filter((token) => token.length >= 2);
+  const evidence = normalizeMatchText(sourceEvidence);
+  return Boolean(labelTokens.length && evidence && labelTokens.every((token) => evidence.includes(token)));
+}
+
+function derivePortfolioLabel(sourceEvidence) {
+  const evidence = cleanString(sourceEvidence, 1000);
+  const patterns = [
+    /(?:investment\s+(?:in|into)|invested\s+(?:in|into)|deployed\s+(?:to|into)|portfolio company)\s+([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,5})/,
+    /\b([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,5})\s*[:\u2013\u2014-]\s*\$[0-9]/
+  ];
+  for (const pattern of patterns) {
+    const match = evidence.match(pattern);
+    if (match) return cleanString(match[1], 120);
+  }
+  return "";
+}
+
+function deriveStructuredClaimLabel(input, field, sourceEvidence) {
+  const supplied = cleanString(
+    input && (input.semanticLabel || input.label || input.companyName || input.investmentName || input.company || input.claimType),
+    120
+  );
+  if (supplied && sourceBacksLabel(supplied, sourceEvidence)) return supplied;
+  const text = `${cleanString(input && input.value, 1000)} ${cleanString(sourceEvidence, 1000)}`;
+  if (field === "financingTerms") {
+    if (/\bmanagement fee\b/i.test(text)) return "Management fee";
+    if (/\b(?:performance fee|carried interest|carry)\b/i.test(text)) return "Performance fee/carry";
+    if (/\b(?:fund )?term\b|\byears?\s+(?:with|plus)\s+(?:extension|option)/i.test(text)) return "Fund term";
+    if (/\bpreferred return\b/i.test(text)) return "Preferred return";
+  }
+  if (field === "customersContractsDeployments") return derivePortfolioLabel(sourceEvidence);
+  return "";
 }
 
 function isFundOpportunity(raw, sourceText) {
@@ -249,8 +305,11 @@ function normalizeCurrentStatus(rawStage, sourceText, currentStatusOverride) {
     : emailStage;
 }
 
-function normalizeAmountRemaining(value, sourceText, currentStage) {
+function normalizeAmountRemaining(value, historicalValue, sourceText, currentStage) {
   const baseClaim = normalizeClaim(value, sourceText, { financial: true });
+  const explicitHistorical = normalizeSemanticFinancialClaim(historicalValue, sourceText, {
+    required: /\b(?:difference|unfunded|target)[\s\S]{0,100}\b(?:commit(?:ted|ments?)|capital)\b|\b(?:commit(?:ted|ments?)|capital)\b[\s\S]{0,100}\b(?:difference|unfunded|target)\b/i
+  });
   const claim = normalizeSemanticFinancialClaim(value, sourceText, {
     required: /\b(?:remaining|left to raise|still to raise|unallocated|unfunded|difference)\b/i,
     forbidden: /\b(?:target fund size|fund target|co[- ]?investment|minimum commitment)\b/i
@@ -260,8 +319,19 @@ function normalizeAmountRemaining(value, sourceText, currentStage) {
   const historicalDifference = /\b(?:difference|unfunded|target)[\s\S]{0,100}\b(?:commit(?:ted|ments?)|capital)\b|\b(?:commit(?:ted|ments?)|capital)\b[\s\S]{0,100}\b(?:difference|unfunded|target)\b/i.test(
     `${baseClaim.value} ${baseClaim.sourceEvidence}`
   );
+  const historicalClaim = explicitHistorical.evidenceStatus === "verified"
+    ? explicitHistorical
+    : historicalDifference ? baseClaim : normalizeClaim("", sourceText);
+  const historical = historicalClaim.value
+    ? {
+        ...historicalClaim,
+        semanticMeaning: "historical-unfunded-target-difference",
+        currentAvailability: false,
+        authoritativeValue: historicalClaim.evidenceStatus === "verified" ? historicalClaim.value : ""
+      }
+    : historicalClaim;
   if (!baseClaim.value || (claim.evidenceStatus === "verified" && !fundraisingClosed)) {
-    return { current: claim, historical: normalizeClaim("", sourceText) };
+    return { current: claim, historical };
   }
   return {
     current: {
@@ -271,13 +341,13 @@ function normalizeAmountRemaining(value, sourceText, currentStage) {
       evidenceStatus: "unresolved",
       authoritativeValue: ""
     },
-    historical: historicalDifference || fundraisingClosed
-      ? {
+    historical: historical.value || historicalDifference || fundraisingClosed
+      ? (historical.value ? historical : {
           ...baseClaim,
           semanticMeaning: "historical-unfunded-target-difference",
           currentAvailability: false,
           authoritativeValue: baseClaim.evidenceStatus === "verified" ? baseClaim.value : ""
-        }
+        })
       : normalizeClaim("", sourceText)
   };
 }
@@ -329,7 +399,11 @@ function normalizeDealAnalysis(raw, source, matchResult) {
     ? cleanString(raw.contactEmail.value)
     : cleanString(raw && raw.contactEmail);
   const fundOpportunity = isFundOpportunity(raw, sourceText);
-  const portfolioActivity = normalizeStructuredClaimField(raw && raw.customersContractsDeployments, sourceText);
+  const portfolioActivity = normalizeStructuredClaimField(
+    raw && raw.customersContractsDeployments,
+    sourceText,
+    { field: "customersContractsDeployments" }
+  );
   const portfolioClaims = claimItems(portfolioActivity);
   const targetInvestorClaims = fundOpportunity ? portfolioClaims.filter(isTargetInvestorClaim) : [];
   const retainedPortfolioClaims = portfolioClaims.filter((claim) => !targetInvestorClaims.includes(claim));
@@ -350,7 +424,12 @@ function normalizeDealAnalysis(raw, source, matchResult) {
     .filter((claim, index, items) => items.findIndex((item) => item.value === claim.value) === index)
     .slice(0, MAX_LIST_ITEMS);
   const stage = normalizeCurrentStatus(raw && raw.stage, sourceText, source && source.currentStatusOverride);
-  const remainingAmounts = normalizeAmountRemaining(raw && raw.amountRemaining, sourceText, stage);
+  const remainingAmounts = normalizeAmountRemaining(
+    raw && raw.amountRemaining,
+    raw && raw.historicalTargetDifference,
+    sourceText,
+    stage
+  );
   const dealData = {
     companyName,
     contactName: rawContactName
@@ -384,7 +463,7 @@ function normalizeDealAnalysis(raw, source, matchResult) {
     proposedCheckSize: normalizeProposedCheckSize(raw && raw.proposedCheckSize, sourceText),
     valuationCap: normalizeClaim(raw && raw.valuationCap, sourceText, { financial: true }),
     securityType: normalizeClaim(raw && raw.securityType, sourceText),
-    financingTerms: normalizeStructuredClaimField(raw && raw.financingTerms, sourceText, { financial: true }),
+    financingTerms: normalizeStructuredClaimField(raw && raw.financingTerms, sourceText, { financial: true, field: "financingTerms" }),
     leadInvestor: normalizeClaim(raw && raw.leadInvestor, sourceText),
     useOfProceeds: normalizeClaim(raw && raw.useOfProceeds, sourceText),
     keyInvestmentPoints: investmentPoints,
@@ -459,8 +538,15 @@ function buildNewDealPrompt(source) {
 }
 
 function opportunityIdentity(value) {
-  const normalized = normalizeMatchText(value);
+  const normalized = normalizeMatchText(canonicalOpportunityName(value));
   return normalized ? crypto.createHash("sha256").update(normalized).digest("hex") : "";
+}
+
+function opportunityIdentityKeys(name, attachments = []) {
+  return Array.from(new Set([
+    opportunityIdentity(name),
+    ...attachments.map((attachment) => opportunityIdentity(attachment && attachment.name))
+  ].filter(Boolean)));
 }
 
 function buildOpportunityDecompositionPrompt(source) {
@@ -488,7 +574,7 @@ function buildOpportunityDecompositionPrompt(source) {
 
 function evidenceAppliesToOpportunity(evidence, opportunityName) {
   const evidenceText = normalizeMatchText(evidence);
-  const nameTokens = normalizeMatchText(opportunityName)
+  const nameTokens = normalizeMatchText(canonicalOpportunityName(opportunityName))
     .split(" ")
     .filter((token) => token.length >= 3 && !["project", "fund", "investment", "coinvestment"].includes(token));
   return Boolean(evidenceText && nameTokens.length && nameTokens.every((token) => evidenceText.includes(token)));
@@ -505,16 +591,18 @@ function evidenceContextAppliesToOpportunity(bodyText, evidence, opportunityName
 }
 
 function deriveEmailCurrentStatus(bodyText, opportunityName, emailEvidence = []) {
-  const candidates = emailEvidence.concat(
-    cleanString(bodyText, MAX_SOURCE_TEXT_LENGTH).split(/(?<=[.!?])\s+|\n+/).map((item) => item.trim()).filter(Boolean)
-  );
+  const bodyCandidates = cleanString(bodyText, MAX_SOURCE_TEXT_LENGTH)
+    .split(/(?<=[.!?])\s+|\n+/).map((item) => item.trim()).filter(Boolean);
   const statusPatterns = [
     { pattern: /\b(?:fundrais(?:ing|e|er)[\s\S]{0,60})?(?:now\s+clos(?:e|ed)|closed|no longer open)\b/i, value: "Fundraising closed" },
     { pattern: /\boversubscribed\b/i, value: "Oversubscribed" },
     { pattern: /\bunder\s+(?:an?\s+)?LOI\b/i, value: "Under LOI" }
   ];
-  for (const candidate of candidates) {
-    if (!evidenceContextAppliesToOpportunity(bodyText, candidate, opportunityName)) continue;
+  for (const candidate of emailEvidence.concat(bodyCandidates)) {
+    const isExplicitPartitionEvidence = emailEvidence.includes(candidate);
+    const applies = evidenceAppliesToOpportunity(candidate, opportunityName) ||
+      (isExplicitPartitionEvidence && evidenceContextAppliesToOpportunity(bodyText, candidate, opportunityName));
+    if (!applies) continue;
     const match = statusPatterns.find((item) => item.pattern.test(candidate));
     if (match) {
       return normalizeClaim({ value: match.value, sourceEvidence: candidate, sourceLocation: "Email body" }, bodyText);
@@ -532,36 +620,49 @@ function normalizeOpportunityDecomposition(raw, source) {
   const rawOpportunities = Array.isArray(raw && raw.opportunities) ? raw.opportunities.slice(0, 20) : [];
 
   rawOpportunities.forEach((item) => {
-    const name = cleanString(item && item.name, 300);
+    const rawName = cleanString(item && item.name, 300);
     const attachmentIds = (Array.isArray(item && item.attachmentIds) ? item.attachmentIds : [])
       .map((id) => cleanString(id, 500))
       .filter((id) => byId.has(id) && !assigned.has(id));
     const emailEvidence = (Array.isArray(item.emailEvidence) ? item.emailEvidence : [])
       .map((evidence) => cleanString(evidence && (evidence.sourceEvidence || evidence.value || evidence), 1000))
-      .filter((evidence) => sourceContainsEvidence(bodyText, evidence) && evidenceContextAppliesToOpportunity(bodyText, evidence, name));
-    if (!name || (!attachmentIds.length && !emailEvidence.length)) return;
+      .filter((evidence) => sourceContainsEvidence(bodyText, evidence) && evidenceContextAppliesToOpportunity(bodyText, evidence, rawName));
+    if (!rawName || (!attachmentIds.length && !emailEvidence.length)) return;
     attachmentIds.forEach((id) => assigned.add(id));
+    const opportunityAttachments = attachmentIds.map((id) => byId.get(id)).filter(Boolean);
+    const attachmentName = opportunityAttachments.length === 1
+      ? canonicalOpportunityName(opportunityAttachments[0].name)
+      : "";
+    const canonicalName = canonicalOpportunityName(rawName) || attachmentName || rawName;
     const currentStatus = normalizeClaim(item.currentStatus, bodyText);
     const validatedCurrentStatus = currentStatus.evidenceStatus === "verified" &&
-      evidenceContextAppliesToOpportunity(bodyText, currentStatus.sourceEvidence, name)
+      evidenceAppliesToOpportunity(currentStatus.sourceEvidence, canonicalName)
       ? currentStatus
-      : deriveEmailCurrentStatus(bodyText, name, emailEvidence);
+      : normalizeClaim("", bodyText);
+    const derivedCurrentStatus = deriveEmailCurrentStatus(bodyText, canonicalName, emailEvidence);
     opportunities.push({
-      name,
-      opportunityId: opportunityIdentity(name),
+      name: canonicalName,
+      opportunityId: opportunityIdentity(canonicalName),
+      opportunityIdentityKeys: opportunityIdentityKeys(canonicalName, opportunityAttachments),
       attachmentIds,
       emailEvidence,
-      currentStatus: validatedCurrentStatus
+      currentStatus: derivedCurrentStatus.evidenceStatus === "verified"
+        ? (validatedCurrentStatus.evidenceStatus === "verified" &&
+            normalizeMatchText(validatedCurrentStatus.value) === normalizeMatchText(derivedCurrentStatus.value)
+            ? validatedCurrentStatus
+            : derivedCurrentStatus)
+        : validatedCurrentStatus
     });
   });
 
   attachments.forEach((attachment) => {
     const id = cleanString(attachment.id, 500);
     if (assigned.has(id)) return;
-    const fallbackName = cleanString(attachment.name, 300).replace(/\.pdf$/i, "") || id;
+    const fallbackName = canonicalOpportunityName(attachment.name) || id;
     opportunities.push({
       name: fallbackName,
       opportunityId: opportunityIdentity(fallbackName),
+      opportunityIdentityKeys: opportunityIdentityKeys(fallbackName, [attachment]),
       attachmentIds: [id],
       emailEvidence: [],
       currentStatus: normalizeClaim("", bodyText)
@@ -597,6 +698,7 @@ function createNewDealAnalysisService({ callModel, houseDomains = [] }) {
       opportunities.push({
         name,
         opportunityId: opportunityIdentity(name),
+        opportunityIdentityKeys: opportunityIdentityKeys(name, attachments),
         attachmentIds: attachments.map((attachment) => attachment.id),
         emailEvidence: [],
         includeFullEmailBody: true,
@@ -610,12 +712,16 @@ function createNewDealAnalysisService({ callModel, houseDomains = [] }) {
         ...source,
         opportunityName: opportunity.name,
         opportunityId: opportunity.opportunityId,
+        opportunityIdentityKeys: opportunity.opportunityIdentityKeys,
         currentStatusOverride: opportunity.currentStatus,
         filename: opportunityAttachments.map((attachment) => attachment.name).join(" | "),
         sourceText: [
           `Opportunity: ${opportunity.name}`,
           opportunity.includeFullEmailBody ? cleanString(source && source.emailBodyText, MAX_SOURCE_TEXT_LENGTH) : "",
           ...opportunity.emailEvidence.map((evidence) => `Newer email evidence: ${evidence}`),
+          opportunity.currentStatus && opportunity.currentStatus.sourceEvidence
+            ? `Newer email status evidence: ${opportunity.currentStatus.sourceEvidence}`
+            : "",
           ...opportunityAttachments.map((attachment) => `Attachment ${attachment.name}:\n${attachment.text}`)
         ].filter(Boolean).join("\n\n").slice(0, MAX_SOURCE_TEXT_LENGTH)
       };
@@ -632,6 +738,8 @@ module.exports = {
   createNewDealAnalysisService,
   normalizeOpportunityDecomposition,
   normalizeDealAnalysis,
+  canonicalOpportunityName,
   opportunityIdentity,
+  opportunityIdentityKeys,
   opportunityFingerprint
 };

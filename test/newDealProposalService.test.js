@@ -68,6 +68,39 @@ test("explicit reanalysis may refresh a pending source-opportunity proposal in p
   assert.equal(harness.getStored().length, 1);
 });
 
+test("explicit reanalysis matches a pending source opportunity through canonical identity aliases", () => {
+  const harness = createHarness();
+  const first = harness.service.saveAiUpdateProposal({
+    proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "canonical-pure",
+    opportunityIdentityKeys: ["canonical-pure"], opportunityFingerprint: "fp-1", summary: "Project Pure"
+  });
+  const refreshed = harness.service.saveAiUpdateProposal({
+    proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "new-model-name",
+    opportunityIdentityKeys: ["canonical-pure", "new-model-name"], opportunityFingerprint: "fp-1", summary: "Project Pure Co-Investment"
+  }, { replacePendingSourceOpportunity: true });
+  assert.equal(refreshed.id, first.id);
+  assert.equal(harness.getStored().length, 1);
+  assert.equal(refreshed.summary, "Project Pure Co-Investment");
+});
+
+test("explicit reanalysis never overwrites an approved or rejected source opportunity", () => {
+  for (const status of ["approved", "rejected"]) {
+    const harness = createHarness();
+    const terminal = harness.service.saveAiUpdateProposal({
+      proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1",
+      opportunityFingerprint: "fp-1", summary: "Reviewed", status
+    });
+    const result = harness.service.saveAiUpdateProposal({
+      proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1",
+      opportunityFingerprint: "fp-1", summary: "Replacement", status: "pending"
+    }, { replacePendingSourceOpportunity: true });
+    assert.equal(result.id, terminal.id);
+    assert.equal(result.status, status);
+    assert.equal(result.summary, "Reviewed");
+    assert.equal(harness.getStored().length, 1);
+  }
+});
+
 test("multiple emails for one opportunity coalesce attachments by hash", () => {
   const harness = createHarness();
   const first = harness.service.saveAiUpdateProposal({

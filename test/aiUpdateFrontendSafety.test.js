@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   buildUserFacingWarnings,
+  formatDealClaimValue,
   getReportUpdatesEmptyMessage,
   isHighRiskNumeric,
   sanitizeForActionableView,
@@ -51,6 +52,34 @@ test("frontend warning helper never renders structured warning objects as object
   assert.equal(warningMessage({ reason: "Readable reason." }), "Readable reason.");
   assert.equal(warningMessage({ nested: { value: true } }), "");
   assert.notEqual(warningMessage({ message: "Readable warning." }), "[object Object]");
+});
+
+test("structured deal claims render evidence-backed semantic labels with their values", () => {
+  const proposal = {
+    dealData: {
+      financingTerms: [
+        { value: "1.75%", semanticLabel: "Management fee", sourceEvidence: "Management fee is 1.75%." },
+        { value: "17.5%", semanticLabel: "Performance fee/carry", sourceEvidence: "Performance fee/carry is 17.5%." },
+        { value: "10 years", semanticLabel: "Fund term", sourceEvidence: "The fund term is 10 years." }
+      ],
+      customersContractsDeployments: [
+        { value: "$15.0MM", semanticLabel: "Alpha Services", sourceEvidence: "$15.0MM investment in Alpha Services" },
+        { value: "$7.5MM", semanticLabel: "Beta Industrial", sourceEvidence: "$7.5MM investment in Beta Industrial" }
+      ],
+      historicalTargetDifference: {
+        value: "$255.5MM",
+        currentAvailability: false,
+        sourceEvidence: "The $255.5MM difference was historically unfunded."
+      }
+    }
+  };
+  assert.equal(formatDealClaimValue(proposal, "financingTerms"), [
+    "Management fee: 1.75%", "Performance fee/carry: 17.5%", "Fund term: 10 years"
+  ].join("\n"));
+  assert.equal(formatDealClaimValue(proposal, "customersContractsDeployments"), [
+    "Alpha Services: $15.0MM", "Beta Industrial: $7.5MM"
+  ].join("\n"));
+  assert.equal(formatDealClaimValue(proposal, "historicalTargetDifference"), "$255.5MM");
 });
 
 test("frontend user-facing warnings hide internal sanitizer messages", () => {

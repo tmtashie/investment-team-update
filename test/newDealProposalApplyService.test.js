@@ -155,3 +155,16 @@ test("saving an unchanged structured field preserves its evidence objects", () =
   );
   assert.deepEqual(result.financingTerms, claims);
 });
+
+test("saving unchanged labeled structured claims preserves evidence and provenance", () => {
+  const { applyNewDealEdits } = require("../server")._test;
+  const claims = [
+    { value: "1.75%", semanticLabel: "Management fee", sourceEvidence: "Management fee is 1.75%.", evidenceStatus: "verified", authoritativeValue: "1.75%" },
+    { value: "10 years", semanticLabel: "Fund term", sourceEvidence: "The fund term is 10 years.", evidenceStatus: "verified", authoritativeValue: "10 years" }
+  ];
+  const result = applyNewDealEdits(
+    { dealData: { financingTerms: claims } },
+    { dealData: { financingTerms: "Management fee: 1.75%\nFund term: 10 years" } }
+  );
+  assert.deepEqual(result.financingTerms, claims);
+});
