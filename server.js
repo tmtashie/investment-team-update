@@ -1261,8 +1261,13 @@ function applyNewDealEdits(proposal, payload) {
     : {};
   NEW_DEAL_EDITABLE_FIELDS.forEach((field) => {
     if (!Object.prototype.hasOwnProperty.call(editedFields, field)) return;
-    const existing = dealData[field] && typeof dealData[field] === "object" ? dealData[field] : {};
+    const existingValue = dealData[field];
     const value = String(editedFields[field] || "").trim().slice(0, 2000);
+    if (Array.isArray(existingValue)) {
+      const displayedValue = existingValue.map((claim) => String((claim && claim.value) || "").trim()).filter(Boolean).join("\n");
+      if (value === displayedValue) return;
+    }
+    const existing = existingValue && typeof existingValue === "object" && !Array.isArray(existingValue) ? existingValue : {};
     const unchangedVerified = existing.evidenceStatus === "verified" && value === existing.value;
     dealData[field] = {
       ...existing,
@@ -5079,6 +5084,14 @@ const server = http.createServer(async (request, response) => {
         graphMessageId: sourceState.graphMessageId,
         expectedInternetMessageId: sourceState.internetMessageId
       });
+      if (existing.opportunityId) {
+        sendJson(response, 200, {
+          ...result,
+          refreshedProposalIds: result.proposalIds,
+          replacementProposalIds: []
+        });
+        return;
+      }
       const replacementIds = result.proposalIds.filter((id) => id !== proposalId);
       if (!replacementIds.length) {
         sendJson(response, 422, { error: "Reanalysis did not create a replacement opportunity proposal." });

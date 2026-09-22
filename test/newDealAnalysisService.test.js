@@ -332,12 +332,24 @@ test("sanitized BEP email decomposes into three evidence-isolated opportunities 
   assert.doesNotMatch(results[2].source.sourceText, /80M-\$105M|specialty ingredients/);
 
   const [core, pure, care] = results.map((item) => item.result.analysis.dealData);
-  assert.equal(core.targetFundSize.authoritativeValue, "$350M");
-  assert.equal(core.minimumLpCommitment.authoritativeValue, "$5M");
+  assert.equal(core.targetFundSize.authoritativeValue, "$350MM");
+  assert.equal(core.minimumLpCommitment.authoritativeValue, "$5MM");
+  assert.equal(core.amountCommitted.authoritativeValue, "$94.5MM");
+  assert.equal(core.amountRemaining.value, "");
   assert.equal(core.amountRemaining.authoritativeValue, "");
+  assert.equal(core.historicalTargetDifference.authoritativeValue, "$255.5MM");
+  assert.equal(core.historicalTargetDifference.currentAvailability, false);
   assert.equal(core.proposedCheckSize.authoritativeValue, "");
   assert.equal(core.stage.authoritativeValue, "Fundraising closed");
-  assert.equal(core.stage.supersededEvidence[0].value, "Currently fundraising");
+  assert.equal(core.stage.sourceEvidence, "fundraising memo is now close");
+  assert.equal(core.stage.supersededEvidence[0].value, "Open for new commitments");
+  assert.equal(Array.isArray(core.tractionRevenue), true);
+  assert.equal(core.tractionRevenue[0].authoritativeValue, "$94.5MM in historical commitments");
+  assert.equal(Array.isArray(core.customersContractsDeployments), true);
+  assert.match(core.customersContractsDeployments[0].authoritativeValue, /Control investments/);
+  assert.equal(Array.isArray(core.financingTerms), true);
+  assert.deepEqual(core.financingTerms.map((claim) => claim.evidenceStatus), ["verified", "verified"]);
+  assert.doesNotMatch(JSON.stringify(core), /\[object Object\]/);
   assert.equal(pure.coInvestmentAvailability.authoritativeValue, "$80M-$105M");
   assert.equal(pure.proposedCheckSize.authoritativeValue, "");
   assert.equal(pure.stage.authoritativeValue, "Oversubscribed");

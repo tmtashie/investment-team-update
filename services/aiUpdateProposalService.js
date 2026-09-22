@@ -27,7 +27,7 @@ function createAiUpdateProposalService({
     return normalized;
   }
 
-  function saveAiUpdateProposal(entry) {
+  function saveAiUpdateProposal(entry, { replacePendingSourceOpportunity = false } = {}) {
     const proposals = readAiUpdateProposals();
     const normalized = normalizeAiUpdateProposal({
       ...entry,
@@ -37,7 +37,17 @@ function createAiUpdateProposalService({
       (proposal) => proposal.sourceMessageKey === normalized.sourceMessageKey &&
         proposal.opportunityId === normalized.opportunityId
     );
-    if (exactSourceOpportunity) return exactSourceOpportunity;
+    if (exactSourceOpportunity) {
+      if (replacePendingSourceOpportunity && exactSourceOpportunity.status === "pending") {
+        return updateAiUpdateProposal(exactSourceOpportunity.id, {
+          ...normalized,
+          status: "pending",
+          reviewedBy: "",
+          reviewedAt: ""
+        });
+      }
+      return exactSourceOpportunity;
+    }
     if (normalized.proposalType === "new-deal") {
       const legacyExactSource = normalized.sourceMessageKey && !normalized.opportunityId && proposals.find(
         (proposal) => proposal.proposalType === "new-deal" &&

@@ -6795,12 +6795,34 @@ function getAiProposalTypeLabel(proposal) {
 
 function dealClaimValue(proposal, field) {
   const claim = proposal && proposal.dealData && proposal.dealData[field];
-  return claim && typeof claim === "object" ? String(claim.value || "") : "";
+  const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  return claims.map((item) => {
+    if (!item || typeof item !== "object") return String(item || "");
+    if (typeof item.value === "string" || typeof item.value === "number") return String(item.value);
+    return "";
+  }).filter(Boolean).join("\n");
 }
 
 function dealClaimStatus(proposal, field) {
   const claim = proposal && proposal.dealData && proposal.dealData[field];
-  return claim && claim.evidenceStatus ? String(claim.evidenceStatus) : "unresolved";
+  const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  const statuses = Array.from(new Set(claims.map((item) => item && item.evidenceStatus).filter(Boolean)));
+  return statuses.length ? statuses.join(" / ") : "unresolved";
+}
+
+function renderDealFieldEvidence(proposal, field) {
+  const claim = proposal && proposal.dealData && proposal.dealData[field];
+  const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  const evidence = [];
+  claims.forEach((item) => {
+    if (item && item.sourceEvidence) evidence.push({ ...item, label: "Source evidence" });
+    (Array.isArray(item && item.supersededEvidence) ? item.supersededEvidence : []).forEach((superseded) => {
+      if (superseded && (superseded.value || superseded.sourceEvidence)) evidence.push({ ...superseded, label: "Superseded attachment evidence" });
+    });
+  });
+  return evidence.length
+    ? `<ul class="ai-change-list">${evidence.map((item) => `<li><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value || "")}${item.sourceEvidence ? `<br><span class="update-meta">${escapeHtml(item.sourceEvidence)}</span>` : ""}</li>`).join("")}</ul>`
+    : "";
 }
 
 function renderDealClaimList(proposal, field, emptyMessage) {
@@ -6860,17 +6882,20 @@ function renderNewDealProposalDetail(proposal) {
         <label>Co-investment availability (${escapeHtml(dealClaimStatus(proposal, "coInvestmentAvailability"))})<input id="newDealCoInvestmentAvailability" value="${escapeHtml(dealClaimValue(proposal, "coInvestmentAvailability"))}"></label>
         <label>Amount committed (${escapeHtml(dealClaimStatus(proposal, "amountCommitted"))})<input id="newDealAmountCommitted" value="${escapeHtml(dealClaimValue(proposal, "amountCommitted"))}"></label>
         <label>Amount remaining (${escapeHtml(dealClaimStatus(proposal, "amountRemaining"))})<input id="newDealAmountRemaining" value="${escapeHtml(dealClaimValue(proposal, "amountRemaining"))}"></label>
+        <label>Historical / unfunded target difference (${escapeHtml(dealClaimStatus(proposal, "historicalTargetDifference"))})<input value="${escapeHtml(dealClaimValue(proposal, "historicalTargetDifference"))}" readonly></label>
         <label>Proposed check size (${escapeHtml(dealClaimStatus(proposal, "proposedCheckSize"))})<input id="newDealCheckSize" value="${escapeHtml(dealClaimValue(proposal, "proposedCheckSize"))}"></label>
         <label>Valuation / cap (${escapeHtml(dealClaimStatus(proposal, "valuationCap"))})<input id="newDealValuationCap" value="${escapeHtml(dealClaimValue(proposal, "valuationCap"))}"></label>
         <label>Security type (${escapeHtml(dealClaimStatus(proposal, "securityType"))})<input id="newDealSecurityType" value="${escapeHtml(dealClaimValue(proposal, "securityType"))}"></label>
         <label>Lead investor (${escapeHtml(dealClaimStatus(proposal, "leadInvestor"))})<input id="newDealLeadInvestor" value="${escapeHtml(dealClaimValue(proposal, "leadInvestor"))}"></label>
       </div>
+      ${renderDealFieldEvidence(proposal, "stage")}
       <label>AI summary<textarea id="newDealSummary" rows="4">${escapeHtml(dealClaimValue(proposal, "dealSummary"))}</textarea></label>
       <label>Strategy / what the opportunity does<textarea id="newDealWhatCompanyDoes" rows="3">${escapeHtml(dealClaimValue(proposal, "whatCompanyDoes"))}</textarea></label>
       <label>Business model / fund strategy<textarea id="newDealBusinessModel" rows="3">${escapeHtml(dealClaimValue(proposal, "businessModel"))}</textarea></label>
-      <label>Traction / deployment / revenue<textarea id="newDealTractionRevenue" rows="3">${escapeHtml(dealClaimValue(proposal, "tractionRevenue"))}</textarea></label>
-      <label>Portfolio / contracts / deployments<textarea id="newDealCustomers" rows="3">${escapeHtml(dealClaimValue(proposal, "customersContractsDeployments"))}</textarea></label>
-      <label>Financing terms<textarea id="newDealFinancingTerms" rows="3">${escapeHtml(dealClaimValue(proposal, "financingTerms"))}</textarea></label>
+      <label>Traction / deployment / revenue<textarea id="newDealTractionRevenue" rows="3">${escapeHtml(dealClaimValue(proposal, "tractionRevenue"))}</textarea></label>${renderDealFieldEvidence(proposal, "tractionRevenue")}
+      <label>Portfolio / contracts / deployments<textarea id="newDealCustomers" rows="3">${escapeHtml(dealClaimValue(proposal, "customersContractsDeployments"))}</textarea></label>${renderDealFieldEvidence(proposal, "customersContractsDeployments")}
+      <label>Financing terms<textarea id="newDealFinancingTerms" rows="3">${escapeHtml(dealClaimValue(proposal, "financingTerms"))}</textarea></label>${renderDealFieldEvidence(proposal, "financingTerms")}
+      ${renderDealFieldEvidence(proposal, "historicalTargetDifference")}
       <label>Use of proceeds<textarea id="newDealUseOfProceeds" rows="3">${escapeHtml(dealClaimValue(proposal, "useOfProceeds"))}</textarea></label>
       <label>Key investment points<textarea id="newDealPoints" rows="4">${escapeHtml(dealClaimListText(proposal, "keyInvestmentPoints"))}</textarea></label>
       <label>Key risks<textarea id="newDealRisks" rows="4">${escapeHtml(dealClaimListText(proposal, "keyRisks"))}</textarea></label>
@@ -6887,7 +6912,7 @@ function renderNewDealProposalDetail(proposal) {
     <section class="ai-detail-section"><h4>Attachments</h4>${documents.length ? `<div class="digest-preview-list">${documents.map((document) => `<article class="digest-preview-item"><p class="highlight-value">${document.url ? `<a href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>` : escapeHtml(document.name || "Attachment")}</p><p class="update-meta">${escapeHtml(document.preservationStatus || "unresolved")} • ${escapeHtml(document.extractionStatus || "not-parsed")}${document.reason ? ` • ${escapeHtml(document.reason)}` : ""}</p></article>`).join("")}</div>` : '<p class="update-meta">No attachments.</p>'}</section>
     <section class="ai-detail-section"><h4>Review</h4><p class="update-meta">Status: ${escapeHtml(proposal.status)}</p>
       ${proposal.status === "pending" && canEditWorkspace() ? `<div class="card-actions">
-        ${isMasterEditor() && proposal.sourceMessageKey && !proposal.opportunityId ? `<button class="secondary-button" type="button" data-action="reanalyze-source-message" data-id="${escapeHtml(proposal.id)}">Reanalyze source into opportunities</button>` : ""}
+        ${isMasterEditor() && proposal.sourceMessageKey ? `<button class="secondary-button" type="button" data-action="reanalyze-source-message" data-id="${escapeHtml(proposal.id)}">${proposal.opportunityId ? "Reanalyze source opportunities" : "Reanalyze source into opportunities"}</button>` : ""}
         ${isMasterEditor() ? `<button type="button" data-action="approve-new-deal" data-id="${escapeHtml(proposal.id)}">Approve as New Pipeline Deal</button><select id="newDealExistingInvestment"><option value="">Select existing investment</option>${allInvestments.map((investment) => `<option value="${escapeHtml(investment.id)}">${escapeHtml(investment.company)} • ${escapeHtml(investment.entity)}</option>`).join("")}</select><button class="secondary-button" type="button" data-action="match-new-deal-existing" data-id="${escapeHtml(proposal.id)}">Match to Existing Investment</button>` : ""}
         <button class="secondary-button danger-button" type="button" data-action="reject-ai-proposal" data-id="${escapeHtml(proposal.id)}">Reject</button>
       </div>` : ""}
@@ -11648,7 +11673,7 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
   }
 
   if (action === "reanalyze-source-message" && proposalId) {
-    const confirmed = window.confirm("Reanalyze this preserved source email into separate pending opportunities? The current proposal will be superseded only after replacements are created. No investment will be created.");
+    const confirmed = window.confirm("Reanalyze this preserved source email? Pending decomposed opportunities will be refreshed in place; a legacy unpartitioned proposal is superseded only after replacements exist. No investment will be created.");
     if (!confirmed) return;
     target.disabled = true;
     try {
@@ -11658,7 +11683,7 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
         body: JSON.stringify({ proposalId })
       });
       await loadAiUpdateProposals();
-      selectedAiUpdateProposalId = result.replacementProposalIds && result.replacementProposalIds[0] || "";
+      selectedAiUpdateProposalId = result.refreshedProposalIds && result.refreshedProposalIds[0] || result.replacementProposalIds && result.replacementProposalIds[0] || "";
       renderAiUpdateProposalDetail();
       if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis created ${result.proposalsCreated || 0} separately reviewable proposals. No investment was created.`;
     } catch (error) {
