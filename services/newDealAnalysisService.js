@@ -268,6 +268,12 @@ function normalizeProposedCheckSize(value, sourceText) {
   const describesOtherFinancialConcept = /\b(minimum(?: lp)? commitment|target fund size|fund target|co[- ]?investment (?:capacity|availability|available)|total co[- ]?investment)\b/i.test(
     `${claim.value} ${claim.sourceEvidence}`
   );
+  if (claim.value && describesOtherFinancialConcept) {
+    return {
+      ...normalizeClaim("", sourceText),
+      supersededEvidence: [{ ...claim, semanticMeaning: "not-a-proposed-beaman-check" }]
+    };
+  }
   if (!claim.value || claim.evidenceStatus !== "verified" || (hasExplicitProposedCheckEvidence(claim.sourceEvidence) && !describesOtherFinancialConcept)) {
     return claim;
   }
@@ -358,17 +364,24 @@ function deadlineHasEventContext(value) {
   );
 }
 
+function hasTemporalStatement(value) {
+  const text = cleanString(value, 1000);
+  return /\b(?:q[1-4]\s*(?:20)?\d{2}|20\d{2}|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{1,2})?(?:,?\s+20\d{2})?|year[- ]end|month[- ]end|quarter[- ]end|next\s+(?:week|month|quarter|year)|this\s+(?:week|month|quarter|year)|within\s+\d+\s+(?:business\s+)?(?:days?|weeks?|months?|years?)|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\b/i.test(text);
+}
+
 function normalizeDeadlineList(value, sourceText) {
-  return normalizeClaimList(value, sourceText).map((claim) => {
-    if (deadlineHasEventContext(claim.value) || !deadlineHasEventContext(claim.sourceEvidence)) {
-      return claim;
-    }
-    return normalizeClaim({
-      value: claim.sourceEvidence,
-      sourceEvidence: claim.sourceEvidence,
-      sourceLocation: claim.sourceLocation
-    }, sourceText);
-  });
+  return normalizeClaimList(value, sourceText)
+    .filter((claim) => claim.evidenceStatus === "verified" && hasTemporalStatement(claim.sourceEvidence || claim.value))
+    .map((claim) => {
+      if (deadlineHasEventContext(claim.value) || !deadlineHasEventContext(claim.sourceEvidence)) {
+        return claim;
+      }
+      return normalizeClaim({
+        value: claim.sourceEvidence,
+        sourceEvidence: claim.sourceEvidence,
+        sourceLocation: claim.sourceLocation
+      }, sourceText);
+    });
 }
 
 function rootDomainFromUrl(value) {
@@ -668,7 +681,21 @@ function normalizeOpportunityDecomposition(raw, source) {
       currentStatus: normalizeClaim("", bodyText)
     });
   });
-  return opportunities;
+  const consolidated = new Map();
+  opportunities.forEach((opportunity) => {
+    const existing = consolidated.get(opportunity.opportunityId);
+    if (!existing) {
+      consolidated.set(opportunity.opportunityId, opportunity);
+      return;
+    }
+    existing.attachmentIds = Array.from(new Set(existing.attachmentIds.concat(opportunity.attachmentIds)));
+    existing.opportunityIdentityKeys = Array.from(new Set(existing.opportunityIdentityKeys.concat(opportunity.opportunityIdentityKeys)));
+    existing.emailEvidence = Array.from(new Set(existing.emailEvidence.concat(opportunity.emailEvidence)));
+    if (existing.currentStatus.evidenceStatus !== "verified" && opportunity.currentStatus.evidenceStatus === "verified") {
+      existing.currentStatus = opportunity.currentStatus;
+    }
+  });
+  return Array.from(consolidated.values());
 }
 
 function createNewDealAnalysisService({ callModel, houseDomains = [] }) {
