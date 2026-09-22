@@ -13,6 +13,7 @@ const { createAiEmailIntakeStateService } = require("../services/aiEmailIntakeSt
 const { createAiUpdateProposalService } = require("../services/aiUpdateProposalService");
 const { createNewDealAnalysisService } = require("../services/newDealAnalysisService");
 const bepFixture = require("./fixtures/bep-multi-opportunity.json");
+const bepLegacyFiveProposals = require("./fixtures/bep-legacy-five-proposals.json");
 
 const PDF_BYTES = Buffer.from("%PDF-1.4\nmock pdf\n").toString("base64");
 
@@ -60,6 +61,8 @@ function createHarness({
   exactMessage,
   extractPdfTextFromUpload,
   saveAiUpdateProposal,
+  sourceProposalSnapshot,
+  reconcilePendingSourceOpportunities,
   allowedSenders = "",
   allowedDomains = "",
   investments = [
@@ -81,6 +84,11 @@ function createHarness({
     }),
     fetchIntakeMessageById: exactMessage ? async () => exactMessage : undefined
   };
+  const saveProposal = saveAiUpdateProposal || ((proposal) => {
+    const saved = { ...proposal, id: `proposal-${savedProposals.length + 1}` };
+    savedProposals.push(saved);
+    return saved;
+  });
   const service = createAiEmailIntakeService({
     graphMailService,
     stateService,
@@ -135,11 +143,12 @@ function createHarness({
       safetyCalls.push(proposal);
       return { ...proposal, safetyChecked: true };
     },
-    saveAiUpdateProposal: saveAiUpdateProposal || ((proposal) => {
-      const saved = { ...proposal, id: `proposal-${savedProposals.length + 1}` };
-      savedProposals.push(saved);
-      return saved;
-    }),
+    saveAiUpdateProposal: saveProposal,
+    sourceProposalSnapshot: sourceProposalSnapshot || (() => []),
+    reconcilePendingSourceOpportunities: reconcilePendingSourceOpportunities || (({ canonicalEntries }) => ({
+      proposals: canonicalEntries.map((proposal) => saveProposal(proposal)),
+      supersededProposals: []
+    })),
     readInvestments: () => investments,
     filterInvestmentsForUser: (investments) => investments,
     entities: [{ id: "beaman-ventures", name: "Beaman Ventures" }],
@@ -860,7 +869,7 @@ test("explicit reanalysis fetches the exact preserved source and only stages pen
   assert.deepEqual(harness.getStored()[0].proposalIds, ["proposal-1", "proposal-2", "proposal-3"]);
 });
 
-test("complete sanitized BEP reanalysis remains three persisted proposals across model naming variation", async () => {
+test("complete BEP reanalysis reconciles five legacy pending siblings to three canonical active proposals", async () => {
   const exactMessage = createMessage({
     id: "bep-graph-id",
     internetMessageId: "<bep-source@example.test>",
@@ -899,14 +908,16 @@ test("complete sanitized BEP reanalysis remains three persisted proposals across
     variedDecomposition, ...bepFixture.analyses
   ];
   const analysisService = createNewDealAnalysisService({ callModel: async () => modelResponses.shift() });
-  let stored = [];
+  let stored = structuredClone(bepLegacyFiveProposals);
+  let generatedId = 0;
+  const investments = [];
   const proposalService = createAiUpdateProposalService({
     AI_UPDATE_PROPOSALS_FILE: "proposals.json",
     readJsonFile: () => stored,
     writeJsonFile: (_file, value) => { stored = value; },
     writeMetadata: () => {},
     normalizeAiUpdateProposal: (value) => ({
-      id: value.id || `proposal-${stored.length + 1}`,
+      id: value.id || `generated-proposal-${++generatedId}`,
       status: value.status || "pending",
       proposalType: value.proposalType || "new-deal",
       documents: value.documents || [],
@@ -919,7 +930,7 @@ test("complete sanitized BEP reanalysis remains three persisted proposals across
   const harness = createHarness({
     messages: [],
     exactMessage,
-    investments: [],
+    investments,
     analyzePotentialNewDeals: analysisService.analyzePotentialNewDeals,
     extractPdfTextFromUpload: async ({ filename, fileData }) => ({
       filename,
@@ -929,7 +940,9 @@ test("complete sanitized BEP reanalysis remains three persisted proposals across
       combinedText: bepFixture.attachments.find((attachment) => attachment.name === filename).text,
       diagnostics: {}
     }),
-    saveAiUpdateProposal: proposalService.saveAiUpdateProposal
+    saveAiUpdateProposal: proposalService.saveAiUpdateProposal,
+    sourceProposalSnapshot: proposalService.sourceProposalSnapshot,
+    reconcilePendingSourceOpportunities: proposalService.reconcilePendingSourceOpportunities
   });
   const first = await harness.service.reanalyzeMessage({
     user: { email: "master@example.test" },
@@ -941,19 +954,50 @@ test("complete sanitized BEP reanalysis remains three persisted proposals across
     graphMessageId: "bep-graph-id",
     expectedInternetMessageId: "<bep-source@example.test>"
   });
-  assert.equal(stored.length, 3);
+  assert.equal(stored.length, 5);
   assert.deepEqual(second.proposalIds, first.proposalIds);
-  assert.deepEqual(stored.map((proposal) => proposal.opportunityName), [
-    "Project Care", "Project Pure", "BEP Core Fund VIII"
+  assert.deepEqual(first.proposalIds.sort(), ["bep-core-canonical", "care-canonical", "pure-canonical"]);
+  assert.deepEqual(first.supersededProposalIds.sort(), ["care-legacy-alias", "pure-legacy-alias"]);
+  assert.deepEqual(second.supersededProposalIds, []);
+  const pending = stored.filter((proposal) => proposal.status === "pending");
+  const superseded = stored.filter((proposal) => proposal.status === "superseded");
+  assert.deepEqual(pending.map((proposal) => proposal.opportunityName).sort(), [
+    "BEP Core Fund VIII", "Project Care", "Project Pure"
   ]);
-  const core = stored.find((proposal) => proposal.opportunityName === "BEP Core Fund VIII").dealData;
+  assert.equal(superseded.length, 2);
+  assert.deepEqual(
+    superseded.map((proposal) => [proposal.id, proposal.supersededByProposalIds[0]]).sort(),
+    [["care-legacy-alias", "care-canonical"], ["pure-legacy-alias", "pure-canonical"]]
+  );
+  const core = pending.find((proposal) => proposal.opportunityName === "BEP Core Fund VIII").dealData;
   assert.equal(core.stage.authoritativeValue, "Fundraising closed");
+  assert.equal(core.stage.sourceEvidence, "The fundraising memo is now close.");
+  assert.equal(core.stage.supersededEvidence[0].value, "Active fundraising");
+  assert.equal(core.targetFundSize.authoritativeValue, "$350MM");
+  assert.equal(core.amountCommitted.authoritativeValue, "$94.5MM");
+  assert.equal(core.minimumLpCommitment.authoritativeValue, "$5MM");
   assert.equal(core.historicalTargetDifference.authoritativeValue, "$255.5MM");
   assert.equal(core.historicalTargetDifference.currentAvailability, false);
+  assert.deepEqual(core.historicalTargetDifference.derivedFrom.map((item) => item.field), ["targetFundSize", "amountCommitted"]);
   assert.equal(core.amountRemaining.value, "");
+  assert.equal(core.amountRemaining.evidenceStatus, "unresolved");
+  assert.equal(core.proposedCheckSize.authoritativeValue, "");
+  assert.equal(core.proposedCheckSize.evidenceStatus, "unresolved");
+  assert.deepEqual(core.deadlines, []);
   assert.deepEqual(core.financingTerms.map((claim) => claim.semanticLabel), [
     "Management fee", "Performance fee/carry", "Fund term"
   ]);
+  assert.deepEqual(core.financingTerms.map((claim) => claim.authoritativeValue), [
+    "1.75%", "17.5% carried interest above 8% preferred return", "10 years with two one-year extensions"
+  ]);
+  assert.equal(core.financingTerms.every((claim) => claim.sourceEvidence && claim.evidenceStatus === "verified"), true);
+  assert.deepEqual(pending.map((proposal) => proposal.documents.map((document) => document.graphAttachmentId)).sort(), [
+    ["core-fund-viii"], ["project-care"], ["project-pure"]
+  ]);
+  assert.equal(harness.uploads.length, 3);
+  assert.equal(new Set(stored.map((proposal) => proposal.id)).size, 5);
+  assert.deepEqual(harness.getStored()[0].proposalIds.sort(), ["bep-core-canonical", "care-canonical", "pure-canonical"]);
+  assert.deepEqual(investments, []);
 });
 
 test("read-only intake preview reports allowlist and terminal state without invoking mutation or analysis", async () => {

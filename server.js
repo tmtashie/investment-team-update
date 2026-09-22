@@ -1230,6 +1230,8 @@ function normalizeAiUpdateProposal(entry) {
     createdInvestmentId: String((entry && entry.createdInvestmentId) || "").trim(),
     supersededByProposalIds: normalizeStringList(entry && entry.supersededByProposalIds),
     supersededReason: String((entry && entry.supersededReason) || "").trim(),
+    supersededAt: String((entry && entry.supersededAt) || "").trim(),
+    reanalysisReconciledAt: String((entry && entry.reanalysisReconciledAt) || "").trim(),
     status: normalizeProposalStatus(entry && entry.status),
     reviewedBy: String((entry && (entry.reviewedBy || entry.reviewed_by)) || "").trim(),
     reviewedAt: String((entry && (entry.reviewedAt || entry.reviewed_at)) || "").trim(),
@@ -1409,6 +1411,8 @@ const { analyzePotentialNewDeal, analyzePotentialNewDeals } = createNewDealAnaly
 
 const {
   readAiUpdateProposals,
+  sourceProposalSnapshot,
+  reconcilePendingSourceOpportunities,
   saveAiUpdateProposal,
   updateAiUpdateProposal,
   approveAiUpdateProposal,
@@ -1464,6 +1468,8 @@ const aiEmailIntakeService = createAiEmailIntakeService({
   finalizeAnalysisForResponse,
   enforceProposalSafetyInvariant,
   saveAiUpdateProposal,
+  sourceProposalSnapshot,
+  reconcilePendingSourceOpportunities,
   readInvestments,
   filterInvestmentsForUser,
   entities: INVESTMENT_ENTITIES,
