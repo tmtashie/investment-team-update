@@ -163,14 +163,18 @@ test("intake preview is master-editor-only and exposed in the AI Update Inbox", 
 
 test("source-message reanalysis is explicit, master-editor-only, and does not call approval", () => {
   const serverSource = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+  const proposalSource = fs.readFileSync(path.join(__dirname, "..", "services", "aiUpdateProposalService.js"), "utf8");
   const appSource = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
   const routeStart = serverSource.indexOf('url.pathname === "/api/ai-email-intake/reanalyze"');
   const routeSource = serverSource.slice(routeStart, routeStart + 3000);
   assert.notEqual(routeStart, -1);
   assert.match(routeSource, /requireMasterEditor\(request, response\)/);
-  assert.match(routeSource, /status: "superseded"/);
+  assert.match(routeSource, /reanalyzeMessage/);
+  assert.match(proposalSource, /status: "superseded"/);
+  assert.match(proposalSource, /assertSourceSnapshot/);
   assert.doesNotMatch(routeSource, /approveNewDealProposal|saveInvestment/);
   assert.match(appSource, /window\.confirm\("Reanalyze this preserved source email\?/);
   assert.match(appSource, /fetchJson\("\/api\/ai-email-intake\/reanalyze"/);
   assert.match(appSource, /No investment was created/);
+  assert.match(appSource, /item\.status === "pending".*Active opportunities from source/s);
 });
