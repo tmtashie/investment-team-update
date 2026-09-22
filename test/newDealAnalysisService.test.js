@@ -354,10 +354,11 @@ test("sanitized BEP email decomposes into three evidence-isolated opportunities 
   assert.match(core.stage.sourceEvidence, /fundraising memo is now close/);
   assert.equal(core.stage.supersededEvidence[0].value, "Open for new commitments");
   assert.equal(Array.isArray(core.tractionRevenue), true);
-  assert.equal(core.tractionRevenue[0].authoritativeValue, "$94.5MM in historical commitments");
+  assert.equal(core.tractionRevenue[0].authoritativeValue, "$94.5MM committed and deployed across six investments");
   assert.equal(Array.isArray(core.customersContractsDeployments), true);
   assert.deepEqual(core.customersContractsDeployments.map((claim) => claim.semanticLabel), [
-    "Alpha Services", "Beta Industrial", "Gamma Business Services"
+    "Alpha Services", "Beta Industrial", "Gamma Business Services",
+    "Delta Logistics", "Epsilon Manufacturing", "Zeta Distribution"
   ]);
   assert.equal(Array.isArray(core.financingTerms), true);
   assert.deepEqual(core.financingTerms.map((claim) => claim.evidenceStatus), ["verified", "verified", "verified"]);
@@ -445,6 +446,7 @@ test("repeated sanitized BEP reanalysis refreshes exactly three canonical pendin
   assert.equal(core.historicalTargetDifference.authoritativeValue, "$255.5MM");
   assert.equal(core.historicalTargetDifference.currentAvailability, false);
   assert.equal(core.amountRemaining.value, "");
+  assert.equal(core.proposedCheckSize.value, "");
   assert.equal(core.proposedCheckSize.authoritativeValue, "");
 });
 
