@@ -6823,7 +6823,7 @@ function renderDealFieldEvidence(proposal, field) {
     });
   });
   return evidence.length
-    ? `<ul class="ai-change-list">${evidence.map((item) => `<li><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value || "")}${item.sourceEvidence ? `<br><span class="update-meta">${escapeHtml(item.sourceEvidence)}</span>` : ""}</li>`).join("")}</ul>`
+    ? `<ul class="ai-change-list">${evidence.map((item) => `<li><strong>${escapeHtml(item.semanticLabel ? `${item.semanticLabel} ${item.label.toLowerCase()}` : item.label)}:</strong> ${escapeHtml(item.value || "")}${item.sourceEvidence ? `<br><span class="update-meta">${escapeHtml(item.sourceEvidence)}</span>` : ""}</li>`).join("")}</ul>`
     : "";
 }
 
@@ -6832,7 +6832,7 @@ function renderDealClaimList(proposal, field, emptyMessage) {
     ? proposal.dealData[field]
     : [];
   return claims.length
-    ? `<ul class="ai-change-list">${claims.map((claim) => `<li>${escapeHtml(claim.value || "")}${claim.evidenceStatus ? ` <span class="status-chip">${escapeHtml(claim.evidenceStatus)}</span>` : ""}</li>`).join("")}</ul>`
+    ? `<ul class="ai-change-list">${claims.map((claim) => `<li>${claim.semanticLabel ? `<strong>${escapeHtml(claim.semanticLabel)}:</strong> ` : ""}${escapeHtml(claim.value || "")}${claim.evidenceStatus ? ` <span class="status-chip">${escapeHtml(claim.evidenceStatus)}</span>` : ""}</li>`).join("")}</ul>`
     : `<p class="update-meta">${escapeHtml(emptyMessage)}</p>`;
 }
 
@@ -6852,7 +6852,7 @@ function renderNewDealProposalDetail(proposal) {
   ).join("");
   const sourceSiblings = allAiUpdateProposals.filter((item) =>
     proposal.sourceMessageKey && item.sourceMessageKey === proposal.sourceMessageKey &&
-      (proposal.opportunityId ? Boolean(item.opportunityId) : !item.opportunityId)
+      item.status === "pending" && (proposal.opportunityId ? Boolean(item.opportunityId) : !item.opportunityId)
   );
   const opportunityLabel = proposal.opportunityName || dealClaimValue(proposal, "companyName") || "Unpartitioned source";
   return `
@@ -7667,7 +7667,7 @@ function renderAiUpdateInbox() {
               <p class="update-meta">
                 ${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")}
               </p>
-              ${proposal.opportunityName ? `<p class="update-meta">Opportunity: ${escapeHtml(proposal.opportunityName)} • Same source email: ${escapeHtml(String(allAiUpdateProposals.filter((item) => item.opportunityId && item.sourceMessageKey === proposal.sourceMessageKey).length))}</p>` : ""}
+              ${proposal.opportunityName ? `<p class="update-meta">Opportunity: ${escapeHtml(proposal.opportunityName)} • Active opportunities from source: ${escapeHtml(String(allAiUpdateProposals.filter((item) => item.status === "pending" && item.opportunityId && item.sourceMessageKey === proposal.sourceMessageKey).length))}</p>` : ""}
               <p class="update-notes">${escapeHtml(summarizeText(proposal.summary || "No summary staged.", ""))}</p>
               <p class="update-meta">Created ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
             </article>
@@ -11675,7 +11675,7 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
   }
 
   if (action === "reanalyze-source-message" && proposalId) {
-    const confirmed = window.confirm("Reanalyze this preserved source email? Pending decomposed opportunities will be refreshed in place; a legacy unpartitioned proposal is superseded only after replacements exist. No investment will be created.");
+    const confirmed = window.confirm("Reanalyze this preserved source email? Canonical pending opportunities will be refreshed in place and redundant pending aliases from this source will be superseded with audit links. Approved or rejected records will not be changed. No investment will be created.");
     if (!confirmed) return;
     target.disabled = true;
     try {
@@ -11687,7 +11687,7 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
       await loadAiUpdateProposals();
       selectedAiUpdateProposalId = result.refreshedProposalIds && result.refreshedProposalIds[0] || result.replacementProposalIds && result.replacementProposalIds[0] || "";
       renderAiUpdateProposalDetail();
-      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis created ${result.proposalsCreated || 0} separately reviewable proposals. No investment was created.`;
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis completed with ${result.proposalsCreated || 0} active proposals and ${(result.supersededProposalIds || []).length} newly superseded aliases. No investment was created.`;
     } catch (error) {
       if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
     } finally {
