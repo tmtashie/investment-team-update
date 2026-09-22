@@ -8,6 +8,7 @@ const {
   normalizeDealAnalysis
 } = require("../services/newDealAnalysisService");
 const chrpFixture = require("./fixtures/chrp-new-deal.json");
+const attainableLivingFundFixture = require("./fixtures/attainable-living-fund.json");
 
 const source = {
   sender: "founder@newco.example",
@@ -65,6 +66,166 @@ test("third-party investment, total raise, and remaining raise cannot become pro
     assert.equal(analysis.dealData.proposedCheckSize.evidenceStatus, "unresolved");
     assert.equal(analysis.dealData.proposedCheckSize.authoritativeValue, "");
   });
+});
+
+test("fund opportunity keeps concrete terms and does not force target investors into company fields", () => {
+  const analysis = normalizeDealAnalysis(
+    attainableLivingFundFixture.modelResponse,
+    attainableLivingFundFixture.source,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+
+  assert.equal(analysis.dealData.amountBeingRaised.authoritativeValue, "$450M");
+  assert.equal(analysis.dealData.amountRemaining.authoritativeValue, "$275M");
+  assert.equal(analysis.dealData.proposedCheckSize.evidenceStatus, "unresolved");
+  assert.equal(analysis.dealData.proposedCheckSize.authoritativeValue, "");
+  assert.equal(analysis.dealData.customersContractsDeployments.value, "");
+  assert.doesNotMatch(analysis.dealData.customersContractsDeployments.value, /pensions|endowments|family offices/i);
+
+  const points = analysis.dealData.keyInvestmentPoints.map((item) => item.value).join("\n");
+  assert.match(points, /\$450M fund target with a \$1M minimum investment/);
+  assert.match(points, /Class A and Class B/);
+  assert.match(points, /8% preferred return and quarterly cash distributions/);
+  assert.match(points, /10-year term with two optional one-year extensions/);
+  assert.match(points, /70% existing assets and 30% development/);
+  assert.match(points, /accelerated depreciation/);
+  assert.match(points, /Southeast and Texas/);
+  assert.match(points, /1.5% management fee/);
+  assert.match(points, /20% carried interest/);
+  assert.match(points, /Target investors: Pensions, endowments, and family offices/);
+  assert.doesNotMatch(points, /Strong projected returns for investors/);
+});
+
+test("later-numbered fund names activate fund-specific target-investor handling", () => {
+  const fundSource = {
+    sender: "sponsor@example.com",
+    sourceText: "Growth Fund VI targets family offices. The vehicle invests in software companies."
+  };
+  const analysis = normalizeDealAnalysis(
+    {
+      isPotentialNewDeal: true,
+      companyName: { value: "Growth Fund VI", sourceEvidence: "Growth Fund VI" },
+      customersContractsDeployments: {
+        value: "Family offices",
+        sourceEvidence: "targets family offices"
+      }
+    },
+    fundSource,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+
+  assert.equal(analysis.dealData.customersContractsDeployments.value, "");
+  assert.equal(
+    analysis.dealData.keyInvestmentPoints.some((item) => item.value === "Target investors: Family offices"),
+    true
+  );
+});
+
+test("fund target, minimum, committed, and remaining amounts cannot become Beaman proposed check size", () => {
+  const invalidCheckClaims = [
+    { value: "$1M", sourceEvidence: "the minimum investment is $1M" },
+    { value: "$450M", sourceEvidence: "The Fund has a $450M target" },
+    { value: "$175M", sourceEvidence: "$175M is committed" },
+    { value: "$275M", sourceEvidence: "$275M remaining against the target" }
+  ];
+
+  invalidCheckClaims.forEach((proposedCheckSize) => {
+    const analysis = normalizeDealAnalysis(
+      { ...attainableLivingFundFixture.modelResponse, proposedCheckSize },
+      attainableLivingFundFixture.source,
+      { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+    );
+    assert.equal(analysis.dealData.proposedCheckSize.evidenceStatus, "unresolved");
+    assert.equal(analysis.dealData.proposedCheckSize.authoritativeValue, "");
+  });
+});
+
+test("illustrative property returns remain illustrative and never become actual or guaranteed performance", () => {
+  const analysis = normalizeDealAnalysis(
+    attainableLivingFundFixture.modelResponse,
+    attainableLivingFundFixture.source,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+  const returnPoint = analysis.dealData.keyInvestmentPoints.find((item) => /19% gross IRR/.test(item.value));
+
+  assert.ok(returnPoint);
+  assert.equal(returnPoint.returnBasis, "illustrative");
+  assert.match(returnPoint.value, /^Illustrative scenario:/);
+  assert.doesNotMatch(returnPoint.value, /actual|achieved|realized|guaranteed/i);
+  assert.match(returnPoint.sourceEvidence, /not actual fund performance/);
+  assert.match(returnPoint.sourceEvidence, /not stated as the Fund's expected return/);
+});
+
+test("fund risk extraction keeps source-disclosed categories and drops unsupported filler", () => {
+  const analysis = normalizeDealAnalysis(
+    attainableLivingFundFixture.modelResponse,
+    attainableLivingFundFixture.source,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+  const risks = analysis.dealData.keyRisks.map((item) => item.value).join("\n");
+
+  assert.equal(analysis.dealData.keyRisks.length, 6);
+  assert.match(risks, /Macro\/rate risk/);
+  assert.match(risks, /Supply\/concession risk/);
+  assert.match(risks, /Operational execution risk/);
+  assert.match(risks, /Construction\/development risk/);
+  assert.match(risks, /Counterparty risk/);
+  assert.match(risks, /Regulatory\/REIT\/tax risk/);
+  assert.doesNotMatch(risks, /Generic investment risk/);
+});
+
+test("fund risk extraction rejects generic risk claims backed only by unrelated source text", () => {
+  const analysis = normalizeDealAnalysis(
+    {
+      ...attainableLivingFundFixture.modelResponse,
+      keyRisks: [{
+        value: "Loss of principal",
+        sourceEvidence: "The Fund has a $450M target",
+        sourceLocation: "Email body"
+      }]
+    },
+    attainableLivingFundFixture.source,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+
+  assert.deepEqual(analysis.dealData.keyRisks, []);
+});
+
+test("issuer fundraising stays separate from supported Beaman follow-up", () => {
+  const analysis = normalizeDealAnalysis(
+    attainableLivingFundFixture.modelResponse,
+    attainableLivingFundFixture.source,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+  const nextSteps = analysis.dealData.nextSteps.map((item) => item.value).join("\n");
+  const deadlines = analysis.dealData.deadlines.map((item) => item.value).join("\n");
+
+  assert.doesNotMatch(nextSteps, /complete fundraising/i);
+  assert.doesNotMatch(nextSteps, /agreed|scheduled meeting/i);
+  assert.match(nextSteps, /Optional follow-up: contact the sender with questions or request an introduction/);
+  assert.match(deadlines, /Issuer plan: Complete fundraising by Q2 2027/);
+});
+
+test("conflicting committed and deployed figures remain visible and non-authoritative", () => {
+  const analysis = normalizeDealAnalysis(
+    attainableLivingFundFixture.modelResponse,
+    attainableLivingFundFixture.source,
+    { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false }
+  );
+
+  assert.equal(analysis.dealData.amountCommitted.conflict, true);
+  assert.equal(analysis.dealData.amountCommitted.evidenceStatus, "probable");
+  assert.equal(analysis.dealData.amountCommitted.authoritativeValue, "");
+  assert.match(analysis.dealData.amountCommitted.value, /\$175M committed/);
+  assert.match(analysis.dealData.amountCommitted.value, /\$168M contributed/);
+  assert.equal(analysis.dealData.amountCommitted.conflictingEvidence.length, 2);
+  assert.equal(analysis.dealData.unverifiedClaims.some((item) => item.field === "amountCommitted" && item.conflict), true);
+
+  assert.equal(analysis.dealData.tractionRevenue.conflict, true);
+  assert.equal(analysis.dealData.tractionRevenue.authoritativeValue, "");
+  assert.match(analysis.dealData.tractionRevenue.value, /\$120M deployed across 14 properties/);
+  assert.match(analysis.dealData.tractionRevenue.value, /\$132M deployed across 16 properties/);
+  assert.equal(analysis.dealData.unverifiedClaims.some((item) => item.field === "tractionRevenue" && item.conflict), true);
 });
 
 test("bare deadline text expands to the verified event context", () => {
@@ -131,6 +292,12 @@ test("prompt explicitly labels attachment and URL content untrusted", () => {
   assert.match(prompt, /investment-oriented synthesis/);
   assert.match(prompt, /third-party investment separate/);
   assert.match(prompt, /Fundraise: \$650K remaining to close by year end/);
+  assert.match(prompt, /investment fund\/vehicle/);
+  assert.match(prompt, /must never list target investors as customers/);
+  assert.match(prompt, /illustrative property, model, pro forma/);
+  assert.match(prompt, /Do not invent risks to fill the field/);
+  assert.match(prompt, /Do not reconcile materially conflicting source figures/);
+  assert.match(prompt, /Do not turn an issuer objective such as completing fundraising into our next step/);
 });
 
 test("model call has a developer-level untrusted-content boundary", () => {
