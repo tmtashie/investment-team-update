@@ -11,7 +11,7 @@ const {
 const { createAiUpdateAnalysisService } = require("../services/aiUpdateAnalysisService");
 const { createAiEmailIntakeStateService } = require("../services/aiEmailIntakeStateService");
 const { createAiUpdateProposalService } = require("../services/aiUpdateProposalService");
-const { createNewDealAnalysisService } = require("../services/newDealAnalysisService");
+const { createNewDealAnalysisService, opportunityIdentity } = require("../services/newDealAnalysisService");
 const bepFixture = require("./fixtures/bep-multi-opportunity.json");
 
 const PDF_BYTES = Buffer.from("%PDF-1.4\nmock pdf\n").toString("base64");
@@ -60,6 +60,9 @@ function createHarness({
   exactMessage,
   extractPdfTextFromUpload,
   saveAiUpdateProposal,
+  sourceProposalSnapshot,
+  reconcileSourceProposals,
+  initialState = [],
   allowedSenders = "",
   allowedDomains = "",
   investments = [
@@ -71,7 +74,7 @@ function createHarness({
   const finalizeCalls = [];
   const safetyCalls = [];
   const uploads = [];
-  const { service: stateService, getStored } = createMemoryStateService();
+  const { service: stateService, getStored } = createMemoryStateService(initialState);
   const graphMailService = {
     isConfigured: () => true,
     fetchIntakeMessages: async () => ({
@@ -139,6 +142,15 @@ function createHarness({
       const saved = { ...proposal, id: `proposal-${savedProposals.length + 1}` };
       savedProposals.push(saved);
       return saved;
+    }),
+    sourceProposalSnapshot: sourceProposalSnapshot || (() => []),
+    reconcileSourceProposals: reconcileSourceProposals || (({ proposals }) => {
+      const saved = proposals.map((proposal) => {
+        const value = { ...proposal, id: `proposal-${savedProposals.length + 1}` };
+        savedProposals.push(value);
+        return value;
+      });
+      return { proposals: saved, refreshedProposalIds: saved.map((proposal) => proposal.id), supersededProposalIds: [] };
     }),
     readInvestments: () => investments,
     filterInvestmentsForUser: (investments) => investments,
@@ -860,7 +872,7 @@ test("explicit reanalysis fetches the exact preserved source and only stages pen
   assert.deepEqual(harness.getStored()[0].proposalIds, ["proposal-1", "proposal-2", "proposal-3"]);
 });
 
-test("complete sanitized BEP reanalysis remains three persisted proposals across model naming variation", async () => {
+test("complete BEP reanalysis reconciles five legacy pending siblings to three canonical proposals idempotently", async () => {
   const exactMessage = createMessage({
     id: "bep-graph-id",
     internetMessageId: "<bep-source@example.test>",
@@ -892,33 +904,94 @@ test("complete sanitized BEP reanalysis remains three persisted proposals across
         ? { value: "Active", sourceEvidence: "BEP Core Fund VIII fundraising memo is now close." }
         : opportunity.currentStatus,
       emailEvidence: opportunity.name === "BEP Core Fund VIII" ? [] : opportunity.emailEvidence
-    }))
+    })).concat(bepFixture.decomposition.opportunities.filter((opportunity) =>
+      ["Project Pure", "Project Care"].includes(opportunity.name)
+    ))
   };
   const modelResponses = [
     bepFixture.decomposition, ...bepFixture.analyses,
     variedDecomposition, ...bepFixture.analyses
   ];
   const analysisService = createNewDealAnalysisService({ callModel: async () => modelResponses.shift() });
-  let stored = [];
+  const sourceMessageKey = exactMessage.internetMessageId;
+  const attachmentDocuments = new Map(exactMessage.attachments.map((attachment, index) => [attachment.id, {
+    id: `document-${index + 1}`,
+    name: attachment.name,
+    storedName: `preserved-${index + 1}.pdf`,
+    url: `/uploads/preserved-${index + 1}.pdf`,
+    hash: attachmentHash(attachment.contentBytes),
+    graphAttachmentId: attachment.id,
+    sourceMessageKey
+  }]));
+  const createdAt = "2026-09-22T12:30:00.000Z";
+  let stored = bepFixture.legacyProposals.map((legacy) => ({
+    id: legacy.id,
+    proposalType: "new-deal",
+    status: "pending",
+    sourceMessageKey,
+    opportunityName: legacy.opportunityName,
+    opportunityId: legacy.opportunityName.endsWith("Co-Investment")
+      ? `legacy-${legacy.id}`
+      : opportunityIdentity(legacy.opportunityName),
+    opportunityIdentityKeys: [],
+    documents: [{ ...attachmentDocuments.get(legacy.attachmentId) }],
+    dealData: { companyName: { value: legacy.opportunityName } },
+    createdAt,
+    updatedAt: createdAt
+  })).concat([
+    {
+      id: "approved-control", proposalType: "new-deal", status: "approved", sourceMessageKey,
+      opportunityName: "Project Pure", opportunityId: "approved-control-opportunity", opportunityIdentityKeys: [],
+      documents: [], dealData: { companyName: { value: "Approved historical control" } },
+      reviewedBy: "reviewer@example.test", reviewedAt: createdAt, createdAt, updatedAt: createdAt
+    },
+    {
+      id: "rejected-control", proposalType: "new-deal", status: "rejected", sourceMessageKey,
+      opportunityName: "Project Care", opportunityId: "rejected-control-opportunity", opportunityIdentityKeys: [],
+      documents: [], dealData: { companyName: { value: "Rejected historical control" } },
+      reviewedBy: "reviewer@example.test", reviewedAt: createdAt, createdAt, updatedAt: createdAt
+    }
+  ]);
+  let generatedIds = 0;
+  let investmentApplyCalls = 0;
   const proposalService = createAiUpdateProposalService({
     AI_UPDATE_PROPOSALS_FILE: "proposals.json",
     readJsonFile: () => stored,
     writeJsonFile: (_file, value) => { stored = value; },
     writeMetadata: () => {},
     normalizeAiUpdateProposal: (value) => ({
-      id: value.id || `proposal-${stored.length + 1}`,
+      id: value.id || `generated-${++generatedIds}`,
       status: value.status || "pending",
       proposalType: value.proposalType || "new-deal",
       documents: value.documents || [],
       opportunityIdentityKeys: value.opportunityIdentityKeys || [],
+      createdAt: value.createdAt || createdAt,
+      updatedAt: value.updatedAt || value.createdAt || createdAt,
+      supersededByProposalIds: value.supersededByProposalIds || [],
       ...value
     }),
     createBackupSnapshot: () => {},
-    applyApprovedAiUpdateProposal: () => ({ applied: false })
+    applyApprovedAiUpdateProposal: () => { investmentApplyCalls += 1; return { applied: false }; }
   });
+  const initialState = [{
+    graphMessageId: exactMessage.id,
+    internetMessageId: sourceMessageKey,
+    conversationId: exactMessage.conversationId,
+    mailbox: exactMessage.mailbox,
+    folderId: exactMessage.folderId,
+    subject: exactMessage.subject,
+    sender: exactMessage.sender,
+    receivedDateTime: exactMessage.receivedDateTime,
+    attachmentHashes: [...attachmentDocuments.values()].map((document) => document.hash),
+    attachments: [...attachmentDocuments.values()],
+    processedAt: createdAt,
+    proposalIds: bepFixture.legacyProposals.map((proposal) => proposal.id),
+    status: "processed"
+  }];
   const harness = createHarness({
     messages: [],
     exactMessage,
+    initialState,
     investments: [],
     analyzePotentialNewDeals: analysisService.analyzePotentialNewDeals,
     extractPdfTextFromUpload: async ({ filename, fileData }) => ({
@@ -929,7 +1002,9 @@ test("complete sanitized BEP reanalysis remains three persisted proposals across
       combinedText: bepFixture.attachments.find((attachment) => attachment.name === filename).text,
       diagnostics: {}
     }),
-    saveAiUpdateProposal: proposalService.saveAiUpdateProposal
+    saveAiUpdateProposal: proposalService.saveAiUpdateProposal,
+    sourceProposalSnapshot: proposalService.sourceProposalSnapshot,
+    reconcileSourceProposals: proposalService.reconcileSourceProposals
   });
   const first = await harness.service.reanalyzeMessage({
     user: { email: "master@example.test" },
@@ -941,19 +1016,57 @@ test("complete sanitized BEP reanalysis remains three persisted proposals across
     graphMessageId: "bep-graph-id",
     expectedInternetMessageId: "<bep-source@example.test>"
   });
-  assert.equal(stored.length, 3);
+  assert.equal(stored.length, 7);
   assert.deepEqual(second.proposalIds, first.proposalIds);
-  assert.deepEqual(stored.map((proposal) => proposal.opportunityName), [
-    "Project Care", "Project Pure", "BEP Core Fund VIII"
+  const pending = stored.filter((proposal) => proposal.status === "pending");
+  const superseded = stored.filter((proposal) => proposal.status === "superseded");
+  assert.equal(pending.length, 3);
+  assert.equal(superseded.length, 2);
+  assert.deepEqual(new Set(pending.map((proposal) => proposal.id)), new Set([
+    "bep-core-canonical", "bep-pure-canonical", "bep-care-canonical"
+  ]));
+  assert.equal(superseded.find((proposal) => proposal.id === "bep-pure-alias").supersededByProposalIds[0], "bep-pure-canonical");
+  assert.equal(superseded.find((proposal) => proposal.id === "bep-care-alias").supersededByProposalIds[0], "bep-care-canonical");
+  assert.ok(superseded.every((proposal) => proposal.reviewedAt && proposal.reviewedBy === "master@example.test"));
+  assert.ok(superseded.every((proposal) => proposal.supersededAt === proposal.reviewedAt));
+  assert.deepEqual(new Set(first.supersededProposalIds), new Set(["bep-pure-alias", "bep-care-alias"]));
+  assert.deepEqual(second.supersededProposalIds, []);
+  assert.equal(second.children.length, 3);
+  assert.deepEqual(harness.getStored()[0].proposalIds, first.proposalIds);
+  assert.equal(harness.getStored()[0].attachments.length, 3);
+  assert.equal(harness.uploads.length, 0);
+  assert.equal(investmentApplyCalls, 0);
+  const approvedControl = stored.find((proposal) => proposal.id === "approved-control");
+  const rejectedControl = stored.find((proposal) => proposal.id === "rejected-control");
+  assert.equal(approvedControl.status, "approved");
+  assert.equal(approvedControl.dealData.companyName.value, "Approved historical control");
+  assert.equal(approvedControl.reviewedAt, createdAt);
+  assert.equal(rejectedControl.status, "rejected");
+  assert.equal(rejectedControl.dealData.companyName.value, "Rejected historical control");
+  assert.equal(rejectedControl.reviewedAt, createdAt);
+  assert.deepEqual(pending.map((proposal) => proposal.documents.map((document) => document.graphAttachmentId)).sort(), [
+    ["core-fund-viii"], ["project-care"], ["project-pure"]
   ]);
-  const core = stored.find((proposal) => proposal.opportunityName === "BEP Core Fund VIII").dealData;
+  const core = pending.find((proposal) => proposal.opportunityName === "BEP Core Fund VIII").dealData;
   assert.equal(core.stage.authoritativeValue, "Fundraising closed");
+  assert.notEqual(core.stage.authoritativeValue, "Active fundraising");
+  assert.equal(core.targetFundSize.authoritativeValue, "$350MM");
+  assert.equal(core.amountCommitted.authoritativeValue, "$94.5MM");
+  assert.equal(core.tractionRevenue[0].authoritativeValue, "$94.5MM committed and deployed across six investments");
+  assert.equal(core.minimumLpCommitment.authoritativeValue, "$5MM");
   assert.equal(core.historicalTargetDifference.authoritativeValue, "$255.5MM");
   assert.equal(core.historicalTargetDifference.currentAvailability, false);
   assert.equal(core.amountRemaining.value, "");
+  assert.equal(core.proposedCheckSize.value, "");
+  assert.equal(core.proposedCheckSize.authoritativeValue, "");
   assert.deepEqual(core.financingTerms.map((claim) => claim.semanticLabel), [
     "Management fee", "Performance fee/carry", "Fund term"
   ]);
+  assert.deepEqual(core.financingTerms.map((claim) => claim.authoritativeValue), [
+    "1.75%", "17.5% carried interest above 8% preferred return", "10 years with two one-year extensions"
+  ]);
+  assert.deepEqual(core.deadlines, []);
+  assert.doesNotMatch(JSON.stringify(core), /\[object Object\]/);
 });
 
 test("read-only intake preview reports allowlist and terminal state without invoking mutation or analysis", async () => {
