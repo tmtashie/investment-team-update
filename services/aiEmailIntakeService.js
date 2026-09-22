@@ -157,6 +157,7 @@ function createProposalPayload({ analysis, source, document, documents }) {
     subject: source.subject,
     opportunityName: source.opportunityName || "",
     opportunityId: source.opportunityId || "",
+    opportunityIdentityKeys: Array.isArray(source.opportunityIdentityKeys) ? source.opportunityIdentityKeys : [],
     sourceMessageKey: source.sourceMessageKey || "",
     sourceMessageKeys: source.sourceMessageKey ? [source.sourceMessageKey] : [],
     confidenceScore: analysis.investmentMatch ? analysis.investmentMatch.confidence : 0,
@@ -456,7 +457,8 @@ function createAiEmailIntakeService({
             analyzedAt,
             sourceMessageKey,
             opportunityName: partition.opportunity.name,
-            opportunityId: partition.opportunity.opportunityId
+            opportunityId: partition.opportunity.opportunityId,
+            opportunityIdentityKeys: partition.opportunity.opportunityIdentityKeys
           },
           investments,
           entitiesForUser,
@@ -494,6 +496,7 @@ function createAiEmailIntakeService({
         matchResult: analysis.matchResult,
         opportunityName: partition.opportunity.name,
         opportunityId: partition.opportunity.opportunityId,
+        opportunityIdentityKeys: partition.opportunity.opportunityIdentityKeys,
         opportunityFingerprint: analysis.opportunityFingerprint,
         sourceMessageKey,
         sourceMessageKeys: [sourceMessageKey],

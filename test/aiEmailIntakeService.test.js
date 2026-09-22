@@ -10,6 +10,9 @@ const {
 } = require("../services/aiEmailIntakeService");
 const { createAiUpdateAnalysisService } = require("../services/aiUpdateAnalysisService");
 const { createAiEmailIntakeStateService } = require("../services/aiEmailIntakeStateService");
+const { createAiUpdateProposalService } = require("../services/aiUpdateProposalService");
+const { createNewDealAnalysisService } = require("../services/newDealAnalysisService");
+const bepFixture = require("./fixtures/bep-multi-opportunity.json");
 
 const PDF_BYTES = Buffer.from("%PDF-1.4\nmock pdf\n").toString("base64");
 
@@ -56,6 +59,7 @@ function createHarness({
   analyzePotentialNewDeals,
   exactMessage,
   extractPdfTextFromUpload,
+  saveAiUpdateProposal,
   allowedSenders = "",
   allowedDomains = "",
   investments = [
@@ -131,11 +135,11 @@ function createHarness({
       safetyCalls.push(proposal);
       return { ...proposal, safetyChecked: true };
     },
-    saveAiUpdateProposal: (proposal) => {
+    saveAiUpdateProposal: saveAiUpdateProposal || ((proposal) => {
       const saved = { ...proposal, id: `proposal-${savedProposals.length + 1}` };
       savedProposals.push(saved);
       return saved;
-    },
+    }),
     readInvestments: () => investments,
     filterInvestmentsForUser: (investments) => investments,
     entities: [{ id: "beaman-ventures", name: "Beaman Ventures" }],
@@ -854,6 +858,102 @@ test("explicit reanalysis fetches the exact preserved source and only stages pen
   assert.equal(result.proposalsCreated, 3);
   assert.deepEqual(harness.savedProposals.map((proposal) => proposal.status), ["pending", "pending", "pending"]);
   assert.deepEqual(harness.getStored()[0].proposalIds, ["proposal-1", "proposal-2", "proposal-3"]);
+});
+
+test("complete sanitized BEP reanalysis remains three persisted proposals across model naming variation", async () => {
+  const exactMessage = createMessage({
+    id: "bep-graph-id",
+    internetMessageId: "<bep-source@example.test>",
+    subject: "BEP background and teasers",
+    bodyContentType: "text",
+    body: bepFixture.emailBody,
+    attachments: bepFixture.attachments.map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      contentType: "application/pdf",
+      size: attachment.text.length,
+      contentBytes: Buffer.from(attachment.text).toString("base64"),
+      isPdf: true
+    })),
+    pdfAttachments: bepFixture.attachments.map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      contentType: "application/pdf",
+      contentBytes: Buffer.from(attachment.text).toString("base64")
+    }))
+  });
+  const variedDecomposition = {
+    opportunities: bepFixture.decomposition.opportunities.map((opportunity) => ({
+      ...opportunity,
+      name: opportunity.name === "Project Pure"
+        ? "Project Pure Co-Investment"
+        : opportunity.name === "Project Care" ? "Opportunity: Project Care Co-Invest" : opportunity.name,
+      currentStatus: opportunity.name === "BEP Core Fund VIII"
+        ? { value: "Active", sourceEvidence: "BEP Core Fund VIII fundraising memo is now close." }
+        : opportunity.currentStatus,
+      emailEvidence: opportunity.name === "BEP Core Fund VIII" ? [] : opportunity.emailEvidence
+    }))
+  };
+  const modelResponses = [
+    bepFixture.decomposition, ...bepFixture.analyses,
+    variedDecomposition, ...bepFixture.analyses
+  ];
+  const analysisService = createNewDealAnalysisService({ callModel: async () => modelResponses.shift() });
+  let stored = [];
+  const proposalService = createAiUpdateProposalService({
+    AI_UPDATE_PROPOSALS_FILE: "proposals.json",
+    readJsonFile: () => stored,
+    writeJsonFile: (_file, value) => { stored = value; },
+    writeMetadata: () => {},
+    normalizeAiUpdateProposal: (value) => ({
+      id: value.id || `proposal-${stored.length + 1}`,
+      status: value.status || "pending",
+      proposalType: value.proposalType || "new-deal",
+      documents: value.documents || [],
+      opportunityIdentityKeys: value.opportunityIdentityKeys || [],
+      ...value
+    }),
+    createBackupSnapshot: () => {},
+    applyApprovedAiUpdateProposal: () => ({ applied: false })
+  });
+  const harness = createHarness({
+    messages: [],
+    exactMessage,
+    investments: [],
+    analyzePotentialNewDeals: analysisService.analyzePotentialNewDeals,
+    extractPdfTextFromUpload: async ({ filename, fileData }) => ({
+      filename,
+      buffer: Buffer.from(fileData, "base64"),
+      pageCount: 1,
+      pages: [],
+      combinedText: bepFixture.attachments.find((attachment) => attachment.name === filename).text,
+      diagnostics: {}
+    }),
+    saveAiUpdateProposal: proposalService.saveAiUpdateProposal
+  });
+  const first = await harness.service.reanalyzeMessage({
+    user: { email: "master@example.test" },
+    graphMessageId: "bep-graph-id",
+    expectedInternetMessageId: "<bep-source@example.test>"
+  });
+  const second = await harness.service.reanalyzeMessage({
+    user: { email: "master@example.test" },
+    graphMessageId: "bep-graph-id",
+    expectedInternetMessageId: "<bep-source@example.test>"
+  });
+  assert.equal(stored.length, 3);
+  assert.deepEqual(second.proposalIds, first.proposalIds);
+  assert.deepEqual(stored.map((proposal) => proposal.opportunityName), [
+    "Project Care", "Project Pure", "BEP Core Fund VIII"
+  ]);
+  const core = stored.find((proposal) => proposal.opportunityName === "BEP Core Fund VIII").dealData;
+  assert.equal(core.stage.authoritativeValue, "Fundraising closed");
+  assert.equal(core.historicalTargetDifference.authoritativeValue, "$255.5MM");
+  assert.equal(core.historicalTargetDifference.currentAvailability, false);
+  assert.equal(core.amountRemaining.value, "");
+  assert.deepEqual(core.financingTerms.map((claim) => claim.semanticLabel), [
+    "Management fee", "Performance fee/carry", "Fund term"
+  ]);
 });
 
 test("read-only intake preview reports allowlist and terminal state without invoking mutation or analysis", async () => {

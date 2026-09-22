@@ -1219,6 +1219,7 @@ function normalizeAiUpdateProposal(entry) {
     matchResult: normalizeJsonObject(entry && entry.matchResult, {}),
     opportunityName: String((entry && entry.opportunityName) || "").trim(),
     opportunityId: String((entry && entry.opportunityId) || "").trim(),
+    opportunityIdentityKeys: normalizeStringList(entry && entry.opportunityIdentityKeys),
     opportunityFingerprint: String((entry && entry.opportunityFingerprint) || "").trim(),
     sourceMessageKey: String((entry && entry.sourceMessageKey) || "").trim(),
     sourceMessageKeys: normalizeStringList(entry && entry.sourceMessageKeys),
@@ -1265,7 +1266,14 @@ function applyNewDealEdits(proposal, payload) {
     const value = String(editedFields[field] || "").trim().slice(0, 2000);
     if (Array.isArray(existingValue)) {
       const displayedValue = existingValue.map((claim) => String((claim && claim.value) || "").trim()).filter(Boolean).join("\n");
-      if (value === displayedValue) return;
+      const labeledDisplayedValue = existingValue.map((claim) => {
+        const claimValue = String((claim && claim.value) || "").trim();
+        const label = String((claim && claim.semanticLabel) || "").trim();
+        return label && claimValue && !claimValue.toLowerCase().startsWith(label.toLowerCase())
+          ? `${label}: ${claimValue}`
+          : claimValue;
+      }).filter(Boolean).join("\n");
+      if (value === displayedValue || value === labeledDisplayedValue) return;
     }
     const existing = existingValue && typeof existingValue === "object" && !Array.isArray(existingValue) ? existingValue : {};
     const unchangedVerified = existing.evidenceStatus === "verified" && value === existing.value;

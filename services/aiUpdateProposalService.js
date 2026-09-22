@@ -33,10 +33,26 @@ function createAiUpdateProposalService({
       ...entry,
       updatedAt: new Date().toISOString()
     });
-    const exactSourceOpportunity = normalized.sourceMessageKey && normalized.opportunityId && proposals.find(
+    let exactSourceOpportunity = normalized.sourceMessageKey && normalized.opportunityId && proposals.find(
       (proposal) => proposal.sourceMessageKey === normalized.sourceMessageKey &&
         proposal.opportunityId === normalized.opportunityId
     );
+    if (!exactSourceOpportunity && replacePendingSourceOpportunity && normalized.sourceMessageKey) {
+      const incomingKeys = new Set([
+        normalized.opportunityId,
+        ...(normalized.opportunityIdentityKeys || [])
+      ].filter(Boolean));
+      const documentKeys = new Set((normalized.documents || [])
+        .flatMap((document) => [document.hash, document.graphAttachmentId].filter(Boolean)));
+      exactSourceOpportunity = proposals.find((proposal) => {
+        if (proposal.sourceMessageKey !== normalized.sourceMessageKey || proposal.status !== "pending") return false;
+        const existingKeys = [proposal.opportunityId, ...(proposal.opportunityIdentityKeys || [])].filter(Boolean);
+        if (existingKeys.some((key) => incomingKeys.has(key))) return true;
+        return (proposal.documents || []).some((document) =>
+          [document.hash, document.graphAttachmentId].filter(Boolean).some((key) => documentKeys.has(key))
+        );
+      });
+    }
     if (exactSourceOpportunity) {
       if (replacePendingSourceOpportunity && exactSourceOpportunity.status === "pending") {
         return updateAiUpdateProposal(exactSourceOpportunity.id, {

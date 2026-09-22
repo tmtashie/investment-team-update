@@ -6794,6 +6794,8 @@ function getAiProposalTypeLabel(proposal) {
 }
 
 function dealClaimValue(proposal, field) {
+  const safety = getAiUpdateSafety();
+  if (safety.formatDealClaimValue) return safety.formatDealClaimValue(proposal, field);
   const claim = proposal && proposal.dealData && proposal.dealData[field];
   const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
   return claims.map((item) => {

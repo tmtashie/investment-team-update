@@ -4,7 +4,7 @@
     {
       "id": "core-fund-viii",
       "name": "BEP Core Fund VIII.pdf",
-      "text": "BEP Core Fund VIII is a private equity fund. The target fund size is $350MM. The minimum LP commitment is $5MM. The fund held an initial close on $94.5MM in historical commitments. The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck. The deck says the fund is open for new commitments. The portfolio includes control investments in business services and industrial companies. The term is ten years with extension options. Management fee is 2% during the investment period."
+      "text": "BEP Core Fund VIII is a private equity fund. The target fund size is $350MM. The minimum LP commitment is $5MM. The fund held an initial close on $94.5MM in historical commitments. The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck. The deck says the fund is open for new commitments. The portfolio includes a $15.0MM investment in Alpha Services, a $7.5MM investment in Beta Industrial, and a $22.0MM investment in Gamma Business Services. The fund term is 10 years. Management fee is 1.75%. Performance fee/carry is 17.5%."
     },
     {
       "id": "project-pure",
@@ -50,16 +50,20 @@
         { "value": "$94.5MM in historical commitments", "sourceEvidence": "The fund held an initial close on $94.5MM in historical commitments." }
       ],
       "customersContractsDeployments": [
-        { "value": "Control investments in business services and industrial companies", "sourceEvidence": "The portfolio includes control investments in business services and industrial companies." }
+        { "value": "$15.0MM", "companyName": "Alpha Services", "sourceEvidence": "The portfolio includes a $15.0MM investment in Alpha Services" },
+        { "value": "$7.5MM", "companyName": "Beta Industrial", "sourceEvidence": "a $7.5MM investment in Beta Industrial" },
+        { "value": "$22.0MM", "companyName": "Gamma Business Services", "sourceEvidence": "a $22.0MM investment in Gamma Business Services" }
       ],
       "targetFundSize": { "value": "$350MM", "sourceEvidence": "The target fund size is $350MM." },
       "minimumLpCommitment": { "value": "$5MM", "sourceEvidence": "The minimum LP commitment is $5MM." },
       "amountCommitted": { "value": "$94.5MM", "sourceEvidence": "The fund held an initial close on $94.5MM in historical commitments." },
-      "amountRemaining": { "value": "$255.5MM", "sourceEvidence": "The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck." },
+      "amountRemaining": { "value": "", "sourceEvidence": "" },
+      "historicalTargetDifference": { "value": "$255.5MM", "sourceEvidence": "The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck." },
       "proposedCheckSize": { "value": "$5MM", "sourceEvidence": "The minimum LP commitment is $5MM." },
       "financingTerms": [
-        { "value": "Ten-year term with extension options", "sourceEvidence": "The term is ten years with extension options." },
-        { "value": "2% management fee during the investment period", "sourceEvidence": "Management fee is 2% during the investment period." }
+        { "value": "1.75%", "sourceEvidence": "Management fee is 1.75%." },
+        { "value": "17.5%", "sourceEvidence": "Performance fee/carry is 17.5%." },
+        { "value": "10 years", "sourceEvidence": "The fund term is 10 years." }
       ]
     },
     {
