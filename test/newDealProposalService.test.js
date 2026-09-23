@@ -164,6 +164,55 @@ test("transactional reconciliation supersedes a legacy unpartitioned source inst
   assert.equal(harness.getStored().find((proposal) => proposal.id === "legacy-source").status, "superseded");
 });
 
+test("transactional reconciliation leaves unmatched pending siblings unchanged without deterministic evidence", () => {
+  const harness = createHarness();
+  harness.service.saveAiUpdateProposal({
+    id: "pure-canonical",
+    proposalType: "new-deal",
+    sourceMessageKey: "message-1",
+    opportunityName: "Project Pure",
+    opportunityId: "pure-id",
+    opportunityIdentityKeys: ["pure-id"],
+    documents: [{ graphAttachmentId: "pure-attachment" }],
+    summary: "Original Pure analysis",
+    status: "pending"
+  });
+  harness.service.saveAiUpdateProposal({
+    id: "unmatched-pending",
+    proposalType: "new-deal",
+    sourceMessageKey: "message-1",
+    opportunityName: "Unrelated Opportunity",
+    opportunityId: "unrelated-id",
+    opportunityIdentityKeys: ["unrelated-id"],
+    documents: [{ graphAttachmentId: "unrelated-attachment" }],
+    summary: "Must remain pending",
+    status: "pending"
+  });
+
+  const result = harness.service.reconcileSourceProposals({
+    sourceMessageKey: "message-1",
+    expectedSnapshot: harness.service.sourceProposalSnapshot("message-1"),
+    reviewer: "master@example.test",
+    proposals: [{
+      proposalType: "new-deal",
+      sourceMessageKey: "message-1",
+      opportunityName: "Project Pure",
+      opportunityId: "pure-id",
+      opportunityIdentityKeys: ["pure-id"],
+      documents: [{ graphAttachmentId: "pure-attachment" }],
+      summary: "Refreshed Pure analysis",
+      status: "pending"
+    }]
+  });
+
+  assert.deepEqual(result.refreshedProposalIds, ["pure-canonical"]);
+  assert.deepEqual(result.supersededProposalIds, []);
+  const unmatched = harness.getStored().find((proposal) => proposal.id === "unmatched-pending");
+  assert.equal(unmatched.status, "pending");
+  assert.equal(unmatched.summary, "Must remain pending");
+  assert.deepEqual(unmatched.supersededByProposalIds || [], []);
+});
+
 test("multiple emails for one opportunity coalesce attachments by hash", () => {
   const harness = createHarness();
   const first = harness.service.saveAiUpdateProposal({
