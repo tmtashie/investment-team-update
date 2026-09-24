@@ -157,6 +157,9 @@ function createAiUpdateProposalService({
     const pendingSiblings = all.filter((proposal) =>
       proposal.sourceMessageKey === sourceMessageKey && proposal.status === "pending"
     );
+    const reviewedSiblings = all.filter((proposal) =>
+      proposal.sourceMessageKey === sourceMessageKey && ["approved", "rejected"].includes(proposal.status)
+    );
     const normalizedIncoming = incoming.map((entry) => normalizeAiUpdateProposal({
       ...entry,
       sourceMessageKey,
@@ -177,6 +180,11 @@ function createAiUpdateProposalService({
       const matches = pendingSiblings.filter((proposal) =>
         !usedCanonicalIds.has(proposal.id) && proposalsMatch(proposal, candidate)
       );
+      if (matches.length === 0 && reviewedSiblings.some((proposal) => proposalsMatch(proposal, candidate))) {
+        const error = new Error("This source opportunity already has a reviewed proposal; reanalysis did not create a replacement.");
+        error.statusCode = 409;
+        throw error;
+      }
       const canonical = matches.find((proposal) => proposal.opportunityId === candidate.opportunityId) ||
         matches.filter((proposal) => proposal.opportunityId).sort((left, right) =>
           String(left.createdAt || "").localeCompare(String(right.createdAt || "")) || left.id.localeCompare(right.id)

@@ -134,6 +134,42 @@ test("transactional source reconciliation aborts when a pending sibling changes 
   assert.equal(harness.getStored()[0].summary, "Human reviewed");
 });
 
+test("transactional reconciliation fails closed when only a reviewed proposal matches", () => {
+  for (const status of ["approved", "rejected"]) {
+    const harness = createHarness();
+    harness.service.saveAiUpdateProposal({
+      id: `${status}-pure`,
+      proposalType: "new-deal",
+      sourceMessageKey: "message-1",
+      opportunityName: "Project Pure",
+      opportunityId: "pure-id",
+      opportunityIdentityKeys: ["pure-id"],
+      summary: "Human reviewed",
+      status
+    });
+    const snapshot = harness.service.sourceProposalSnapshot("message-1");
+
+    assert.throws(() => harness.service.reconcileSourceProposals({
+      sourceMessageKey: "message-1",
+      expectedSnapshot: snapshot,
+      reviewer: "master@example.test",
+      proposals: [{
+        proposalType: "new-deal",
+        sourceMessageKey: "message-1",
+        opportunityName: "Project Pure Co-Investment",
+        opportunityId: "pure-canonical-id",
+        opportunityIdentityKeys: ["pure-id", "pure-canonical-id"],
+        summary: "AI replacement",
+        status: "pending"
+      }]
+    }), /already has a reviewed proposal/);
+
+    assert.equal(harness.getStored().length, 1);
+    assert.equal(harness.getStored()[0].status, status);
+    assert.equal(harness.getStored()[0].summary, "Human reviewed");
+  }
+});
+
 test("transactional reconciliation supersedes a legacy unpartitioned source instead of reusing it as a canonical identity", () => {
   const harness = createHarness();
   harness.service.saveAiUpdateProposal({
