@@ -44,6 +44,25 @@
     ).trim();
   }
 
+  function dealClaimLabel(item) {
+    if (!item || typeof item !== "object") return "";
+    return String(item.semanticLabel || "").trim();
+  }
+
+  function formatDealClaimItem(item) {
+    if (!item || typeof item !== "object") return String(item || "");
+    const value = item.value === undefined || item.value === null ? "" : String(item.value).trim();
+    const label = dealClaimLabel(item);
+    if (!label || !value || compactText(value).startsWith(compactText(label))) return value;
+    return `${label}: ${value}`;
+  }
+
+  function formatDealClaimValue(proposal, field) {
+    const claim = proposal && proposal.dealData && proposal.dealData[field];
+    const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+    return claims.map(formatDealClaimItem).filter(Boolean).join("\n");
+  }
+
   function isVerified(item) {
     return String((item && item.evidenceStatus) || "").trim().toLowerCase() === "verified";
   }
@@ -193,6 +212,9 @@
 
   const api = {
     buildUserFacingWarnings,
+    dealClaimLabel,
+    formatDealClaimItem,
+    formatDealClaimValue,
     getReportUpdatesEmptyMessage,
     getItemValue,
     isActionable,

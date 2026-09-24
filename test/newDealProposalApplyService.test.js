@@ -142,3 +142,29 @@ test("manual edits cannot upgrade changed financial terms to verified", () => {
   assert.equal(changed.proposedCheckSize.evidenceStatus, "unresolved");
   assert.equal(changed.proposedCheckSize.authoritativeValue, "");
 });
+
+test("saving an unchanged structured field preserves its evidence objects", () => {
+  const { applyNewDealEdits } = require("../server")._test;
+  const claims = [
+    { value: "Ten-year term", sourceEvidence: "The term is ten years.", evidenceStatus: "verified", authoritativeValue: "Ten-year term" },
+    { value: "2% management fee", sourceEvidence: "Management fee is 2%.", evidenceStatus: "verified", authoritativeValue: "2% management fee" }
+  ];
+  const result = applyNewDealEdits(
+    { dealData: { financingTerms: claims } },
+    { dealData: { financingTerms: "Ten-year term\n2% management fee" } }
+  );
+  assert.deepEqual(result.financingTerms, claims);
+});
+
+test("saving unchanged labeled structured claims preserves evidence and provenance", () => {
+  const { applyNewDealEdits } = require("../server")._test;
+  const claims = [
+    { value: "1.75%", semanticLabel: "Management fee", sourceEvidence: "Management fee is 1.75%.", evidenceStatus: "verified", authoritativeValue: "1.75%" },
+    { value: "10 years", semanticLabel: "Fund term", sourceEvidence: "The fund term is 10 years.", evidenceStatus: "verified", authoritativeValue: "10 years" }
+  ];
+  const result = applyNewDealEdits(
+    { dealData: { financingTerms: claims } },
+    { dealData: { financingTerms: "Management fee: 1.75%\nFund term: 10 years" } }
+  );
+  assert.deepEqual(result.financingTerms, claims);
+});

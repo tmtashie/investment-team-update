@@ -1,7 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   buildUserFacingWarnings,
+  formatDealClaimValue,
   getReportUpdatesEmptyMessage,
   isHighRiskNumeric,
   sanitizeForActionableView,
@@ -49,6 +52,34 @@ test("frontend warning helper never renders structured warning objects as object
   assert.equal(warningMessage({ reason: "Readable reason." }), "Readable reason.");
   assert.equal(warningMessage({ nested: { value: true } }), "");
   assert.notEqual(warningMessage({ message: "Readable warning." }), "[object Object]");
+});
+
+test("structured deal claims render evidence-backed semantic labels with their values", () => {
+  const proposal = {
+    dealData: {
+      financingTerms: [
+        { value: "1.75%", semanticLabel: "Management fee", sourceEvidence: "Management fee is 1.75%." },
+        { value: "17.5%", semanticLabel: "Performance fee/carry", sourceEvidence: "Performance fee/carry is 17.5%." },
+        { value: "10 years", semanticLabel: "Fund term", sourceEvidence: "The fund term is 10 years." }
+      ],
+      customersContractsDeployments: [
+        { value: "$15.0MM", semanticLabel: "Alpha Services", sourceEvidence: "$15.0MM investment in Alpha Services" },
+        { value: "$7.5MM", semanticLabel: "Beta Industrial", sourceEvidence: "$7.5MM investment in Beta Industrial" }
+      ],
+      historicalTargetDifference: {
+        value: "$255.5MM",
+        currentAvailability: false,
+        sourceEvidence: "The $255.5MM difference was historically unfunded."
+      }
+    }
+  };
+  assert.equal(formatDealClaimValue(proposal, "financingTerms"), [
+    "Management fee: 1.75%", "Performance fee/carry: 17.5%", "Fund term: 10 years"
+  ].join("\n"));
+  assert.equal(formatDealClaimValue(proposal, "customersContractsDeployments"), [
+    "Alpha Services: $15.0MM", "Beta Industrial: $7.5MM"
+  ].join("\n"));
+  assert.equal(formatDealClaimValue(proposal, "historicalTargetDifference"), "$255.5MM");
 });
 
 test("frontend user-facing warnings hide internal sanitizer messages", () => {
@@ -113,4 +144,33 @@ test("report update empty state distinguishes no rows from filtered-out rows", (
     getReportUpdatesEmptyMessage(2, 1),
     "No saved updates or reports yet. Add your first monthly report, quarterly letter, capital call, or call note above."
   );
+});
+
+test("intake preview is master-editor-only and exposed in the AI Update Inbox", () => {
+  const serverSource = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+  const indexSource = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  const appSource = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const routeStart = serverSource.indexOf('url.pathname === "/api/ai-email-intake/preview"');
+  const routeSource = serverSource.slice(routeStart, routeStart + 500);
+
+  assert.notEqual(routeStart, -1);
+  assert.match(routeSource, /requireMasterEditor\(request, response\)/);
+  assert.match(indexSource, /id="previewAiEmailIntakeButton"/);
+  assert.match(indexSource, /id="aiEmailIntakePreviewResult"/);
+  assert.match(appSource, /fetchJson\("\/api\/ai-email-intake\/preview"\)/);
+  assert.match(appSource, /isMasterEditor\(\).*previewAiEmailIntakeButton/s);
+});
+
+test("source-message reanalysis is explicit, master-editor-only, and does not call approval", () => {
+  const serverSource = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+  const appSource = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const routeStart = serverSource.indexOf('url.pathname === "/api/ai-email-intake/reanalyze"');
+  const routeSource = serverSource.slice(routeStart, routeStart + 3000);
+  assert.notEqual(routeStart, -1);
+  assert.match(routeSource, /requireMasterEditor\(request, response\)/);
+  assert.match(routeSource, /status: "superseded"/);
+  assert.doesNotMatch(routeSource, /approveNewDealProposal|saveInvestment/);
+  assert.match(appSource, /window\.confirm\("Reanalyze this preserved source email\?/);
+  assert.match(appSource, /fetchJson\("\/api\/ai-email-intake\/reanalyze"/);
+  assert.match(appSource, /No investment was created/);
 });

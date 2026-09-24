@@ -1,0 +1,90 @@
+{
+  "emailBody": "BEP Core Fund VIII fundraising memo is now close. Project Pure is oversubscribed. Project Care is under LOI.",
+  "attachments": [
+    {
+      "id": "core-fund-viii",
+      "name": "BEP Core Fund VIII.pdf",
+      "text": "BEP Core Fund VIII is a private equity fund. The target fund size is $350MM. The minimum LP commitment is $5MM. The fund held an initial close on $94.5MM in historical commitments. The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck. The deck says the fund is open for new commitments. The portfolio includes a $15.0MM investment in Alpha Services, a $7.5MM investment in Beta Industrial, and a $22.0MM investment in Gamma Business Services. The fund term is 10 years. Management fee is 1.75%. Performance fee/carry is 17.5%."
+    },
+    {
+      "id": "project-pure",
+      "name": "Project Pure Co-Investment.pdf",
+      "text": "Project Pure is a specialty ingredients co-investment. Revenue is $240M and adjusted EBITDA is $42M. Total co-investment availability is $80M-$105M. The deck describes allocations as open."
+    },
+    {
+      "id": "project-care",
+      "name": "Project Care Co-Investment.pdf",
+      "text": "Project Care is an adult day health and HCBS co-investment. The business operates 54 centers serving 8,000 members. Total co-investment availability is approximately $150M-$165M. The deck describes the transaction as in diligence."
+    }
+  ],
+  "decomposition": {
+    "opportunities": [
+      {
+        "name": "BEP Core Fund VIII",
+        "attachmentIds": ["core-fund-viii"],
+        "emailEvidence": ["BEP Core Fund VIII fundraising memo is now close."],
+        "currentStatus": { "value": "Fundraising closed", "sourceEvidence": "fundraising memo is now close", "sourceLocation": "Email body" }
+      },
+      {
+        "name": "Project Pure",
+        "attachmentIds": ["project-pure"],
+        "emailEvidence": ["Project Pure is oversubscribed."],
+        "currentStatus": { "value": "Oversubscribed", "sourceEvidence": "Project Pure is oversubscribed.", "sourceLocation": "Email body" }
+      },
+      {
+        "name": "Project Care",
+        "attachmentIds": ["project-care"],
+        "emailEvidence": ["Project Care is under LOI."],
+        "currentStatus": { "value": "Under LOI", "sourceEvidence": "Project Care is under LOI.", "sourceLocation": "Email body" }
+      }
+    ]
+  },
+  "analyses": [
+    {
+      "isPotentialNewDeal": true,
+      "classificationReason": "Fund opportunity.",
+      "companyName": { "value": "BEP Core Fund VIII", "sourceEvidence": "BEP Core Fund VIII is a private equity fund." },
+      "whatCompanyDoes": { "value": "Private equity fund", "sourceEvidence": "BEP Core Fund VIII is a private equity fund." },
+      "stage": { "value": "Open for new commitments", "sourceEvidence": "The deck says the fund is open for new commitments." },
+      "tractionRevenue": [
+        { "value": "$94.5MM in historical commitments", "sourceEvidence": "The fund held an initial close on $94.5MM in historical commitments." }
+      ],
+      "customersContractsDeployments": [
+        { "value": "$15.0MM", "companyName": "Alpha Services", "sourceEvidence": "The portfolio includes a $15.0MM investment in Alpha Services" },
+        { "value": "$7.5MM", "companyName": "Beta Industrial", "sourceEvidence": "a $7.5MM investment in Beta Industrial" },
+        { "value": "$22.0MM", "companyName": "Gamma Business Services", "sourceEvidence": "a $22.0MM investment in Gamma Business Services" }
+      ],
+      "targetFundSize": { "value": "$350MM", "sourceEvidence": "The target fund size is $350MM." },
+      "minimumLpCommitment": { "value": "$5MM", "sourceEvidence": "The minimum LP commitment is $5MM." },
+      "amountCommitted": { "value": "$94.5MM", "sourceEvidence": "The fund held an initial close on $94.5MM in historical commitments." },
+      "amountRemaining": { "value": "", "sourceEvidence": "" },
+      "historicalTargetDifference": { "value": "$255.5MM", "sourceEvidence": "The $255.5MM difference between the target and historical commitments was unfunded at the time of the deck." },
+      "proposedCheckSize": { "value": "$5MM", "sourceEvidence": "The minimum LP commitment is $5MM." },
+      "financingTerms": [
+        { "value": "1.75%", "sourceEvidence": "Management fee is 1.75%." },
+        { "value": "17.5%", "sourceEvidence": "Performance fee/carry is 17.5%." },
+        { "value": "10 years", "sourceEvidence": "The fund term is 10 years." }
+      ]
+    },
+    {
+      "isPotentialNewDeal": true,
+      "classificationReason": "Specialty ingredients co-investment.",
+      "companyName": { "value": "Project Pure", "sourceEvidence": "Project Pure is a specialty ingredients co-investment." },
+      "whatCompanyDoes": { "value": "Specialty ingredients co-investment", "sourceEvidence": "Project Pure is a specialty ingredients co-investment." },
+      "stage": { "value": "Allocations open", "sourceEvidence": "The deck describes allocations as open." },
+      "tractionRevenue": { "value": "$240M revenue and $42M adjusted EBITDA", "sourceEvidence": "Revenue is $240M and adjusted EBITDA is $42M." },
+      "coInvestmentAvailability": { "value": "$80M-$105M", "sourceEvidence": "Total co-investment availability is $80M-$105M." },
+      "proposedCheckSize": { "value": "$80M-$105M", "sourceEvidence": "Total co-investment availability is $80M-$105M." }
+    },
+    {
+      "isPotentialNewDeal": true,
+      "classificationReason": "Adult day health and HCBS co-investment.",
+      "companyName": { "value": "Project Care", "sourceEvidence": "Project Care is an adult day health and HCBS co-investment." },
+      "whatCompanyDoes": { "value": "Adult day health and HCBS", "sourceEvidence": "Project Care is an adult day health and HCBS co-investment." },
+      "stage": { "value": "In diligence", "sourceEvidence": "The deck describes the transaction as in diligence." },
+      "tractionRevenue": { "value": "54 centers serving 8,000 members", "sourceEvidence": "The business operates 54 centers serving 8,000 members." },
+      "coInvestmentAvailability": { "value": "approximately $150M-$165M", "sourceEvidence": "Total co-investment availability is approximately $150M-$165M." },
+      "proposedCheckSize": { "value": "$150M-$165M", "sourceEvidence": "Total co-investment availability is approximately $150M-$165M." }
+    }
+  ]
+}
