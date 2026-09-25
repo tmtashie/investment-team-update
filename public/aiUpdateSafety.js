@@ -57,10 +57,133 @@
     return `${label}: ${value}`;
   }
 
-  function formatDealClaimValue(proposal, field) {
+  function claimItems(proposal, field) {
     const claim = proposal && proposal.dealData && proposal.dealData[field];
-    const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
-    return claims.map(formatDealClaimItem).filter(Boolean).join("\n");
+    return Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  }
+
+  function claimValue(proposal, field) {
+    const item = claimItems(proposal, field)[0];
+    return String((item && (item.authoritativeValue || item.value)) || "").trim();
+  }
+
+  function fundraisingIsClosed(proposal) {
+    return /\bfundraising\s+(?:is\s+)?closed\b/i.test(claimValue(proposal, "stage"));
+  }
+
+  function parseMillions(value) {
+    const match = String(value || "").match(/\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(B|BN|BILLION|M|MM|MILLION|K|THOUSAND)?\b/i);
+    if (!match) return null;
+    const amount = Number(match[1].replace(/,/g, ""));
+    if (!Number.isFinite(amount)) return null;
+    const unit = String(match[2] || "").toLowerCase();
+    if (["b", "bn", "billion"].includes(unit)) return amount * 1000;
+    if (["k", "thousand"].includes(unit)) return amount / 1000;
+    return amount;
+  }
+
+  function formatMillions(value) {
+    return `$${value.toLocaleString("en-US", { maximumFractionDigits: 3 })}MM`;
+  }
+
+  function deriveHistoricalTargetDifference(proposal) {
+    if (!fundraisingIsClosed(proposal)) return null;
+    const targetClaim = claimItems(proposal, "targetFundSize")[0];
+    const committedClaim = claimItems(proposal, "amountCommitted")[0];
+    if (!isVerified(targetClaim) || !isVerified(committedClaim)) return null;
+    const target = parseMillions(targetClaim.authoritativeValue || targetClaim.value);
+    const committed = parseMillions(committedClaim.authoritativeValue || committedClaim.value);
+    if (target === null || committed === null || target <= committed) return null;
+    const value = formatMillions(Math.round((target - committed) * 1000) / 1000);
+    return {
+      value,
+      authoritativeValue: value,
+      evidenceStatus: "verified",
+      sourceEvidence: [targetClaim.sourceEvidence, committedClaim.sourceEvidence].filter(Boolean).join(" | "),
+      sourceLocation: "Derived from verified target and historical commitments",
+      semanticMeaning: "historical-unfunded-target-difference",
+      currentAvailability: false,
+      derivedFrom: [
+        { field: "targetFundSize", value: targetClaim.value, sourceEvidence: targetClaim.sourceEvidence },
+        { field: "amountCommitted", value: committedClaim.value, sourceEvidence: committedClaim.sourceEvidence }
+      ]
+    };
+  }
+
+  function sourceSupportsNextStep(claim) {
+    if (String((claim && claim.evidenceStatus) || "").toLowerCase() === "confirmed") return true;
+    if (!isVerified(claim)) return false;
+    const evidence = String((claim && claim.sourceEvidence) || "");
+    const hasAction = /\b(review|evaluate|diligence|contact|follow[- ]?up|schedule|meet|meeting|call|decide|respond|request|send|provide|discuss|consider|introduc(?:e|tion))\b/i.test(evidence);
+    const isDirected = /\b(beaman(?: ventures)?|tyler|lee|we|our|you|your|please|should|will|agreed|scheduled|available|happy to|let me know|can connect)\b/i.test(evidence);
+    return hasAction && isDirected;
+  }
+
+  function normalizeClosedFundraisingNarrative(value, targetFundSize) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    const target = String(targetFundSize || "").trim();
+    let changed = false;
+    let normalized = text.replace(
+      /\b(?:is\s+)?(?:currently\s+)?(?:raising|seeking\s+to\s+raise|seeks\s+to\s+raise)\s+\$?\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?\s*(?:b|bn|billion|m|mm|million|k|thousand)?\b/gi,
+      () => {
+        changed = true;
+        return target ? `has a target fund size of ${target}` : "has a stated target fund size";
+      }
+    );
+    normalized = normalized
+      .replace(/\bactive fundraising\b/gi, () => { changed = true; return "fundraising closed"; })
+      .replace(/\bopen for new commitments\b/gi, () => { changed = true; return "closed to new commitments"; });
+    if (changed && !/\bfundraising\s+(?:is\s+)?closed\b/i.test(normalized)) {
+      normalized = `${normalized.replace(/[.\s]+$/, "")}. Fundraising is closed.`;
+    }
+    return normalized;
+  }
+
+  function getDisplayDealClaimItems(proposal, field) {
+    let items = claimItems(proposal, field);
+    if (["amountRemaining", "proposedCheckSize"].includes(field)) {
+      items = items.filter((item) => ["verified", "confirmed"].includes(String((item && item.evidenceStatus) || "").toLowerCase()));
+    }
+    if (field === "historicalTargetDifference" && !items.some((item) => item && item.value)) {
+      const derived = deriveHistoricalTargetDifference(proposal);
+      items = derived ? [derived] : items;
+    }
+    if (field === "nextSteps") items = items.filter(sourceSupportsNextStep);
+    if (!fundraisingIsClosed(proposal) || field === "stage") return items;
+    const target = claimValue(proposal, "targetFundSize");
+    return items.map((item) => {
+      const value = normalizeClosedFundraisingNarrative(item && item.value, target);
+      return value === String((item && item.value) || "")
+        ? item
+        : { ...item, value, authoritativeValue: isVerified(item) ? value : "" };
+    });
+  }
+
+  function formatDealClaimValue(proposal, field) {
+    return getDisplayDealClaimItems(proposal, field).map(formatDealClaimItem).filter(Boolean).join("\n");
+  }
+
+  function formatAiUpdateProposalSummary(proposal) {
+    const dealSummary = proposal && proposal.proposalType === "new-deal"
+      ? formatDealClaimValue(proposal, "dealSummary")
+      : "";
+    if (dealSummary) return dealSummary;
+    const summary = String((proposal && proposal.summary) || "").trim();
+    return fundraisingIsClosed(proposal)
+      ? normalizeClosedFundraisingNarrative(summary, claimValue(proposal, "targetFundSize"))
+      : summary;
+  }
+
+  function normalizeAiUpdateProposalCounts(data) {
+    const statuses = ["pending", "approved", "rejected", "superseded"];
+    const proposals = data && Array.isArray(data.proposals) ? data.proposals : null;
+    return statuses.reduce((counts, status) => {
+      counts[status] = proposals
+        ? proposals.filter((proposal) => proposal && proposal.status === status).length
+        : Number((data && data.counts && data.counts[status]) || 0);
+      return counts;
+    }, {});
   }
 
   function isVerified(item) {
@@ -213,13 +336,17 @@
   const api = {
     buildUserFacingWarnings,
     dealClaimLabel,
+    formatAiUpdateProposalSummary,
     formatDealClaimItem,
     formatDealClaimValue,
+    getDisplayDealClaimItems,
     getReportUpdatesEmptyMessage,
     getItemValue,
     isActionable,
     isHighRiskNumeric,
     isVerified,
+    normalizeAiUpdateProposalCounts,
+    normalizeClosedFundraisingNarrative,
     sanitizeForActionableView,
     shouldRefreshInvestmentsAfterAiProposalAction,
     warningMessage
