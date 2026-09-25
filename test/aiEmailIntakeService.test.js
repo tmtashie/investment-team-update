@@ -12,6 +12,12 @@ const { createAiUpdateAnalysisService } = require("../services/aiUpdateAnalysisS
 const { createAiEmailIntakeStateService } = require("../services/aiEmailIntakeStateService");
 const { createAiUpdateProposalService } = require("../services/aiUpdateProposalService");
 const { createNewDealAnalysisService } = require("../services/newDealAnalysisService");
+const {
+  formatAiUpdateProposalSummary,
+  formatDealClaimValue,
+  getDisplayDealClaimItems,
+  normalizeAiUpdateProposalCounts
+} = require("../public/aiUpdateSafety");
 const bepFixture = require("./fixtures/bep-multi-opportunity.json");
 const bepLegacyFiveProposals = require("./fixtures/bep-legacy-five-proposals.json");
 
@@ -969,7 +975,8 @@ test("complete BEP reanalysis reconciles five legacy pending siblings to three c
     superseded.map((proposal) => [proposal.id, proposal.supersededByProposalIds[0]]).sort(),
     [["care-legacy-alias", "care-canonical"], ["pure-legacy-alias", "pure-canonical"]]
   );
-  const core = pending.find((proposal) => proposal.opportunityName === "BEP Core Fund VIII").dealData;
+  const coreProposal = pending.find((proposal) => proposal.opportunityName === "BEP Core Fund VIII");
+  const core = coreProposal.dealData;
   assert.equal(core.stage.authoritativeValue, "Fundraising closed");
   assert.equal(core.stage.sourceEvidence, "The fundraising memo is now close.");
   assert.equal(core.stage.supersededEvidence[0].value, "Active fundraising");
@@ -991,6 +998,19 @@ test("complete BEP reanalysis reconciles five legacy pending siblings to three c
     "1.75%", "17.5% carried interest above 8% preferred return", "10 years with two one-year extensions"
   ]);
   assert.equal(core.financingTerms.every((claim) => claim.sourceEvidence && claim.evidenceStatus === "verified"), true);
+  const visibleCounts = normalizeAiUpdateProposalCounts({ proposals: stored });
+  assert.deepEqual(visibleCounts, { pending: 3, approved: 0, rejected: 0, superseded: 2 });
+  assert.equal(formatDealClaimValue(coreProposal, "historicalTargetDifference"), "$255.5MM");
+  assert.equal(getDisplayDealClaimItems(coreProposal, "historicalTargetDifference")[0].currentAvailability, false);
+  assert.equal(formatDealClaimValue(coreProposal, "amountRemaining"), "");
+  assert.equal(formatDealClaimValue(coreProposal, "proposedCheckSize"), "");
+  assert.match(formatDealClaimValue(coreProposal, "dealSummary"), /target fund size of \$350MM/i);
+  assert.match(formatDealClaimValue(coreProposal, "dealSummary"), /fundraising is closed/i);
+  assert.equal(formatAiUpdateProposalSummary(coreProposal), formatDealClaimValue(coreProposal, "dealSummary"));
+  assert.doesNotMatch([
+    "dealSummary", "whatCompanyDoes", "businessModel", "tractionRevenue", "keyInvestmentPoints"
+  ].map((field) => formatDealClaimValue(coreProposal, field)).join("\n"), /currently raising|seeking to raise/i);
+  assert.deepEqual(getDisplayDealClaimItems(coreProposal, "nextSteps"), []);
   assert.deepEqual(pending.map((proposal) => proposal.documents.map((document) => document.graphAttachmentId)).sort(), [
     ["core-fund-viii"], ["project-care"], ["project-pure"]
   ]);
