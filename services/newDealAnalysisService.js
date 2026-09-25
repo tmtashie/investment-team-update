@@ -209,6 +209,14 @@ function isIssuerFundraisingPlan(claim) {
   return issuerObjective && !beamanAction;
 }
 
+function sourceSupportsNextStep(claim) {
+  if (!claim || claim.evidenceStatus !== "verified") return false;
+  const evidence = cleanString(claim.sourceEvidence, 1000);
+  const hasAction = /\b(review|evaluate|diligence|contact|follow[- ]?up|schedule|meet|meeting|call|decide|respond|request|send|provide|discuss|consider|introduc(?:e|tion))\b/i.test(evidence);
+  const isDirected = /\b(beaman(?: ventures)?|tyler|lee|we|our|you|your|please|should|will|agreed|scheduled|available|happy to|let me know|can connect)\b/i.test(evidence);
+  return hasAction && isDirected;
+}
+
 function normalizeNextSteps(value, sourceText) {
   const claims = normalizeClaimList(value, sourceText);
   const nextSteps = [];
@@ -232,9 +240,48 @@ function normalizeNextSteps(value, sourceText) {
       nextSteps.push({ ...claim, value: valueText, authoritativeValue: claim.evidenceStatus === "verified" ? valueText : "" });
       return;
     }
-    nextSteps.push(claim);
+    if (sourceSupportsNextStep(claim)) nextSteps.push(claim);
   });
   return { nextSteps, issuerPlans };
+}
+
+function rewriteClosedFundraisingNarrative(value, targetFundSize) {
+  const text = cleanString(value, 2000);
+  if (!text) return "";
+  const target = cleanString(targetFundSize, 200);
+  let changed = false;
+  let normalized = text.replace(
+    /\b(?:is\s+)?(?:currently\s+)?(?:raising|seeking\s+to\s+raise|seeks\s+to\s+raise)\s+\$?\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?\s*(?:b|bn|billion|m|mm|million|k|thousand)?\b/gi,
+    () => {
+      changed = true;
+      return target ? `has a target fund size of ${target}` : "has a stated target fund size";
+    }
+  );
+  normalized = normalized
+    .replace(/\bactive fundraising\b/gi, () => { changed = true; return "fundraising closed"; })
+    .replace(/\bopen for new commitments\b/gi, () => { changed = true; return "closed to new commitments"; });
+  if (changed && !/\bfundraising\s+(?:is\s+)?closed\b/i.test(normalized)) {
+    normalized = `${normalized.replace(/[.\s]+$/, "")}. Fundraising is closed.`;
+  }
+  return normalized;
+}
+
+function normalizeClosedFundraisingField(value, stage, targetFundSize) {
+  if (!/\bfundraising\s+(?:is\s+)?closed\b/i.test(`${stage && stage.authoritativeValue} ${stage && stage.value}`)) {
+    return value;
+  }
+  const items = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
+  const normalized = items.map((claim) => {
+    const rewritten = rewriteClosedFundraisingNarrative(claim && claim.value, targetFundSize && (targetFundSize.authoritativeValue || targetFundSize.value));
+    if (rewritten === cleanString(claim && claim.value, 2000)) return claim;
+    return {
+      ...claim,
+      value: rewritten,
+      authoritativeValue: claim.evidenceStatus === "verified" ? rewritten : "",
+      currentStatusApplied: true
+    };
+  });
+  return Array.isArray(value) ? normalized : normalized[0] || value;
 }
 
 function normalizeClaimList(value, sourceText, options = {}) {
@@ -522,6 +569,13 @@ function normalizeDealAnalysis(raw, source, matchResult) {
     relevantUrls: urls,
     unverifiedClaims: []
   };
+  [
+    "dealSummary", "whatCompanyDoes", "businessModel", "tractionRevenue",
+    "customersContractsDeployments", "roundType", "financingTerms", "useOfProceeds",
+    "keyInvestmentPoints", "keyRisks", "deadlines"
+  ].forEach((field) => {
+    dealData[field] = normalizeClosedFundraisingField(dealData[field], stage, targetFundSize);
+  });
   Object.entries(dealData).forEach(([field, item]) => {
     const values = Array.isArray(item) ? item : item && item.value !== undefined ? [item] : [];
     values.filter((claim) => claim.evidenceStatus !== "verified").forEach((claim) => {
@@ -568,10 +622,11 @@ function buildNewDealPrompt(source) {
     "For fund keyInvestmentPoints, extract concrete source-supported terms and characteristics such as fund target, minimum investment, term/extensions, investor classes, preferred return or cash distributions, portfolio allocation, deployment status, tax/depreciation strategy, target geography/assets, and disclosed fees/carry. Omit generic praise such as 'Strong projected returns for investors'.",
     "Returns shown only in an illustrative property, model, pro forma, hypothetical, or target scenario must be labeled illustrative or targeted. Never describe them as achieved, realized, guaranteed, or necessarily the fund-level expected return.",
     "Extract only source-disclosed risks. Prefer specific categories and mechanisms such as macro/rate, supply/concession, operational execution, construction/development, counterparty, regulatory/REIT/tax structure, liquidity, or concentration. Do not invent risks to fill the field.",
-    "nextSteps are Beaman Ventures review or communication actions only. Do not turn an issuer objective such as completing fundraising into our next step. Put issuer fundraising plans in deadlines with an 'Issuer plan:' label. An offer to answer questions or make an introduction can support an optional contact/request action, but never claim Beaman agreed to a meeting unless the source says so.",
+    "nextSteps are Beaman Ventures review or communication actions only and require explicit source support for that action. Do not infer review, diligence, or follow-up from performance facts alone. If no Beaman action is explicitly requested, offered, agreed, or stated, leave nextSteps empty. Do not turn an issuer objective such as completing fundraising into our next step. Put issuer fundraising plans in deadlines with an 'Issuer plan:' label. An offer to answer questions or make an introduction can support an optional contact/request action, but never claim Beaman agreed to a meeting unless the source says so.",
     "Do not reconcile materially conflicting source figures. For a conflicted claim, leave the main value non-authoritative and include conflictingEvidence as an array of objects with value, sourceEvidence, and sourceLocation for each competing statement.",
     "Keep targetFundSize, amountBeingRaised, amountCommitted, amountRemaining, historicalTargetDifference, minimumLpCommitment, coInvestmentAvailability, proposedCheckSize, and any third-party investment separate. Never copy one concept into another.",
     "amountRemaining means capital currently available or still being raised. If fundraising is closed, leave amountRemaining empty. A target-minus-historical-commitments calculation belongs in historicalTargetDifference and must never imply current availability.",
+    "When newer email evidence says fundraising is closed, every narrative field must use that current status. Describe the fund-size figure only as the fund target; never say the fund is currently raising, seeking to raise, or open for commitments. Preserve stale deck fundraising language only as superseded evidence on stage.",
     "proposedCheckSize must be empty unless SOURCE DATA explicitly states Beaman Ventures', Tyler's, Lee's, or the addressed recipient's intended or requested check, investment, allocation, or commitment. A fund minimum, fund target, total round, or total co-investment availability is never the recipient's proposed check.",
     "Every deadline value must name the associated event and preserve material context. For example, use 'Fundraise: $650K remaining to close by year end', never only 'by year end'.",
     "Schema keys: isPotentialNewDeal, classificationReason, companyName, contactName, contactEmail, dealSummary, whatCompanyDoes, businessModel, stage, tractionRevenue, customersContractsDeployments, roundType, targetFundSize, minimumLpCommitment, coInvestmentAvailability, amountBeingRaised, amountCommitted, amountRemaining, historicalTargetDifference, proposedCheckSize, valuationCap, securityType, financingTerms, leadInvestor, useOfProceeds, keyInvestmentPoints, keyRisks, nextSteps, deadlines, relevantUrls.",
