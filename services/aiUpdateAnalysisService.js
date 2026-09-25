@@ -775,20 +775,7 @@ function hasExplicitPhrase(sourceText, phrase) {
     return true;
   }
   const compactPhrase = compactMatchText(phrase);
-  if (compactPhrase.length < 6) {
-    return false;
-  }
-  const sourceTokens = normalizeMatchText(sourceText).split(" ").filter(Boolean);
-  for (let start = 0; start < sourceTokens.length; start += 1) {
-    let compactSpan = "";
-    for (let end = start; end < sourceTokens.length && compactSpan.length < compactPhrase.length; end += 1) {
-      compactSpan += compactMatchText(sourceTokens[end]);
-      if (compactSpan === compactPhrase) {
-        return true;
-      }
-    }
-  }
-  return false;
+  return compactPhrase.length >= 6 && compactMatchText(sourceText).includes(compactPhrase);
 }
 
 function findMatchedAlias(sourceParts, aliases) {
@@ -813,7 +800,7 @@ function scoreDomainEvidence(sender, aliases) {
   }
   const matchedAlias = aliases.find((alias) => {
     const compactAlias = compactMatchText(alias);
-    return compactAlias.length >= 4 && compactAlias === compactMatchText(rootDomain);
+    return compactAlias.length >= 4 && (compactAlias.includes(rootDomain) || rootDomain.includes(compactAlias));
   });
   return matchedAlias
     ? {
@@ -825,8 +812,8 @@ function scoreDomainEvidence(sender, aliases) {
     : null;
 }
 
-function generateInvestmentMatchCandidates({ source, investments }) {
-  return generateSharedInvestmentMatchCandidates({ source, investments });
+function generateInvestmentMatchCandidates({ source, investments, houseDomains }) {
+  return generateSharedInvestmentMatchCandidates({ source, investments, houseDomains });
 }
 
 function confidenceFromDeterministicCandidate(candidate, hasCompetingCandidate) {
@@ -1874,6 +1861,7 @@ function buildConsolidationPrompt({
 function createAiUpdateAnalysisService({
   callModel,
   normalizeEntityName,
+  houseDomains = [],
   getNow = () => new Date()
 }) {
   async function analyzeInvestmentUpdate({
@@ -1910,7 +1898,8 @@ function createAiUpdateAnalysisService({
     const selectedEntity = normalizeEntityOverride(entityOverrideId, entities, normalizeEntityName);
     const deterministicMatch = generateInvestmentMatchCandidates({
       source: cleanSource,
-      investments
+      investments,
+      houseDomains
     });
     const modelCandidateList = selectedInvestment
       ? [{ investment: selectedInvestment }]

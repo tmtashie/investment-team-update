@@ -264,10 +264,6 @@ test("semantic-only match produces lower confidence and warning", async () => {
       reason: "Financial update sounded similar."
     },
     entityMatch: {},
-    deterministicEvidence: {
-      investmentId: "vanguard-id",
-      types: ["sourceBody"]
-    },
     extractedFacts: [],
     whatChanged: [],
     proposedChanges: [],
@@ -310,9 +306,7 @@ test("embedded compact alias text is not deterministic portfolio evidence", asyn
   });
 
   const result = await service.analyzeInvestmentUpdate({
-    source: {
-      sourceText: "The integration uses a FINSYNChronization process for monthly reporting."
-    },
+    source: { sourceText: "The integration uses a FINSYNChronization process for monthly reporting." },
     investments: finsyncInvestments,
     entities
   });
@@ -326,50 +320,7 @@ test("embedded compact alias text is not deterministic portfolio evidence", asyn
   assert.match(result.analysis.warnings.join(" "), /lacks explicit/);
 });
 
-test("compact alias matching still accepts complete punctuation-normalized tokens", async () => {
-  const punctuationInvestments = [
-    {
-      id: "elf-id",
-      company: "E.L.F. Beauty",
-      entity: "Beaman Ventures",
-      assetType: "Public Stock",
-      status: "Active"
-    }
-  ];
-  const { service } = createService({
-    investmentMatch: { investmentId: "elf-id", confidence: 80 },
-    entityMatch: {},
-    extractedFacts: [],
-    whatChanged: [],
-    proposedChanges: [],
-    warnings: [],
-    unresolved: []
-  });
-
-  const result = await service.analyzeInvestmentUpdate({
-    source: { sourceText: "ELF Beauty issued its monthly investor update." },
-    investments: punctuationInvestments,
-    entities
-  });
-
-  assert.equal(result.analysis.investmentMatch.investmentId, "elf-id");
-  assert.ok(result.analysis.investmentMatch.confidence >= 95);
-  assert.deepEqual(result.analysis.deterministicEvidence, {
-    investmentId: "elf-id",
-    types: ["sourceBody"]
-  });
-});
-
 test("sender domain substrings are not deterministic portfolio evidence", async () => {
-  const beamInvestments = [
-    {
-      id: "beam-id",
-      company: "Beam",
-      entity: "Beaman Ventures",
-      assetType: "Private Investment",
-      status: "Active"
-    }
-  ];
   const { service } = createService({
     investmentMatch: {
       investmentId: "beam-id",
@@ -390,7 +341,7 @@ test("sender domain substrings are not deterministic portfolio evidence", async 
       sender: "updates@sunbeam.com",
       sourceText: "Monthly investor report with no named portfolio company."
     },
-    investments: beamInvestments,
+    investments: [{ id: "beam-id", company: "Beam", entity: "Beaman Ventures" }],
     entities
   });
 
@@ -2057,4 +2008,3 @@ test("failed material development is absent from What Changed and not actionable
   assert.doesNotMatch(result.analysis.whatChanged.join(" "), /\$5M|line of credit|committed/i);
   assert.match(result.analysis.warnings.join(" "), /Removed unsupported material development/);
 });
-

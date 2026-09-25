@@ -27,17 +27,50 @@ function createAiUpdateProposalService({
     return normalized;
   }
 
-  function saveAiUpdateProposal(entry) {
+  function saveAiUpdateProposal(entry, { replacePendingSourceOpportunity = false } = {}) {
     const proposals = readAiUpdateProposals();
     const normalized = normalizeAiUpdateProposal({
       ...entry,
       updatedAt: new Date().toISOString()
     });
+    let exactSourceOpportunity = normalized.sourceMessageKey && normalized.opportunityId && proposals.find(
+      (proposal) => proposal.sourceMessageKey === normalized.sourceMessageKey &&
+        proposal.opportunityId === normalized.opportunityId
+    );
+    if (!exactSourceOpportunity && replacePendingSourceOpportunity && normalized.sourceMessageKey) {
+      const incomingKeys = new Set([
+        normalized.opportunityId,
+        ...(normalized.opportunityIdentityKeys || [])
+      ].filter(Boolean));
+      const documentKeys = new Set((normalized.documents || [])
+        .flatMap((document) => [document.hash, document.graphAttachmentId].filter(Boolean)));
+      exactSourceOpportunity = proposals.find((proposal) => {
+        if (proposal.sourceMessageKey !== normalized.sourceMessageKey || proposal.status !== "pending") return false;
+        const existingKeys = [proposal.opportunityId, ...(proposal.opportunityIdentityKeys || [])].filter(Boolean);
+        if (existingKeys.some((key) => incomingKeys.has(key))) return true;
+        return (proposal.documents || []).some((document) =>
+          [document.hash, document.graphAttachmentId].filter(Boolean).some((key) => documentKeys.has(key))
+        );
+      });
+    }
+    if (exactSourceOpportunity) {
+      if (replacePendingSourceOpportunity && exactSourceOpportunity.status === "pending") {
+        return updateAiUpdateProposal(exactSourceOpportunity.id, {
+          ...normalized,
+          status: "pending",
+          reviewedBy: "",
+          reviewedAt: ""
+        });
+      }
+      return exactSourceOpportunity;
+    }
     if (normalized.proposalType === "new-deal") {
-      const exactSource = normalized.sourceMessageKey && proposals.find(
-        (proposal) => proposal.proposalType === "new-deal" && proposal.sourceMessageKey === normalized.sourceMessageKey
+      const legacyExactSource = normalized.sourceMessageKey && !normalized.opportunityId && proposals.find(
+        (proposal) => proposal.proposalType === "new-deal" &&
+          proposal.sourceMessageKey === normalized.sourceMessageKey &&
+          !proposal.opportunityId
       );
-      if (exactSource) return exactSource;
+      if (legacyExactSource) return legacyExactSource;
       const sameOpportunity = normalized.opportunityFingerprint && proposals.find(
         (proposal) => proposal.proposalType === "new-deal" &&
           proposal.opportunityFingerprint === normalized.opportunityFingerprint &&

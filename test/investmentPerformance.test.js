@@ -94,7 +94,10 @@ function loadPerformanceHelpers() {
 
   return {
     buildPerformanceInputs: context.buildPerformanceInputs,
-    getAiProposalTypeLabel: context.getAiProposalTypeLabel
+    dealClaimStatus: context.dealClaimStatus,
+    dealClaimValue: context.dealClaimValue,
+    getAiProposalTypeLabel: context.getAiProposalTypeLabel,
+    renderDealFieldEvidence: context.renderDealFieldEvidence
   };
 }
 
@@ -103,6 +106,32 @@ test("proposal labels distinguish existing updates, ambiguous review, and potent
   assert.equal(getAiProposalTypeLabel({ proposalType: "investment-update" }), "Existing Investment Update");
   assert.equal(getAiProposalTypeLabel({ proposalType: "new-deal", matchResult: { status: "ambiguous" } }), "Ambiguous Review");
   assert.equal(getAiProposalTypeLabel({ proposalType: "new-deal", matchResult: { status: "no-match" } }), "Potential New Deal");
+});
+
+test("structured new-deal claims render readable values while retaining evidence", () => {
+  const { dealClaimStatus, dealClaimValue, renderDealFieldEvidence } = loadPerformanceHelpers();
+  const proposal = { dealData: {
+    tractionRevenue: [
+      { value: "$94.5MM historical commitments", sourceEvidence: "Initial close on $94.5MM.", evidenceStatus: "verified" }
+    ],
+    customersContractsDeployments: [
+      { value: "Control investments", sourceEvidence: "The portfolio includes control investments.", evidenceStatus: "verified" }
+    ],
+    financingTerms: [
+      { value: "Ten-year term", sourceEvidence: "The term is ten years.", evidenceStatus: "verified" },
+      { value: "2% management fee", sourceEvidence: "Management fee is 2%.", evidenceStatus: "verified" }
+    ]
+  } };
+  assert.equal(dealClaimValue(proposal, "tractionRevenue"), "$94.5MM historical commitments");
+  assert.equal(dealClaimValue(proposal, "customersContractsDeployments"), "Control investments");
+  assert.equal(dealClaimValue(proposal, "financingTerms"), "Ten-year term\n2% management fee");
+  assert.equal(dealClaimStatus(proposal, "financingTerms"), "verified");
+  const evidence = renderDealFieldEvidence(proposal, "financingTerms");
+  assert.match(evidence, /The term is ten years/);
+  assert.match(evidence, /Management fee is 2%/);
+  assert.doesNotMatch(evidence, /\[object Object\]/);
+  assert.doesNotMatch(dealClaimValue(proposal, "tractionRevenue"), /\[object Object\]/);
+  assert.doesNotMatch(dealClaimValue(proposal, "customersContractsDeployments"), /\[object Object\]/);
 });
 
 test("pipeline contributions are excluded from performance inputs", () => {

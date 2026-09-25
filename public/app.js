@@ -280,7 +280,9 @@ const companyTasks = document.getElementById("companyTasks");
 const aiUpdateInboxSummary = document.getElementById("aiUpdateInboxSummary");
 const aiUpdateInboxMessage = document.getElementById("aiUpdateInboxMessage");
 const checkAiEmailIntakeButton = document.getElementById("checkAiEmailIntakeButton");
+const previewAiEmailIntakeButton = document.getElementById("previewAiEmailIntakeButton");
 const aiEmailIntakeResult = document.getElementById("aiEmailIntakeResult");
+const aiEmailIntakePreviewResult = document.getElementById("aiEmailIntakePreviewResult");
 const aiUpdateInboxList = document.getElementById("aiUpdateInboxList");
 const aiUpdateProposalDetail = document.getElementById("aiUpdateProposalDetail");
 const openAiUpdateAnalyzerButton = document.getElementById("openAiUpdateAnalyzerButton");
@@ -324,7 +326,9 @@ let aiEmailIntakeConfig = {
   enabled: false,
   configured: false,
   mailboxUser: "",
-  folderName: ""
+  folderName: "",
+  maxMessagesPerRun: 0,
+  houseDomains: []
 };
 let selectedAiUpdateProposalId = "";
 let latestAiUpdateAnalysis = null;
@@ -6790,13 +6794,37 @@ function getAiProposalTypeLabel(proposal) {
 }
 
 function dealClaimValue(proposal, field) {
+  const safety = getAiUpdateSafety();
+  if (safety.formatDealClaimValue) return safety.formatDealClaimValue(proposal, field);
   const claim = proposal && proposal.dealData && proposal.dealData[field];
-  return claim && typeof claim === "object" ? String(claim.value || "") : "";
+  const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  return claims.map((item) => {
+    if (!item || typeof item !== "object") return String(item || "");
+    if (typeof item.value === "string" || typeof item.value === "number") return String(item.value);
+    return "";
+  }).filter(Boolean).join("\n");
 }
 
 function dealClaimStatus(proposal, field) {
   const claim = proposal && proposal.dealData && proposal.dealData[field];
-  return claim && claim.evidenceStatus ? String(claim.evidenceStatus) : "unresolved";
+  const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  const statuses = Array.from(new Set(claims.map((item) => item && item.evidenceStatus).filter(Boolean)));
+  return statuses.length ? statuses.join(" / ") : "unresolved";
+}
+
+function renderDealFieldEvidence(proposal, field) {
+  const claim = proposal && proposal.dealData && proposal.dealData[field];
+  const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  const evidence = [];
+  claims.forEach((item) => {
+    if (item && item.sourceEvidence) evidence.push({ ...item, label: "Source evidence" });
+    (Array.isArray(item && item.supersededEvidence) ? item.supersededEvidence : []).forEach((superseded) => {
+      if (superseded && (superseded.value || superseded.sourceEvidence)) evidence.push({ ...superseded, label: "Superseded attachment evidence" });
+    });
+  });
+  return evidence.length
+    ? `<ul class="ai-change-list">${evidence.map((item) => `<li><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value || "")}${item.sourceEvidence ? `<br><span class="update-meta">${escapeHtml(item.sourceEvidence)}</span>` : ""}</li>`).join("")}</ul>`
+    : "";
 }
 
 function renderDealClaimList(proposal, field, emptyMessage) {
@@ -6822,6 +6850,11 @@ function renderNewDealProposalDetail(proposal) {
   const entityOptions = configuredEntities.map((entity) =>
     `<option value="${escapeHtml(entity)}" ${entity === proposal.proposedEntity ? "selected" : ""}>${escapeHtml(entity)}</option>`
   ).join("");
+  const sourceSiblings = allAiUpdateProposals.filter((item) =>
+    proposal.sourceMessageKey && item.sourceMessageKey === proposal.sourceMessageKey &&
+      (proposal.opportunityId ? Boolean(item.opportunityId) : !item.opportunityId)
+  );
+  const opportunityLabel = proposal.opportunityName || dealClaimValue(proposal, "companyName") || "Unpartitioned source";
   return `
     <div class="panel-header">
       <div><p class="feature-kicker">${escapeHtml(getAiProposalTypeLabel(proposal))}</p><h3>${escapeHtml(getAiProposalInvestmentName(proposal))}</h3><p class="section-copy">Review source evidence before creating a pipeline record.</p></div>
@@ -6829,33 +6862,42 @@ function renderNewDealProposalDetail(proposal) {
     </div>
     <section class="ai-detail-section">
       <h4>Source and match</h4>
+      <p class="highlight-value">${escapeHtml(opportunityLabel)}</p>
       <p class="update-meta">${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")} • ${escapeHtml(proposal.sourceDate || "Date not set")}</p>
+      <p class="update-meta">Same source email • ${escapeHtml(String(sourceSiblings.length))} separately reviewable opportunit${sourceSiblings.length === 1 ? "y" : "ies"}</p>
+      ${sourceSiblings.length > 1 ? `<div class="document-pill-row">${sourceSiblings.map((item) => `<span class="document-pill">${escapeHtml(item.opportunityName || getAiProposalInvestmentName(item))}</span>`).join("")}</div>` : ""}
       <p class="update-meta">${escapeHtml(match.status || "no-match")} • ${escapeHtml(match.reason || proposal.matchReason || "No match reason")}</p>
       ${candidates.length ? `<div class="document-pill-row">${candidates.map((candidate) => `<span class="document-pill">${escapeHtml(candidate.investmentName)} (${escapeHtml(String(candidate.score || 0))})</span>`).join("")}</div>` : '<p class="update-meta">No deterministic existing-investment candidates.</p>'}
     </section>
     <section class="ai-detail-section">
       <h4>Proposed fields</h4>
       <div class="company-summary-grid new-deal-edit-grid">
-        <label>Company / deal name (${escapeHtml(dealClaimStatus(proposal, "companyName"))})<input id="newDealCompanyName" value="${escapeHtml(dealClaimValue(proposal, "companyName"))}"></label>
+        <label>Company / fund / deal name (${escapeHtml(dealClaimStatus(proposal, "companyName"))})<input id="newDealCompanyName" value="${escapeHtml(dealClaimValue(proposal, "companyName"))}"></label>
         <label>Contact name (${escapeHtml(dealClaimStatus(proposal, "contactName"))})<input id="newDealContactName" value="${escapeHtml(dealClaimValue(proposal, "contactName"))}"></label>
         <label>Contact email (${escapeHtml(dealClaimStatus(proposal, "contactEmail"))})<input id="newDealContactEmail" type="email" value="${escapeHtml(dealClaimValue(proposal, "contactEmail"))}"></label>
         <label>Entity<select id="newDealEntity">${entityOptions}</select></label>
         <label>Round type (${escapeHtml(dealClaimStatus(proposal, "roundType"))})<input id="newDealRoundType" value="${escapeHtml(dealClaimValue(proposal, "roundType"))}"></label>
         <label>Stage (${escapeHtml(dealClaimStatus(proposal, "stage"))})<input id="newDealStage" value="${escapeHtml(dealClaimValue(proposal, "stage"))}"></label>
         <label>Amount being raised (${escapeHtml(dealClaimStatus(proposal, "amountBeingRaised"))})<input id="newDealAmountRaised" value="${escapeHtml(dealClaimValue(proposal, "amountBeingRaised"))}"></label>
+        <label>Target fund size (${escapeHtml(dealClaimStatus(proposal, "targetFundSize"))})<input id="newDealTargetFundSize" value="${escapeHtml(dealClaimValue(proposal, "targetFundSize"))}"></label>
+        <label>Minimum LP commitment (${escapeHtml(dealClaimStatus(proposal, "minimumLpCommitment"))})<input id="newDealMinimumLpCommitment" value="${escapeHtml(dealClaimValue(proposal, "minimumLpCommitment"))}"></label>
+        <label>Co-investment availability (${escapeHtml(dealClaimStatus(proposal, "coInvestmentAvailability"))})<input id="newDealCoInvestmentAvailability" value="${escapeHtml(dealClaimValue(proposal, "coInvestmentAvailability"))}"></label>
         <label>Amount committed (${escapeHtml(dealClaimStatus(proposal, "amountCommitted"))})<input id="newDealAmountCommitted" value="${escapeHtml(dealClaimValue(proposal, "amountCommitted"))}"></label>
         <label>Amount remaining (${escapeHtml(dealClaimStatus(proposal, "amountRemaining"))})<input id="newDealAmountRemaining" value="${escapeHtml(dealClaimValue(proposal, "amountRemaining"))}"></label>
+        <label>Historical / unfunded target difference (${escapeHtml(dealClaimStatus(proposal, "historicalTargetDifference"))})<input value="${escapeHtml(dealClaimValue(proposal, "historicalTargetDifference"))}" readonly></label>
         <label>Proposed check size (${escapeHtml(dealClaimStatus(proposal, "proposedCheckSize"))})<input id="newDealCheckSize" value="${escapeHtml(dealClaimValue(proposal, "proposedCheckSize"))}"></label>
         <label>Valuation / cap (${escapeHtml(dealClaimStatus(proposal, "valuationCap"))})<input id="newDealValuationCap" value="${escapeHtml(dealClaimValue(proposal, "valuationCap"))}"></label>
         <label>Security type (${escapeHtml(dealClaimStatus(proposal, "securityType"))})<input id="newDealSecurityType" value="${escapeHtml(dealClaimValue(proposal, "securityType"))}"></label>
         <label>Lead investor (${escapeHtml(dealClaimStatus(proposal, "leadInvestor"))})<input id="newDealLeadInvestor" value="${escapeHtml(dealClaimValue(proposal, "leadInvestor"))}"></label>
       </div>
+      ${renderDealFieldEvidence(proposal, "stage")}
       <label>AI summary<textarea id="newDealSummary" rows="4">${escapeHtml(dealClaimValue(proposal, "dealSummary"))}</textarea></label>
-      <label>What the company does<textarea id="newDealWhatCompanyDoes" rows="3">${escapeHtml(dealClaimValue(proposal, "whatCompanyDoes"))}</textarea></label>
-      <label>Product / business model<textarea id="newDealBusinessModel" rows="3">${escapeHtml(dealClaimValue(proposal, "businessModel"))}</textarea></label>
-      <label>Traction / revenue<textarea id="newDealTractionRevenue" rows="3">${escapeHtml(dealClaimValue(proposal, "tractionRevenue"))}</textarea></label>
-      <label>Customers / contracts / deployments<textarea id="newDealCustomers" rows="3">${escapeHtml(dealClaimValue(proposal, "customersContractsDeployments"))}</textarea></label>
-      <label>Financing terms<textarea id="newDealFinancingTerms" rows="3">${escapeHtml(dealClaimValue(proposal, "financingTerms"))}</textarea></label>
+      <label>Strategy / what the opportunity does<textarea id="newDealWhatCompanyDoes" rows="3">${escapeHtml(dealClaimValue(proposal, "whatCompanyDoes"))}</textarea></label>
+      <label>Business model / fund strategy<textarea id="newDealBusinessModel" rows="3">${escapeHtml(dealClaimValue(proposal, "businessModel"))}</textarea></label>
+      <label>Traction / deployment / revenue<textarea id="newDealTractionRevenue" rows="3">${escapeHtml(dealClaimValue(proposal, "tractionRevenue"))}</textarea></label>${renderDealFieldEvidence(proposal, "tractionRevenue")}
+      <label>Portfolio / contracts / deployments<textarea id="newDealCustomers" rows="3">${escapeHtml(dealClaimValue(proposal, "customersContractsDeployments"))}</textarea></label>${renderDealFieldEvidence(proposal, "customersContractsDeployments")}
+      <label>Financing terms<textarea id="newDealFinancingTerms" rows="3">${escapeHtml(dealClaimValue(proposal, "financingTerms"))}</textarea></label>${renderDealFieldEvidence(proposal, "financingTerms")}
+      ${renderDealFieldEvidence(proposal, "historicalTargetDifference")}
       <label>Use of proceeds<textarea id="newDealUseOfProceeds" rows="3">${escapeHtml(dealClaimValue(proposal, "useOfProceeds"))}</textarea></label>
       <label>Key investment points<textarea id="newDealPoints" rows="4">${escapeHtml(dealClaimListText(proposal, "keyInvestmentPoints"))}</textarea></label>
       <label>Key risks<textarea id="newDealRisks" rows="4">${escapeHtml(dealClaimListText(proposal, "keyRisks"))}</textarea></label>
@@ -6872,6 +6914,7 @@ function renderNewDealProposalDetail(proposal) {
     <section class="ai-detail-section"><h4>Attachments</h4>${documents.length ? `<div class="digest-preview-list">${documents.map((document) => `<article class="digest-preview-item"><p class="highlight-value">${document.url ? `<a href="${escapeHtml(document.url)}" target="_blank" rel="noreferrer">${escapeHtml(document.name)}</a>` : escapeHtml(document.name || "Attachment")}</p><p class="update-meta">${escapeHtml(document.preservationStatus || "unresolved")} • ${escapeHtml(document.extractionStatus || "not-parsed")}${document.reason ? ` • ${escapeHtml(document.reason)}` : ""}</p></article>`).join("")}</div>` : '<p class="update-meta">No attachments.</p>'}</section>
     <section class="ai-detail-section"><h4>Review</h4><p class="update-meta">Status: ${escapeHtml(proposal.status)}</p>
       ${proposal.status === "pending" && canEditWorkspace() ? `<div class="card-actions">
+        ${isMasterEditor() && proposal.sourceMessageKey ? `<button class="secondary-button" type="button" data-action="reanalyze-source-message" data-id="${escapeHtml(proposal.id)}">${proposal.opportunityId ? "Reanalyze source opportunities" : "Reanalyze source into opportunities"}</button>` : ""}
         ${isMasterEditor() ? `<button type="button" data-action="approve-new-deal" data-id="${escapeHtml(proposal.id)}">Approve as New Pipeline Deal</button><select id="newDealExistingInvestment"><option value="">Select existing investment</option>${allInvestments.map((investment) => `<option value="${escapeHtml(investment.id)}">${escapeHtml(investment.company)} • ${escapeHtml(investment.entity)}</option>`).join("")}</select><button class="secondary-button" type="button" data-action="match-new-deal-existing" data-id="${escapeHtml(proposal.id)}">Match to Existing Investment</button>` : ""}
         <button class="secondary-button danger-button" type="button" data-action="reject-ai-proposal" data-id="${escapeHtml(proposal.id)}">Reject</button>
       </div>` : ""}
@@ -7495,6 +7538,75 @@ function renderAiEmailIntakeResult(result) {
   `;
 }
 
+function formatDiagnosticBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDiagnosticDateTime(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value || "Not available") : parsed.toLocaleString();
+}
+
+function renderAiEmailIntakePreview(result) {
+  if (!aiEmailIntakePreviewResult) return;
+  if (!result) {
+    aiEmailIntakePreviewResult.classList.add("hidden");
+    aiEmailIntakePreviewResult.innerHTML = "";
+    return;
+  }
+  const messages = Array.isArray(result.messages) ? result.messages : [];
+  const limits = result.limits || {};
+  aiEmailIntakePreviewResult.classList.remove("hidden");
+  aiEmailIntakePreviewResult.innerHTML = `
+    <div class="update-head">
+      <div>
+        <p class="dashboard-label">Read-only Microsoft 365 preview</p>
+        <h3>${escapeHtml(String(messages.length))} message${messages.length === 1 ? "" : "s"} in the intake window</h3>
+        <p class="update-meta">${escapeHtml(result.mailbox || aiEmailIntakeConfig.mailboxUser || "Configured mailbox")} • ${escapeHtml(result.folderName || aiEmailIntakeConfig.folderName || "AI Investment Updates")} • newest ${escapeHtml(String(result.maxMessagesPerRun || aiEmailIntakeConfig.maxMessagesPerRun || 0))}</p>
+      </div>
+      <span class="status-chip">No state changes</span>
+    </div>
+    <p class="update-meta">Projected attachment budget: ${escapeHtml(formatDiagnosticBytes(limits.maxMessageBytes))} per message, ${escapeHtml(formatDiagnosticBytes(limits.maxRunBytes))} per run. Actual decoded bytes are validated only during intake.</p>
+    ${messages.map((message, index) => {
+      const state = message.state || {};
+      const allowlist = message.allowlist || {};
+      const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+      return `
+        <article class="intake-preview-message">
+          <div class="update-head">
+            <div>
+              <p class="dashboard-label">${escapeHtml(`Window ${index + 1}`)}</p>
+              <h4>${escapeHtml(message.subject || "No subject")}</h4>
+              <p class="update-meta">${escapeHtml(message.sender || "Unknown sender")} • ${escapeHtml(formatDiagnosticDateTime(message.receivedDateTime))}</p>
+            </div>
+            <span class="status-chip">${escapeHtml(message.eligibilityStatus || "unknown")}</span>
+          </div>
+          <p>${escapeHtml(message.eligibilityReason || "")}</p>
+          <dl class="intake-preview-metadata">
+            <div><dt>Graph ID</dt><dd>${escapeHtml(message.graphMessageId || "Missing")}</dd></div>
+            <div><dt>Internet Message ID</dt><dd>${escapeHtml(message.internetMessageId || "Missing")}</dd></div>
+            <div><dt>State</dt><dd>${escapeHtml(state.found ? state.status || "unknown" : "No entry")}</dd></div>
+            <div><dt>Allowlist</dt><dd>${escapeHtml(allowlist.allowed ? "Allowed" : "Blocked")} · sender ${escapeHtml(allowlist.senderRuleConfigured ? allowlist.senderMatch ? "matched" : "not matched" : "rule not configured")} · domain ${escapeHtml(allowlist.domainRuleConfigured ? allowlist.domainMatch ? "matched" : "not matched" : "rule not configured")}</dd></div>
+            <div><dt>Attachments</dt><dd>${escapeHtml(String(message.attachmentCount || 0))}${message.attachmentCountTruncated ? "+ (window truncated)" : ""}</dd></div>
+            <div><dt>Projected budget</dt><dd>${escapeHtml(formatDiagnosticBytes(message.projectedMessageAttachmentBytes))} message · ${escapeHtml(formatDiagnosticBytes(message.projectedRunAttachmentBytesAfterMessage))} cumulative run</dd></div>
+          </dl>
+          ${attachments.length ? `<div class="intake-preview-attachments">${attachments.map((attachment) => `
+            <div>
+              <strong>${escapeHtml(attachment.name || "Unnamed attachment")}</strong>
+              <span>${escapeHtml(attachment.contentType || "Unknown type")} · ${escapeHtml(formatDiagnosticBytes(attachment.size))} · ${escapeHtml(attachment.status || "unknown")}</span>
+              <small>${escapeHtml(attachment.reason || "")}</small>
+            </div>
+          `).join("")}</div>` : ""}
+        </article>
+      `;
+    }).join("")}
+    ${result.error ? `<p class="form-message">${escapeHtml(result.error)}</p>` : ""}
+  `;
+}
+
 function syncAiEmailIntakeControls() {
   if (!checkAiEmailIntakeButton) {
     return;
@@ -7506,6 +7618,14 @@ function syncAiEmailIntakeControls() {
     : aiEmailIntakeConfig.enabled
       ? "Microsoft 365 email intake needs Graph mailbox configuration."
       : "Microsoft 365 email intake is disabled.";
+  if (previewAiEmailIntakeButton) {
+    const previewAvailable = isMasterEditor() && aiEmailIntakeConfig.enabled && aiEmailIntakeConfig.configured;
+    previewAiEmailIntakeButton.classList.toggle("hidden", !isMasterEditor());
+    previewAiEmailIntakeButton.disabled = !previewAvailable;
+    previewAiEmailIntakeButton.title = previewAvailable
+      ? `Preview ${aiEmailIntakeConfig.mailboxUser || "configured mailbox"} / ${aiEmailIntakeConfig.folderName || "AI Investment Updates"}`
+      : "Master Editor access and Microsoft 365 intake configuration are required.";
+  }
 }
 
 function renderAiUpdateInbox() {
@@ -7514,7 +7634,7 @@ function renderAiUpdateInbox() {
   }
   syncAiEmailIntakeControls();
 
-  aiUpdateInboxSummary.innerHTML = ["pending", "approved", "rejected"]
+  aiUpdateInboxSummary.innerHTML = ["pending", "approved", "rejected", "superseded"]
     .map(
       (status) => `
         <article class="dashboard-card">
@@ -7547,6 +7667,7 @@ function renderAiUpdateInbox() {
               <p class="update-meta">
                 ${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")}
               </p>
+              ${proposal.opportunityName ? `<p class="update-meta">Opportunity: ${escapeHtml(proposal.opportunityName)} • Same source email: ${escapeHtml(String(allAiUpdateProposals.filter((item) => item.opportunityId && item.sourceMessageKey === proposal.sourceMessageKey).length))}</p>` : ""}
               <p class="update-notes">${escapeHtml(summarizeText(proposal.summary || "No summary staged.", ""))}</p>
               <p class="update-meta">Created ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
             </article>
@@ -8774,17 +8895,21 @@ async function loadConfig() {
   }
   configuredEntities = Array.isArray(config.entities) ? config.entities : [];
   aiEmailIntakeConfig = config.aiEmailIntake && typeof config.aiEmailIntake === "object"
-    ? {
+      ? {
         enabled: Boolean(config.aiEmailIntake.enabled),
         configured: Boolean(config.aiEmailIntake.configured),
         mailboxUser: String(config.aiEmailIntake.mailboxUser || "").trim(),
-        folderName: String(config.aiEmailIntake.folderName || "").trim()
+        folderName: String(config.aiEmailIntake.folderName || "").trim(),
+        maxMessagesPerRun: Number(config.aiEmailIntake.maxMessagesPerRun) || 0,
+        houseDomains: Array.isArray(config.aiEmailIntake.houseDomains) ? config.aiEmailIntake.houseDomains : []
       }
     : {
         enabled: false,
         configured: false,
         mailboxUser: "",
-        folderName: ""
+        folderName: "",
+        maxMessagesPerRun: 0,
+        houseDomains: []
       };
   renderConfiguredEntitySelects();
 
@@ -11221,6 +11346,29 @@ addListener(checkAiEmailIntakeButton, "click", async () => {
   }
 });
 
+addListener(previewAiEmailIntakeButton, "click", async () => {
+  if (!previewAiEmailIntakeButton) return;
+  previewAiEmailIntakeButton.disabled = true;
+  if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = "Loading the read-only Microsoft 365 intake preview...";
+  renderAiEmailIntakePreview(null);
+  try {
+    const result = await fetchJson("/api/ai-email-intake/preview");
+    renderAiEmailIntakePreview(result);
+    if (aiUpdateInboxMessage) {
+      aiUpdateInboxMessage.textContent = `Preview loaded for ${result.messages ? result.messages.length : 0} message${result.messages && result.messages.length === 1 ? "" : "s"}. No intake state was changed.`;
+    }
+  } catch (error) {
+    if (error.status === 401) {
+      setSignedInState(null);
+      return;
+    }
+    renderAiEmailIntakePreview({ messages: [], error: error.message });
+    if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
+  } finally {
+    syncAiEmailIntakeControls();
+  }
+});
+
 addListener(cancelAiUpdateAnalysisButton, "click", () => {
   closeAiUpdateAnalyzer();
 });
@@ -11448,6 +11596,9 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
           tractionRevenue: document.getElementById("newDealTractionRevenue").value,
           customersContractsDeployments: document.getElementById("newDealCustomers").value,
           roundType: document.getElementById("newDealRoundType").value,
+          targetFundSize: document.getElementById("newDealTargetFundSize").value,
+          minimumLpCommitment: document.getElementById("newDealMinimumLpCommitment").value,
+          coInvestmentAvailability: document.getElementById("newDealCoInvestmentAvailability").value,
           amountBeingRaised: document.getElementById("newDealAmountRaised").value,
           amountCommitted: document.getElementById("newDealAmountCommitted").value,
           amountRemaining: document.getElementById("newDealAmountRemaining").value,
@@ -11515,6 +11666,28 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
       if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = result.idempotent
         ? "Pipeline deal was already created; no duplicate was added."
         : "New pipeline deal created.";
+    } catch (error) {
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
+    } finally {
+      target.disabled = false;
+    }
+    return;
+  }
+
+  if (action === "reanalyze-source-message" && proposalId) {
+    const confirmed = window.confirm("Reanalyze this preserved source email? Pending decomposed opportunities will be refreshed in place; a legacy unpartitioned proposal is superseded only after replacements exist. No investment will be created.");
+    if (!confirmed) return;
+    target.disabled = true;
+    try {
+      const result = await fetchJson("/api/ai-email-intake/reanalyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proposalId })
+      });
+      await loadAiUpdateProposals();
+      selectedAiUpdateProposalId = result.refreshedProposalIds && result.refreshedProposalIds[0] || result.replacementProposalIds && result.replacementProposalIds[0] || "";
+      renderAiUpdateProposalDetail();
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis created ${result.proposalsCreated || 0} separately reviewable proposals. No investment was created.`;
     } catch (error) {
       if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
     } finally {

@@ -73,6 +73,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-before-productio
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_BODY_SIZE_BYTES = 20 * 1024 * 1024;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const AI_EMAIL_HOUSE_DOMAINS = process.env.AI_EMAIL_HOUSE_DOMAINS || "beamanventures.com";
 const AI_ANALYST_SYSTEM_PROMPT =
   "You are an internal investment analyst for Beaman Ventures. Your job is to produce concise, Lee-ready investment analysis. Be clear, practical, and decision-oriented. Do not make up facts. If data is missing, say what is missing and suggest what to ask for.";
 const DATA_SCHEMA_VERSION = 2;
@@ -103,6 +104,7 @@ const ENTITY_ALIASES = {
   "Katherine Trust": "Katherine Trust",
   "Natalie Trust": "Natalie Trust"
 };
+
 
 const DEFAULT_RECIPIENTS = splitCsv(process.env.TEAM_EMAILS || "");
 const DEFAULT_UPDATE_REQUEST_EMAIL = "Tyler@Beamanventures.com";
@@ -1130,7 +1132,7 @@ function normalizeTask(entry) {
   };
 }
 
-const AI_UPDATE_PROPOSAL_STATUSES = ["pending", "approved", "rejected"];
+const AI_UPDATE_PROPOSAL_STATUSES = ["pending", "approved", "rejected", "superseded"];
 
 function normalizeProposalStatus(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -1215,6 +1217,9 @@ function normalizeAiUpdateProposal(entry) {
     ),
     dealData: normalizeJsonObject(entry && entry.dealData, {}),
     matchResult: normalizeJsonObject(entry && entry.matchResult, {}),
+    opportunityName: String((entry && entry.opportunityName) || "").trim(),
+    opportunityId: String((entry && entry.opportunityId) || "").trim(),
+    opportunityIdentityKeys: normalizeStringList(entry && entry.opportunityIdentityKeys),
     opportunityFingerprint: String((entry && entry.opportunityFingerprint) || "").trim(),
     sourceMessageKey: String((entry && entry.sourceMessageKey) || "").trim(),
     sourceMessageKeys: normalizeStringList(entry && entry.sourceMessageKeys),
@@ -1223,6 +1228,8 @@ function normalizeAiUpdateProposal(entry) {
     noExistingMatchConfirmed: Boolean(entry && entry.noExistingMatchConfirmed),
     amountConfirmed: Boolean(entry && entry.amountConfirmed),
     createdInvestmentId: String((entry && entry.createdInvestmentId) || "").trim(),
+    supersededByProposalIds: normalizeStringList(entry && entry.supersededByProposalIds),
+    supersededReason: String((entry && entry.supersededReason) || "").trim(),
     status: normalizeProposalStatus(entry && entry.status),
     reviewedBy: String((entry && (entry.reviewedBy || entry.reviewed_by)) || "").trim(),
     reviewedAt: String((entry && (entry.reviewedAt || entry.reviewed_at)) || "").trim(),
@@ -1234,12 +1241,14 @@ function normalizeAiUpdateProposal(entry) {
 const NEW_DEAL_EDITABLE_FIELDS = [
   "companyName", "contactName", "contactEmail", "dealSummary", "roundType",
   "whatCompanyDoes", "businessModel", "stage", "tractionRevenue",
-  "customersContractsDeployments", "amountBeingRaised", "amountCommitted",
+  "customersContractsDeployments", "targetFundSize", "minimumLpCommitment",
+  "coInvestmentAvailability", "amountBeingRaised", "amountCommitted",
   "amountRemaining", "proposedCheckSize", "valuationCap", "securityType",
   "financingTerms", "leadInvestor", "useOfProceeds"
 ];
 const NEW_DEAL_FINANCIAL_FIELDS = new Set([
-  "tractionRevenue", "amountBeingRaised", "amountCommitted", "amountRemaining",
+  "tractionRevenue", "targetFundSize", "minimumLpCommitment", "coInvestmentAvailability",
+  "amountBeingRaised", "amountCommitted", "amountRemaining",
   "proposedCheckSize", "valuationCap", "financingTerms"
 ]);
 const NEW_DEAL_EDITABLE_LIST_FIELDS = [
@@ -1253,8 +1262,20 @@ function applyNewDealEdits(proposal, payload) {
     : {};
   NEW_DEAL_EDITABLE_FIELDS.forEach((field) => {
     if (!Object.prototype.hasOwnProperty.call(editedFields, field)) return;
-    const existing = dealData[field] && typeof dealData[field] === "object" ? dealData[field] : {};
+    const existingValue = dealData[field];
     const value = String(editedFields[field] || "").trim().slice(0, 2000);
+    if (Array.isArray(existingValue)) {
+      const displayedValue = existingValue.map((claim) => String((claim && claim.value) || "").trim()).filter(Boolean).join("\n");
+      const labeledDisplayedValue = existingValue.map((claim) => {
+        const claimValue = String((claim && claim.value) || "").trim();
+        const label = String((claim && claim.semanticLabel) || "").trim();
+        return label && claimValue && !claimValue.toLowerCase().startsWith(label.toLowerCase())
+          ? `${label}: ${claimValue}`
+          : claimValue;
+      }).filter(Boolean).join("\n");
+      if (value === displayedValue || value === labeledDisplayedValue) return;
+    }
+    const existing = existingValue && typeof existingValue === "object" && !Array.isArray(existingValue) ? existingValue : {};
     const unchangedVerified = existing.evidenceStatus === "verified" && value === existing.value;
     dealData[field] = {
       ...existing,
@@ -1377,11 +1398,13 @@ async function callAiUpdateAnalysisModel(prompt) {
 
 const { analyzeInvestmentUpdate } = createAiUpdateAnalysisService({
   callModel: callAiUpdateAnalysisModel,
-  normalizeEntityName
+  normalizeEntityName,
+  houseDomains: AI_EMAIL_HOUSE_DOMAINS
 });
 
-const { analyzePotentialNewDeal } = createNewDealAnalysisService({
-  callModel: callAiUpdateAnalysisModel
+const { analyzePotentialNewDeal, analyzePotentialNewDeals } = createNewDealAnalysisService({
+  callModel: callAiUpdateAnalysisModel,
+  houseDomains: AI_EMAIL_HOUSE_DOMAINS
 });
 
 const {
@@ -1436,6 +1459,7 @@ const aiEmailIntakeService = createAiEmailIntakeService({
   stateService: aiEmailIntakeStateService,
   analyzeInvestmentUpdate,
   analyzePotentialNewDeal,
+  analyzePotentialNewDeals,
   extractPdfTextFromUpload,
   finalizeAnalysisForResponse,
   enforceProposalSafetyInvariant,
@@ -4803,7 +4827,8 @@ const server = http.createServer(async (request, response) => {
           ? microsoftGraphMailService.getSafeConfigStatus().maxMessagesPerRun
           : 0,
         allowedSendersConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_SENDERS),
-        allowedDomainsConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_DOMAINS)
+        allowedDomainsConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_DOMAINS),
+        houseDomains: AI_EMAIL_HOUSE_DOMAINS.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
       },
       entities: INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity)),
       familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
@@ -5005,6 +5030,96 @@ const server = http.createServer(async (request, response) => {
         error: error.message || "Microsoft 365 email intake failed.",
         results: []
       });
+      return;
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ai-email-intake/preview") {
+    const user = requireMasterEditor(request, response);
+    if (!user) {
+      return;
+    }
+    if (!AI_EMAIL_INTAKE_ENABLED) {
+      sendJson(response, 400, {
+        error: "Microsoft 365 email intake is disabled. Set AI_EMAIL_INTAKE_ENABLED=true after configuring Microsoft Graph."
+      });
+      return;
+    }
+
+    try {
+      const result = await aiEmailIntakeService.previewEmails();
+      const status = result.configured === false ? 400 : 200;
+      sendJson(response, status, result);
+      return;
+    } catch (error) {
+      sendJson(response, error.statusCode || 500, {
+        configured: true,
+        error: error.message || "Microsoft 365 email intake preview failed.",
+        messages: []
+      });
+      return;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-email-intake/reanalyze") {
+    const user = requireMasterEditor(request, response);
+    if (!user) return;
+    if (!AI_EMAIL_INTAKE_ENABLED) {
+      sendJson(response, 400, { error: "Microsoft 365 email intake is disabled." });
+      return;
+    }
+    try {
+      const payload = await parseRequestBody(request);
+      const proposalId = String(payload.proposalId || "").trim();
+      const existing = readAiUpdateProposals().find((proposal) => proposal.id === proposalId);
+      if (!existing || existing.proposalType !== "new-deal") {
+        sendJson(response, 404, { error: "Potential New Deal proposal not found." });
+        return;
+      }
+      if (existing.status !== "pending") {
+        sendJson(response, 409, { error: "Only a pending source proposal can be reanalyzed." });
+        return;
+      }
+      const sourceState = aiEmailIntakeStateService.readState().find((entry) =>
+        entry.proposalIds.includes(proposalId)
+      );
+      if (!sourceState || !sourceState.graphMessageId) {
+        sendJson(response, 409, { error: "The preserved intake state does not contain a Graph source-message ID." });
+        return;
+      }
+      const result = await aiEmailIntakeService.reanalyzeMessage({
+        user,
+        graphMessageId: sourceState.graphMessageId,
+        expectedInternetMessageId: sourceState.internetMessageId
+      });
+      if (existing.opportunityId) {
+        sendJson(response, 200, {
+          ...result,
+          refreshedProposalIds: result.proposalIds,
+          replacementProposalIds: []
+        });
+        return;
+      }
+      const replacementIds = result.proposalIds.filter((id) => id !== proposalId);
+      if (!replacementIds.length) {
+        sendJson(response, 422, { error: "Reanalysis did not create a replacement opportunity proposal." });
+        return;
+      }
+      const superseded = updateAiUpdateProposal(proposalId, {
+        status: "superseded",
+        supersededByProposalIds: replacementIds,
+        supersededReason: "Explicit master-editor source-message reanalysis produced decomposed opportunity proposals.",
+        reviewedBy: user.email,
+        reviewedAt: new Date().toISOString()
+      });
+      sendJson(response, 200, {
+        ...result,
+        supersededProposalId: superseded.id,
+        replacementProposalIds: replacementIds
+      });
+      return;
+    } catch (error) {
+      sendJson(response, error.statusCode || 500, { error: error.message || "Source-message reanalysis failed." });
       return;
     }
   }

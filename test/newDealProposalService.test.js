@@ -34,6 +34,73 @@ test("same source message cannot create two new-deal proposals", () => {
   assert.equal(harness.getStored().length, 1);
 });
 
+test("one source message may create distinct proposals but not duplicate a source-opportunity pair", () => {
+  const harness = createHarness();
+  const first = harness.service.saveAiUpdateProposal({ proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1", opportunityFingerprint: "fp-1" });
+  const second = harness.service.saveAiUpdateProposal({ proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-2", opportunityFingerprint: "fp-2" });
+  const duplicate = harness.service.saveAiUpdateProposal({ proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1", opportunityFingerprint: "fp-1" });
+  assert.notEqual(first.id, second.id);
+  assert.equal(duplicate.id, first.id);
+  assert.equal(harness.getStored().length, 2);
+});
+
+test("source-opportunity idempotency also protects an existing-investment proposal route", () => {
+  const harness = createHarness();
+  const first = harness.service.saveAiUpdateProposal({ proposalType: "investment-update", sourceMessageKey: "message-1", opportunityId: "opp-1", investmentId: "existing-1" });
+  const duplicate = harness.service.saveAiUpdateProposal({ proposalType: "investment-update", sourceMessageKey: "message-1", opportunityId: "opp-1", investmentId: "existing-1" });
+  assert.equal(duplicate.id, first.id);
+  assert.equal(harness.getStored().length, 1);
+});
+
+test("explicit reanalysis may refresh a pending source-opportunity proposal in place", () => {
+  const harness = createHarness();
+  const first = harness.service.saveAiUpdateProposal({
+    proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1",
+    opportunityFingerprint: "fp-1", summary: "Stale analysis"
+  });
+  const refreshed = harness.service.saveAiUpdateProposal({
+    proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1",
+    opportunityFingerprint: "fp-1", summary: "Corrected analysis"
+  }, { replacePendingSourceOpportunity: true });
+  assert.equal(refreshed.id, first.id);
+  assert.equal(refreshed.summary, "Corrected analysis");
+  assert.equal(refreshed.status, "pending");
+  assert.equal(harness.getStored().length, 1);
+});
+
+test("explicit reanalysis matches a pending source opportunity through canonical identity aliases", () => {
+  const harness = createHarness();
+  const first = harness.service.saveAiUpdateProposal({
+    proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "canonical-pure",
+    opportunityIdentityKeys: ["canonical-pure"], opportunityFingerprint: "fp-1", summary: "Project Pure"
+  });
+  const refreshed = harness.service.saveAiUpdateProposal({
+    proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "new-model-name",
+    opportunityIdentityKeys: ["canonical-pure", "new-model-name"], opportunityFingerprint: "fp-1", summary: "Project Pure Co-Investment"
+  }, { replacePendingSourceOpportunity: true });
+  assert.equal(refreshed.id, first.id);
+  assert.equal(harness.getStored().length, 1);
+  assert.equal(refreshed.summary, "Project Pure Co-Investment");
+});
+
+test("explicit reanalysis never overwrites an approved or rejected source opportunity", () => {
+  for (const status of ["approved", "rejected"]) {
+    const harness = createHarness();
+    const terminal = harness.service.saveAiUpdateProposal({
+      proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1",
+      opportunityFingerprint: "fp-1", summary: "Reviewed", status
+    });
+    const result = harness.service.saveAiUpdateProposal({
+      proposalType: "new-deal", sourceMessageKey: "message-1", opportunityId: "opp-1",
+      opportunityFingerprint: "fp-1", summary: "Replacement", status: "pending"
+    }, { replacePendingSourceOpportunity: true });
+    assert.equal(result.id, terminal.id);
+    assert.equal(result.status, status);
+    assert.equal(result.summary, "Reviewed");
+    assert.equal(harness.getStored().length, 1);
+  }
+});
+
 test("multiple emails for one opportunity coalesce attachments by hash", () => {
   const harness = createHarness();
   const first = harness.service.saveAiUpdateProposal({
