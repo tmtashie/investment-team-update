@@ -263,6 +263,10 @@ test("semantic-only match produces lower confidence and warning", async () => {
       confidence: 91,
       reason: "Financial update sounded similar."
     },
+    deterministicEvidence: {
+      investmentId: "vanguard-id",
+      types: ["sourceBody"]
+    },
     entityMatch: {},
     extractedFacts: [],
     whatChanged: [],
