@@ -4,9 +4,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   buildUserFacingWarnings,
+  formatAiUpdateProposalSummary,
   formatDealClaimValue,
+  getDisplayDealClaimItems,
   getReportUpdatesEmptyMessage,
   isHighRiskNumeric,
+  normalizeAiUpdateProposalCounts,
   sanitizeForActionableView,
   shouldRefreshInvestmentsAfterAiProposalAction,
   warningMessage
@@ -80,6 +83,65 @@ test("structured deal claims render evidence-backed semantic labels with their v
     "Alpha Services: $15.0MM", "Beta Industrial: $7.5MM"
   ].join("\n"));
   assert.equal(formatDealClaimValue(proposal, "historicalTargetDifference"), "$255.5MM");
+});
+
+test("BEP persisted statuses and legacy Core fields produce the final Inbox display", () => {
+  const proposals = [
+    { id: "core", status: "pending" },
+    { id: "pure", status: "pending" },
+    { id: "care", status: "pending" },
+    { id: "pure-alias", status: "superseded" },
+    { id: "care-alias", status: "superseded" }
+  ];
+  assert.deepEqual(normalizeAiUpdateProposalCounts({
+    proposals,
+    counts: { pending: 99, superseded: 0 }
+  }), { pending: 3, approved: 0, rejected: 0, superseded: 2 });
+
+  const core = {
+    proposalType: "new-deal",
+    summary: "BEP Core Fund VIII is currently raising $350MM.",
+    dealData: {
+      stage: { value: "Fundraising closed", authoritativeValue: "Fundraising closed", evidenceStatus: "verified" },
+      targetFundSize: {
+        value: "$350MM", authoritativeValue: "$350MM", evidenceStatus: "verified",
+        sourceEvidence: "The target fund size is $350MM."
+      },
+      amountCommitted: {
+        value: "$94.5MM", authoritativeValue: "$94.5MM", evidenceStatus: "verified",
+        sourceEvidence: "The fund has $94.5MM committed across six investments."
+      },
+      amountRemaining: { value: "", authoritativeValue: "", evidenceStatus: "unresolved" },
+      proposedCheckSize: { value: "", authoritativeValue: "", evidenceStatus: "unresolved" },
+      dealSummary: {
+        value: "BEP Core Fund VIII is currently raising $350MM.", evidenceStatus: "verified"
+      },
+      businessModel: {
+        value: "The fund is seeking to raise $350MM.", evidenceStatus: "verified"
+      },
+      nextSteps: [{
+        value: "Beaman Ventures should review fund performance.",
+        sourceEvidence: "The fund has $94.5MM committed across six investments.",
+        evidenceStatus: "verified"
+      }]
+    }
+  };
+  const historical = getDisplayDealClaimItems(core, "historicalTargetDifference")[0];
+  assert.equal(formatDealClaimValue(core, "historicalTargetDifference"), "$255.5MM");
+  assert.equal(historical.currentAvailability, false);
+  assert.equal(historical.sourceLocation, "Derived from verified target and historical commitments");
+  assert.equal(formatDealClaimValue(core, "amountRemaining"), "");
+  assert.equal(formatDealClaimValue(core, "proposedCheckSize"), "");
+  assert.match(formatDealClaimValue(core, "dealSummary"), /target fund size of \$350MM/i);
+  assert.match(formatDealClaimValue(core, "dealSummary"), /fundraising is closed/i);
+  assert.doesNotMatch(formatDealClaimValue(core, "dealSummary"), /currently raising|seeking to raise/i);
+  assert.doesNotMatch(formatDealClaimValue(core, "businessModel"), /currently raising|seeking to raise/i);
+  assert.doesNotMatch(formatAiUpdateProposalSummary(core), /currently raising|seeking to raise/i);
+  assert.match(formatAiUpdateProposalSummary(core), /fundraising is closed/i);
+  assert.deepEqual(getDisplayDealClaimItems(core, "nextSteps"), []);
+  assert.equal(getDisplayDealClaimItems({
+    dealData: { nextSteps: [{ value: "Review at the next IC meeting.", evidenceStatus: "confirmed" }] }
+  }, "nextSteps").length, 1);
 });
 
 test("frontend user-facing warnings hide internal sanitizer messages", () => {
@@ -175,4 +237,6 @@ test("source-message reanalysis is explicit, master-editor-only, and does not ca
   assert.match(appSource, /No investment was created/);
   assert.match(appSource, /item\.status === "pending" && item\.opportunityId/);
   assert.match(appSource, /superseded.*redundant pending aliases/);
+  assert.match(appSource, /normalizeAiUpdateProposalCounts\(data\)/);
+  assert.match(appSource, /Historical \/ unfunded target difference.*derived, non-current/);
 });
