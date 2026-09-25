@@ -258,6 +258,18 @@ test("bare deadline text expands to the verified event context", () => {
   assert.equal(analysis.dealData.deadlines[0].evidenceStatus, "verified");
 });
 
+test("generic upcoming investments text is not a deadline without temporal evidence", () => {
+  const localSource = { sourceText: "Upcoming investments. Fund close by Q2 2027." };
+  const analysis = normalizeDealAnalysis({
+    companyName: { value: "Example Fund", sourceEvidence: "Example Fund" },
+    deadlines: [
+      { value: "Upcoming investments", sourceEvidence: "Upcoming investments." },
+      { value: "Fund close by Q2 2027", sourceEvidence: "Fund close by Q2 2027." }
+    ]
+  }, localSource, { status: "no-match", candidates: [], best: null, hasCompetingCandidate: false });
+  assert.deepEqual(analysis.dealData.deadlines.map((claim) => claim.value), ["Fund close by Q2 2027"]);
+});
+
 test("prompt injection in source is data and cannot set authorization or approval fields", async () => {
   let prompt = "";
   const service = createNewDealAnalysisService({
@@ -352,9 +364,9 @@ test("sanitized BEP email decomposes into three evidence-isolated opportunities 
   assert.equal(core.proposedCheckSize.authoritativeValue, "");
   assert.equal(core.stage.authoritativeValue, "Fundraising closed");
   assert.match(core.stage.sourceEvidence, /fundraising memo is now close/);
-  assert.equal(core.stage.supersededEvidence[0].value, "Open for new commitments");
+  assert.equal(core.stage.supersededEvidence[0].value, "Active fundraising");
   assert.equal(Array.isArray(core.tractionRevenue), true);
-  assert.equal(core.tractionRevenue[0].authoritativeValue, "$94.5MM in historical commitments");
+  assert.equal(core.tractionRevenue[0].authoritativeValue, "$94.5MM committed across six investments");
   assert.equal(Array.isArray(core.customersContractsDeployments), true);
   assert.deepEqual(core.customersContractsDeployments.map((claim) => claim.semanticLabel), [
     "Alpha Services", "Beta Industrial", "Gamma Business Services"
@@ -441,7 +453,7 @@ test("repeated sanitized BEP reanalysis refreshes exactly three canonical pendin
   ]);
   const core = stored.find((proposal) => proposal.opportunityName === "BEP Core Fund VIII").dealData;
   assert.equal(core.stage.authoritativeValue, "Fundraising closed");
-  assert.equal(core.stage.supersededEvidence[0].value, "Open for new commitments");
+  assert.equal(core.stage.supersededEvidence[0].value, "Active fundraising");
   assert.equal(core.historicalTargetDifference.authoritativeValue, "$255.5MM");
   assert.equal(core.historicalTargetDifference.currentAvailability, false);
   assert.equal(core.amountRemaining.value, "");

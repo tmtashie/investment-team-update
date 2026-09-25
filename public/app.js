@@ -6852,6 +6852,7 @@ function renderNewDealProposalDetail(proposal) {
   ).join("");
   const sourceSiblings = allAiUpdateProposals.filter((item) =>
     proposal.sourceMessageKey && item.sourceMessageKey === proposal.sourceMessageKey &&
+      item.status === "pending" &&
       (proposal.opportunityId ? Boolean(item.opportunityId) : !item.opportunityId)
   );
   const opportunityLabel = proposal.opportunityName || dealClaimValue(proposal, "companyName") || "Unpartitioned source";
@@ -7667,7 +7668,7 @@ function renderAiUpdateInbox() {
               <p class="update-meta">
                 ${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")}
               </p>
-              ${proposal.opportunityName ? `<p class="update-meta">Opportunity: ${escapeHtml(proposal.opportunityName)} • Same source email: ${escapeHtml(String(allAiUpdateProposals.filter((item) => item.opportunityId && item.sourceMessageKey === proposal.sourceMessageKey).length))}</p>` : ""}
+              ${proposal.opportunityName ? `<p class="update-meta">Opportunity: ${escapeHtml(proposal.opportunityName)} • Same source email: ${escapeHtml(String(allAiUpdateProposals.filter((item) => item.status === "pending" && item.opportunityId && item.sourceMessageKey === proposal.sourceMessageKey).length))}</p>` : ""}
               <p class="update-notes">${escapeHtml(summarizeText(proposal.summary || "No summary staged.", ""))}</p>
               <p class="update-meta">Created ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
             </article>
@@ -11687,7 +11688,7 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
       await loadAiUpdateProposals();
       selectedAiUpdateProposalId = result.refreshedProposalIds && result.refreshedProposalIds[0] || result.replacementProposalIds && result.replacementProposalIds[0] || "";
       renderAiUpdateProposalDetail();
-      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis created ${result.proposalsCreated || 0} separately reviewable proposals. No investment was created.`;
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis refreshed ${result.proposalsRefreshed || result.proposalsCreated || 0} canonical proposals and superseded ${(result.supersededProposalIds || []).length} redundant pending aliases. No investment was created.`;
     } catch (error) {
       if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
     } finally {

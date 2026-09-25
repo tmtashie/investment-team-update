@@ -2,15 +2,16 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createAiUpdateProposalService } = require("../services/aiUpdateProposalService");
 
-function createHarness() {
-  let stored = [];
+function createHarness(initial = []) {
+  let stored = structuredClone(initial);
+  let generatedId = 0;
   const service = createAiUpdateProposalService({
     AI_UPDATE_PROPOSALS_FILE: "proposals.json",
     readJsonFile: () => stored,
     writeJsonFile: (_file, value) => { stored = value; },
     writeMetadata: () => {},
     normalizeAiUpdateProposal: (value) => ({
-      id: value.id || `proposal-${stored.length + 1}`,
+      id: value.id || `proposal-${++generatedId}`,
       proposalType: value.proposalType || "investment-update",
       status: value.status || "pending",
       sourceMessageKey: value.sourceMessageKey || "",
@@ -99,6 +100,68 @@ test("explicit reanalysis never overwrites an approved or rejected source opport
     assert.equal(result.summary, "Reviewed");
     assert.equal(harness.getStored().length, 1);
   }
+});
+
+test("source reconciliation supersedes pending aliases but preserves reviewed aliases", () => {
+  const initial = [
+    { id: "pure", proposalType: "new-deal", sourceMessageKey: "message-1", opportunityName: "Project Pure", opportunityId: "pure-id", status: "pending", updatedAt: "v1", documents: [] },
+    { id: "pure-alias", proposalType: "new-deal", sourceMessageKey: "message-1", opportunityName: "Project Pure Co-Investment", opportunityId: "legacy-pure-id", status: "pending", updatedAt: "v1", documents: [] },
+    { id: "pure-approved", proposalType: "new-deal", sourceMessageKey: "message-1", opportunityName: "Project Pure Co-Investment", opportunityId: "legacy-approved-id", status: "approved", updatedAt: "v1", documents: [] },
+    { id: "care", proposalType: "new-deal", sourceMessageKey: "message-1", opportunityName: "Project Care", opportunityId: "care-id", status: "pending", updatedAt: "v1", documents: [] },
+    { id: "care-rejected", proposalType: "new-deal", sourceMessageKey: "message-1", opportunityName: "Project Care Co-Investment", opportunityId: "legacy-rejected-id", status: "rejected", updatedAt: "v1", documents: [] }
+  ];
+  const harness = createHarness(initial);
+  const snapshot = harness.service.sourceProposalSnapshot("message-1");
+  const result = harness.service.reconcilePendingSourceOpportunities({
+    sourceMessageKey: "message-1",
+    expectedSnapshot: snapshot,
+    reviewer: "master@example.test",
+    reconciledAt: "2026-09-22T22:00:00.000Z",
+    canonicalEntries: [
+      { proposalType: "new-deal", opportunityName: "Project Pure", opportunityId: require("../services/newDealAnalysisService").opportunityIdentity("Project Pure"), status: "pending" },
+      { proposalType: "new-deal", opportunityName: "Project Care", opportunityId: require("../services/newDealAnalysisService").opportunityIdentity("Project Care"), status: "pending" }
+    ]
+  });
+  assert.deepEqual(result.supersededProposals.map((proposal) => proposal.id), ["pure-alias"]);
+  assert.equal(harness.getStored().find((proposal) => proposal.id === "pure-approved").status, "approved");
+  assert.equal(harness.getStored().find((proposal) => proposal.id === "care-rejected").status, "rejected");
+});
+
+test("source reconciliation fails closed when a proposal changes after the snapshot", () => {
+  const harness = createHarness([{
+    id: "pure", proposalType: "new-deal", sourceMessageKey: "message-1", opportunityName: "Project Pure",
+    opportunityId: "pure-id", status: "pending", updatedAt: "v1", documents: []
+  }]);
+  const snapshot = harness.service.sourceProposalSnapshot("message-1");
+  harness.service.updateAiUpdateProposal("pure", { status: "approved" });
+  assert.throws(() => harness.service.reconcilePendingSourceOpportunities({
+    sourceMessageKey: "message-1",
+    expectedSnapshot: snapshot,
+    reviewer: "master@example.test",
+    canonicalEntries: [{ proposalType: "new-deal", opportunityName: "Project Pure", opportunityId: "pure-id" }]
+  }), /changed during reanalysis/);
+  assert.equal(harness.getStored()[0].status, "approved");
+});
+
+test("source reconciliation leaves an unpartitioned legacy proposal for the existing legacy supersession path", () => {
+  const harness = createHarness([{
+    id: "legacy", proposalType: "new-deal", sourceMessageKey: "message-1", opportunityName: "",
+    opportunityId: "", status: "pending", updatedAt: "v1",
+    documents: [{ graphAttachmentId: "core" }, { graphAttachmentId: "pure" }, { graphAttachmentId: "care" }]
+  }]);
+  const result = harness.service.reconcilePendingSourceOpportunities({
+    sourceMessageKey: "message-1",
+    expectedSnapshot: harness.service.sourceProposalSnapshot("message-1"),
+    reviewer: "master@example.test",
+    canonicalEntries: [
+      { proposalType: "new-deal", opportunityName: "Core Fund", opportunityId: "core", documents: [{ graphAttachmentId: "core" }] },
+      { proposalType: "new-deal", opportunityName: "Project Pure", opportunityId: "pure", documents: [{ graphAttachmentId: "pure" }] },
+      { proposalType: "new-deal", opportunityName: "Project Care", opportunityId: "care", documents: [{ graphAttachmentId: "care" }] }
+    ]
+  });
+  assert.equal(result.proposals.length, 3);
+  assert.equal(result.supersededProposals.length, 0);
+  assert.equal(harness.getStored().find((proposal) => proposal.id === "legacy").status, "pending");
 });
 
 test("multiple emails for one opportunity coalesce attachments by hash", () => {

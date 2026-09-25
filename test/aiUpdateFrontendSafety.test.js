@@ -173,4 +173,6 @@ test("source-message reanalysis is explicit, master-editor-only, and does not ca
   assert.match(appSource, /window\.confirm\("Reanalyze this preserved source email\?/);
   assert.match(appSource, /fetchJson\("\/api\/ai-email-intake\/reanalyze"/);
   assert.match(appSource, /No investment was created/);
+  assert.match(appSource, /item\.status === "pending" && item\.opportunityId/);
+  assert.match(appSource, /superseded.*redundant pending aliases/);
 });

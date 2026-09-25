@@ -1,3 +1,5 @@
+const { opportunityIdentity } = require("./newDealAnalysisService");
+
 function createAiUpdateProposalService({
   AI_UPDATE_PROPOSALS_FILE,
   readJsonFile,
@@ -25,6 +27,150 @@ function createAiUpdateProposalService({
     }
 
     return normalized;
+  }
+
+  function sourceProposalSnapshot(sourceMessageKey) {
+    return readAiUpdateProposals()
+      .filter((proposal) => proposal.sourceMessageKey === sourceMessageKey)
+      .map((proposal) => ({
+        id: proposal.id,
+        status: proposal.status,
+        updatedAt: proposal.updatedAt,
+        opportunityId: proposal.opportunityId,
+        opportunityName: proposal.opportunityName,
+        version: JSON.stringify(proposal)
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  function proposalIdentityKeys(proposal) {
+    const companyName = proposal && proposal.dealData && proposal.dealData.companyName;
+    const companyValue = companyName && typeof companyName === "object" ? companyName.value : companyName;
+    return new Set([
+      proposal && proposal.opportunityId,
+      ...(proposal && proposal.opportunityIdentityKeys || []),
+      opportunityIdentity(proposal && proposal.opportunityName),
+      opportunityIdentity(companyValue)
+    ].filter(Boolean));
+  }
+
+  function proposalDocumentKeys(proposal) {
+    return new Set((proposal && proposal.documents || [])
+      .flatMap((document) => [document.hash, document.graphAttachmentId].filter(Boolean)));
+  }
+
+  function proposalsRepresentSameOpportunity(existing, incoming) {
+    const incomingKeys = proposalIdentityKeys(incoming);
+    if ([...proposalIdentityKeys(existing)].some((key) => incomingKeys.has(key))) return true;
+    const incomingDocuments = proposalDocumentKeys(incoming);
+    return [...proposalDocumentKeys(existing)].some((key) => incomingDocuments.has(key));
+  }
+
+  function reconcilePendingSourceOpportunities({
+    sourceMessageKey,
+    canonicalEntries,
+    expectedSnapshot,
+    reviewer,
+    reconciledAt = new Date().toISOString()
+  }) {
+    const proposals = readAiUpdateProposals();
+    const currentSnapshot = proposals
+      .filter((proposal) => proposal.sourceMessageKey === sourceMessageKey)
+      .map((proposal) => ({
+        id: proposal.id,
+        status: proposal.status,
+        updatedAt: proposal.updatedAt,
+        opportunityId: proposal.opportunityId,
+        opportunityName: proposal.opportunityName,
+        version: JSON.stringify(proposal)
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+    if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot || [])) {
+      const error = new Error("Source proposals changed during reanalysis; no reconciliation was applied.");
+      error.statusCode = 409;
+      throw error;
+    }
+    const normalizedEntries = (Array.isArray(canonicalEntries) ? canonicalEntries : [])
+      .map((entry) => normalizeAiUpdateProposal({ ...entry, sourceMessageKey, status: "pending", updatedAt: reconciledAt }));
+    const canonicalIds = normalizedEntries.map((entry) => entry.opportunityId).filter(Boolean);
+    if (!normalizedEntries.length || canonicalIds.length !== normalizedEntries.length || new Set(canonicalIds).size !== canonicalIds.length) {
+      const error = new Error("Reanalysis did not produce a unique canonical opportunity set.");
+      error.statusCode = 422;
+      throw error;
+    }
+
+    const replacements = new Map();
+    const supersededById = new Map();
+    const canonicalProposals = [];
+    for (const entry of normalizedEntries) {
+      const matching = proposals.filter((proposal) =>
+        proposal.sourceMessageKey === sourceMessageKey && proposal.opportunityId &&
+          proposalsRepresentSameOpportunity(proposal, entry)
+      );
+      const pendingMatches = matching.filter((proposal) => proposal.status === "pending");
+      const exactPending = pendingMatches.find((proposal) => proposal.opportunityId === entry.opportunityId);
+      const namedPending = pendingMatches.find((proposal) =>
+        opportunityIdentity(proposal.opportunityName) === entry.opportunityId
+      );
+      const selected = exactPending || namedPending || pendingMatches[0];
+      if (!selected && matching.some((proposal) => ["approved", "rejected"].includes(proposal.status))) {
+        const error = new Error("A reviewed source opportunity cannot be overwritten by reanalysis.");
+        error.statusCode = 409;
+        throw error;
+      }
+      const canonical = normalizeAiUpdateProposal({
+        ...(selected || {}),
+        ...entry,
+        id: selected ? selected.id : entry.id,
+        createdAt: selected ? selected.createdAt : entry.createdAt,
+        status: "pending",
+        reviewedBy: "",
+        reviewedAt: "",
+        reanalysisReconciledAt: reconciledAt,
+        updatedAt: reconciledAt
+      });
+      canonicalProposals.push(canonical);
+      if (selected) replacements.set(selected.id, canonical);
+      pendingMatches.filter((proposal) => !selected || proposal.id !== selected.id).forEach((proposal) => {
+        const existingTarget = supersededById.get(proposal.id);
+        if (existingTarget && existingTarget !== canonical.id) {
+          const error = new Error("A pending source alias matched more than one canonical opportunity.");
+          error.statusCode = 409;
+          throw error;
+        }
+        supersededById.set(proposal.id, canonical.id);
+      });
+    }
+
+    const supersededProposals = [];
+    const next = proposals.map((proposal) => {
+      if (replacements.has(proposal.id)) return replacements.get(proposal.id);
+      const canonicalId = supersededById.get(proposal.id);
+      if (!canonicalId) return proposal;
+      if (proposal.status !== "pending") {
+        const error = new Error("Only unchanged pending aliases may be superseded by reanalysis.");
+        error.statusCode = 409;
+        throw error;
+      }
+      const superseded = normalizeAiUpdateProposal({
+        ...proposal,
+        status: "superseded",
+        supersededByProposalIds: [canonicalId],
+        supersededReason: "Explicit master-editor reanalysis reconciled this pending alias to its canonical source opportunity.",
+        reviewedBy: reviewer,
+        reviewedAt: reconciledAt,
+        supersededAt: reconciledAt,
+        reanalysisReconciledAt: reconciledAt,
+        updatedAt: reconciledAt
+      });
+      supersededProposals.push(superseded);
+      return superseded;
+    });
+    canonicalProposals.filter((proposal) => !proposals.some((existing) => existing.id === proposal.id))
+      .forEach((proposal) => next.unshift(proposal));
+    createBackupSnapshot("before-source-opportunity-reconciliation");
+    writeAiUpdateProposals(next);
+    return { proposals: canonicalProposals, supersededProposals };
   }
 
   function saveAiUpdateProposal(entry, { replacePendingSourceOpportunity = false } = {}) {
@@ -149,6 +295,8 @@ function createAiUpdateProposalService({
 
   return {
     readAiUpdateProposals,
+    sourceProposalSnapshot,
+    reconcilePendingSourceOpportunities,
     writeAiUpdateProposals,
     saveAiUpdateProposal,
     updateAiUpdateProposal,
