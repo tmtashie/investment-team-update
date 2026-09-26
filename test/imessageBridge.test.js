@@ -126,6 +126,12 @@ test("an allowlisted conversation can be read with normalized output", (t) => {
   assert.equal(JSON.stringify(result).includes(THREAD_ONE_GUID), false);
 });
 
+test("recent-message limiting uses normalized Apple timestamps", (t) => {
+  const { service } = withService(t);
+  const result = service.readRecentMessages({ threadId: THREAD_ONE, limit: 1 });
+  assert.deepEqual(result.messages.map((message) => message.messageId), ["message-later"]);
+});
+
 test("a non-allowlisted conversation is rejected before message access", (t) => {
   const { service } = withService(t);
   assert.throws(
@@ -287,6 +293,43 @@ test("the MCP surface contains only three annotated read-only tools", () => {
     assert.equal(tool.inputSchema.additionalProperties, false);
   }
   assert.equal(TOOL_DEFINITIONS.some((tool) => /send|reply|react|edit|delete|attachment|mark/i.test(tool.name)), false);
+});
+
+test("the MCP handler rejects inherited object properties as tool names", async (t) => {
+  const { service } = withService(t);
+  const handle = createMcpRequestHandler(service);
+  for (const name of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+    const response = await handle({
+      jsonrpc: "2.0",
+      id: name,
+      method: "tools/call",
+      params: { name, arguments: {} }
+    });
+    assert.deepEqual(response.error, { code: -32601, message: "Tool not found" });
+  }
+});
+
+test("the MCP handler rejects malformed present arguments without rejecting omitted arguments", async (t) => {
+  const { service } = withService(t);
+  const handle = createMcpRequestHandler(service);
+  for (const value of [null, false, 0, ""]) {
+    const response = await handle({
+      jsonrpc: "2.0",
+      id: String(value),
+      method: "tools/call",
+      params: { name: "list_allowed_message_threads", arguments: value }
+    });
+    assert.equal(response.result.isError, true);
+    assert.equal(response.result.structuredContent.code, "INVALID_REQUEST");
+  }
+
+  const omitted = await handle({
+    jsonrpc: "2.0",
+    id: "omitted",
+    method: "tools/call",
+    params: { name: "list_allowed_message_threads" }
+  });
+  assert.equal(omitted.result.isError, false);
 });
 
 test("the MCP handler completes the read-only handshake and ignores notifications", async (t) => {
