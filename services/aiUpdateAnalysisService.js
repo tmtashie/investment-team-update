@@ -1579,6 +1579,9 @@ function normalizeAnalysisResult({
   const whatChanged = shouldEnforceEvidenceGate
     ? enrichSafeWhatChangedSummary([], proposedChanges, materialDevelopments)
     : enrichWhatChangedSummary(raw.whatChanged || raw.what_changed, proposedChanges);
+  const matchedDeterministicCandidate = matchedInvestment && !hasCompetingCandidate
+    ? deterministicCandidates.find((candidate) => candidate.investmentId === matchedInvestment.id)
+    : null;
 
   const normalizedAnalysis = {
     investmentMatch: {
@@ -1592,6 +1595,12 @@ function normalizeAnalysisResult({
         : deterministicBest && matchedInvestment && matchedInvestment.id === deterministicBest.investmentId
           ? deterministicReason
           : asString(modelInvestmentMatch.reason || modelInvestmentMatch.matchReason, 600)
+    },
+    deterministicEvidence: {
+      investmentId: matchedDeterministicCandidate ? matchedDeterministicCandidate.investmentId : "",
+      types: matchedDeterministicCandidate && Array.isArray(matchedDeterministicCandidate.evidenceTypes)
+        ? matchedDeterministicCandidate.evidenceTypes.slice()
+        : []
     },
     entityMatch: {
       entityId: entityName,

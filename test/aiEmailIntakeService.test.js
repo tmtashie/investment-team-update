@@ -109,6 +109,10 @@ function createHarness({
               confidence: 96,
               reason: "Exact source body match for 'Healing Innovations'."
             },
+            deterministicEvidence: {
+              investmentId: "healing-id",
+              types: ["sourceBody"]
+            },
             entityMatch: {
               entityId: "beaman-ventures",
               entityName: "Beaman Ventures",
@@ -328,9 +332,32 @@ test("automated explicit-match helper rejects warning-marked semantic matches", 
         investmentId: "finsync-id",
         reason: "Exact subject match for 'FINSYNC'. Sender domain 'finsync' supports 'FINSYNC'."
       },
+      deterministicEvidence: {
+        investmentId: "finsync-id",
+        types: ["subject", "senderDomain"]
+      },
       warnings: []
     }),
     true
+  );
+});
+
+test("automated explicit-match helper does not trust model-authored reason text", () => {
+  assert.equal(
+    hasAutomatedExplicitInvestmentMatch({
+      investmentMatch: {
+        investmentId: "healing-id",
+        reason: "Exact source body match for 'Healing Innovations'."
+      },
+      candidates: [
+        {
+          investmentId: "healing-id",
+          reason: "Sender domain 'healing' supports 'Healing Innovations'."
+        }
+      ],
+      warnings: []
+    }),
+    false
   );
 });
 
@@ -437,6 +464,10 @@ test("valid deterministic FINSYNC match with no actionable content stores safe s
         confidence: 98,
         reason: "Exact subject match for 'FINSYNC'. Sender domain 'finsync' supports 'FINSYNC'."
       },
+      deterministicEvidence: {
+        investmentId: "finsync-id",
+        types: ["subject", "senderDomain"]
+      },
       entityMatch: {
         entityId: "Beaman Ventures",
         entityName: "Beaman Ventures",
@@ -531,6 +562,10 @@ test("automated email intake accepts a valid deterministic explicit match", asyn
         investmentName: "FINSYNC",
         confidence: 98,
         reason: "Exact subject match for 'FINSYNC'. Sender domain 'finsync' supports 'FINSYNC'."
+      },
+      deterministicEvidence: {
+        investmentId: "finsync-id",
+        types: ["subject", "senderDomain"]
       },
       entityMatch: {
         entityId: "Beaman Ventures",
