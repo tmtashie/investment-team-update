@@ -114,6 +114,7 @@ test("strict numeric equivalence preserves financial scale", () => {
   assert.equal(_test.numericValuesExactlyEquivalent("3M", "3,000,000"), true);
   assert.equal(_test.numericValuesExactlyEquivalent("3M", "3"), false);
 });
+
 test("strict numeric matcher rejects Page 9 KPI tokens for 21.7M", () => {
   const page9 =
     "Q2 KPIs Total Units Sold: 57 Sales Meetings: 89 Total Units Deployed: 53 Total Units Trained: 51 Total Steps Last Quarter: 3,920,989 Total Sessions: 23,908 Total Patients: 4,093 Service Calls: 45 Operations FTE: 21 (+1) Part-Time: 4 Key Contractors: 6 People";

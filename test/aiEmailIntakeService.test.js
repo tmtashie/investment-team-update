@@ -209,6 +209,7 @@ test("email body intake normalizes HTML and uses the existing AI analysis and pr
   assert.equal(harness.savedProposals[0].investmentId, "healing-id");
   assert.deepEqual(harness.getStored()[0].proposalIds, ["proposal-1"]);
 });
+
 test("PDF attachment intake extracts text and creates one pending proposal per PDF", async () => {
   const message = createMessage({
     body: "Please see the attached board materials.",

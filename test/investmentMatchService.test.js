@@ -12,6 +12,7 @@ test("shared matcher returns a confident deterministic existing investment", () 
   assert.equal(result.best.investmentId, "acme");
   assert.deepEqual(result.best.evidenceTypes, ["sourceBody", "senderDomain"]);
 });
+
 test("competing deterministic candidates are ambiguous", () => {
   const result = generateInvestmentMatchCandidates({
     source: { subject: "Atlas update", sourceText: "Atlas Holdings and Atlas Health are referenced in this opportunity." },
