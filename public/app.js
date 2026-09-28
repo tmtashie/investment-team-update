@@ -6806,40 +6806,51 @@ function dealClaimValue(proposal, field) {
 }
 
 function dealClaimStatus(proposal, field) {
+  const safety = getAiUpdateSafety();
   const claim = proposal && proposal.dealData && proposal.dealData[field];
-  const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  const claims = safety.getDisplayDealClaimItems
+    ? safety.getDisplayDealClaimItems(proposal, field)
+    : Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
   const statuses = Array.from(new Set(claims.map((item) => item && item.evidenceStatus).filter(Boolean)));
   return statuses.length ? statuses.join(" / ") : "unresolved";
 }
 
 function renderDealFieldEvidence(proposal, field) {
+  const safety = getAiUpdateSafety();
   const claim = proposal && proposal.dealData && proposal.dealData[field];
-  const claims = Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
+  const claims = safety.getDisplayDealClaimItems
+    ? safety.getDisplayDealClaimItems(proposal, field)
+    : Array.isArray(claim) ? claim : claim && typeof claim === "object" ? [claim] : [];
   const evidence = [];
   claims.forEach((item) => {
-    if (item && item.sourceEvidence) evidence.push({ ...item, label: "Source evidence" });
+    if (item && item.sourceEvidence) evidence.push({
+      ...item,
+      label: item.currentAvailability === false ? "Historical derived evidence (not current availability)" : "Source evidence"
+    });
     (Array.isArray(item && item.supersededEvidence) ? item.supersededEvidence : []).forEach((superseded) => {
       if (superseded && (superseded.value || superseded.sourceEvidence)) evidence.push({ ...superseded, label: "Superseded attachment evidence" });
     });
   });
   return evidence.length
-    ? `<ul class="ai-change-list">${evidence.map((item) => `<li><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value || "")}${item.sourceEvidence ? `<br><span class="update-meta">${escapeHtml(item.sourceEvidence)}</span>` : ""}</li>`).join("")}</ul>`
+    ? `<ul class="ai-change-list">${evidence.map((item) => `<li><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value || "")}${item.sourceLocation ? `<br><span class="update-meta">${escapeHtml(item.sourceLocation)}</span>` : ""}${item.sourceEvidence ? `<br><span class="update-meta">${escapeHtml(item.sourceEvidence)}</span>` : ""}</li>`).join("")}</ul>`
     : "";
 }
 
 function renderDealClaimList(proposal, field, emptyMessage) {
-  const claims = proposal && proposal.dealData && Array.isArray(proposal.dealData[field])
-    ? proposal.dealData[field]
-    : [];
+  const safety = getAiUpdateSafety();
+  const claims = safety.getDisplayDealClaimItems
+    ? safety.getDisplayDealClaimItems(proposal, field)
+    : proposal && proposal.dealData && Array.isArray(proposal.dealData[field]) ? proposal.dealData[field] : [];
   return claims.length
     ? `<ul class="ai-change-list">${claims.map((claim) => `<li>${escapeHtml(claim.value || "")}${claim.evidenceStatus ? ` <span class="status-chip">${escapeHtml(claim.evidenceStatus)}</span>` : ""}</li>`).join("")}</ul>`
     : `<p class="update-meta">${escapeHtml(emptyMessage)}</p>`;
 }
 
 function dealClaimListText(proposal, field) {
-  const claims = proposal && proposal.dealData && Array.isArray(proposal.dealData[field])
-    ? proposal.dealData[field]
-    : [];
+  const safety = getAiUpdateSafety();
+  const claims = safety.getDisplayDealClaimItems
+    ? safety.getDisplayDealClaimItems(proposal, field)
+    : proposal && proposal.dealData && Array.isArray(proposal.dealData[field]) ? proposal.dealData[field] : [];
   return claims.map((claim) => claim.value || "").filter(Boolean).join("\n");
 }
 
@@ -6852,6 +6863,7 @@ function renderNewDealProposalDetail(proposal) {
   ).join("");
   const sourceSiblings = allAiUpdateProposals.filter((item) =>
     proposal.sourceMessageKey && item.sourceMessageKey === proposal.sourceMessageKey &&
+      item.status === "pending" &&
       (proposal.opportunityId ? Boolean(item.opportunityId) : !item.opportunityId)
   );
   const opportunityLabel = proposal.opportunityName || dealClaimValue(proposal, "companyName") || "Unpartitioned source";
@@ -6884,7 +6896,7 @@ function renderNewDealProposalDetail(proposal) {
         <label>Co-investment availability (${escapeHtml(dealClaimStatus(proposal, "coInvestmentAvailability"))})<input id="newDealCoInvestmentAvailability" value="${escapeHtml(dealClaimValue(proposal, "coInvestmentAvailability"))}"></label>
         <label>Amount committed (${escapeHtml(dealClaimStatus(proposal, "amountCommitted"))})<input id="newDealAmountCommitted" value="${escapeHtml(dealClaimValue(proposal, "amountCommitted"))}"></label>
         <label>Amount remaining (${escapeHtml(dealClaimStatus(proposal, "amountRemaining"))})<input id="newDealAmountRemaining" value="${escapeHtml(dealClaimValue(proposal, "amountRemaining"))}"></label>
-        <label>Historical / unfunded target difference (${escapeHtml(dealClaimStatus(proposal, "historicalTargetDifference"))})<input value="${escapeHtml(dealClaimValue(proposal, "historicalTargetDifference"))}" readonly></label>
+        <label>Historical / unfunded target difference (derived, non-current) (${escapeHtml(dealClaimStatus(proposal, "historicalTargetDifference"))})<input value="${escapeHtml(dealClaimValue(proposal, "historicalTargetDifference"))}" readonly></label>
         <label>Proposed check size (${escapeHtml(dealClaimStatus(proposal, "proposedCheckSize"))})<input id="newDealCheckSize" value="${escapeHtml(dealClaimValue(proposal, "proposedCheckSize"))}"></label>
         <label>Valuation / cap (${escapeHtml(dealClaimStatus(proposal, "valuationCap"))})<input id="newDealValuationCap" value="${escapeHtml(dealClaimValue(proposal, "valuationCap"))}"></label>
         <label>Security type (${escapeHtml(dealClaimStatus(proposal, "securityType"))})<input id="newDealSecurityType" value="${escapeHtml(dealClaimValue(proposal, "securityType"))}"></label>
@@ -7667,8 +7679,13 @@ function renderAiUpdateInbox() {
               <p class="update-meta">
                 ${escapeHtml(proposal.sender || "Sender not set")} • ${escapeHtml(proposal.subject || "No subject")}
               </p>
-              ${proposal.opportunityName ? `<p class="update-meta">Opportunity: ${escapeHtml(proposal.opportunityName)} • Same source email: ${escapeHtml(String(allAiUpdateProposals.filter((item) => item.opportunityId && item.sourceMessageKey === proposal.sourceMessageKey).length))}</p>` : ""}
-              <p class="update-notes">${escapeHtml(summarizeText(proposal.summary || "No summary staged.", ""))}</p>
+              ${proposal.opportunityName ? `<p class="update-meta">Opportunity: ${escapeHtml(proposal.opportunityName)} • Same source email: ${escapeHtml(String(allAiUpdateProposals.filter((item) => item.status === "pending" && item.opportunityId && item.sourceMessageKey === proposal.sourceMessageKey).length))}</p>` : ""}
+              <p class="update-notes">${escapeHtml(summarizeText(
+                getAiUpdateSafety().formatAiUpdateProposalSummary
+                  ? getAiUpdateSafety().formatAiUpdateProposalSummary(proposal)
+                  : proposal.summary || "No summary staged.",
+                ""
+              ))}</p>
               <p class="update-meta">Created ${escapeHtml(formatDisplayDate(proposal.createdAt))}</p>
             </article>
           `
@@ -9000,11 +9017,15 @@ async function loadAiUpdateProposals() {
   try {
     const data = await fetchJson("/api/ai-update-proposals");
     allAiUpdateProposals = Array.isArray(data.proposals) ? data.proposals : [];
-    aiUpdateProposalCounts = {
-      pending: Number((data.counts && data.counts.pending) || 0),
-      approved: Number((data.counts && data.counts.approved) || 0),
-      rejected: Number((data.counts && data.counts.rejected) || 0)
-    };
+    const safety = getAiUpdateSafety();
+    aiUpdateProposalCounts = safety.normalizeAiUpdateProposalCounts
+      ? safety.normalizeAiUpdateProposalCounts(data)
+      : {
+          pending: Number((data.counts && data.counts.pending) || 0),
+          approved: Number((data.counts && data.counts.approved) || 0),
+          rejected: Number((data.counts && data.counts.rejected) || 0),
+          superseded: Number((data.counts && data.counts.superseded) || 0)
+        };
     if (
       selectedAiUpdateProposalId &&
       !allAiUpdateProposals.some((proposal) => proposal.id === selectedAiUpdateProposalId)
@@ -11687,7 +11708,7 @@ addListener(aiUpdateProposalDetail, "click", async (event) => {
       await loadAiUpdateProposals();
       selectedAiUpdateProposalId = result.refreshedProposalIds && result.refreshedProposalIds[0] || result.replacementProposalIds && result.replacementProposalIds[0] || "";
       renderAiUpdateProposalDetail();
-      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis created ${result.proposalsCreated || 0} separately reviewable proposals. No investment was created.`;
+      if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = `Source reanalysis refreshed ${result.proposalsRefreshed || result.proposalsCreated || 0} canonical proposals and superseded ${(result.supersededProposalIds || []).length} redundant pending aliases. No investment was created.`;
     } catch (error) {
       if (aiUpdateInboxMessage) aiUpdateInboxMessage.textContent = error.message;
     } finally {

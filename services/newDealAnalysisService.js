@@ -209,6 +209,14 @@ function isIssuerFundraisingPlan(claim) {
   return issuerObjective && !beamanAction;
 }
 
+function sourceSupportsNextStep(claim) {
+  if (!claim || claim.evidenceStatus !== "verified") return false;
+  const evidence = cleanString(claim.sourceEvidence, 1000);
+  const hasAction = /\b(review|evaluate|diligence|contact|follow[- ]?up|schedule|meet|meeting|call|decide|respond|request|send|provide|discuss|consider|introduc(?:e|tion))\b/i.test(evidence);
+  const isDirected = /\b(beaman(?: ventures)?|tyler|lee|we|our|you|your|please|should|will|agreed|scheduled|available|happy to|let me know|can connect)\b/i.test(evidence);
+  return hasAction && isDirected;
+}
+
 function normalizeNextSteps(value, sourceText) {
   const claims = normalizeClaimList(value, sourceText);
   const nextSteps = [];
@@ -232,9 +240,48 @@ function normalizeNextSteps(value, sourceText) {
       nextSteps.push({ ...claim, value: valueText, authoritativeValue: claim.evidenceStatus === "verified" ? valueText : "" });
       return;
     }
-    nextSteps.push(claim);
+    if (sourceSupportsNextStep(claim)) nextSteps.push(claim);
   });
   return { nextSteps, issuerPlans };
+}
+
+function rewriteClosedFundraisingNarrative(value, targetFundSize) {
+  const text = cleanString(value, 2000);
+  if (!text) return "";
+  const target = cleanString(targetFundSize, 200);
+  let changed = false;
+  let normalized = text.replace(
+    /\b(?:is\s+)?(?:currently\s+)?(?:raising|seeking\s+to\s+raise|seeks\s+to\s+raise)\s+\$?\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?\s*(?:b|bn|billion|m|mm|million|k|thousand)?\b/gi,
+    () => {
+      changed = true;
+      return target ? `has a target fund size of ${target}` : "has a stated target fund size";
+    }
+  );
+  normalized = normalized
+    .replace(/\bactive fundraising\b/gi, () => { changed = true; return "fundraising closed"; })
+    .replace(/\bopen for new commitments\b/gi, () => { changed = true; return "closed to new commitments"; });
+  if (changed && !/\bfundraising\s+(?:is\s+)?closed\b/i.test(normalized)) {
+    normalized = `${normalized.replace(/[.\s]+$/, "")}. Fundraising is closed.`;
+  }
+  return normalized;
+}
+
+function normalizeClosedFundraisingField(value, stage, targetFundSize) {
+  if (!/\bfundraising\s+(?:is\s+)?closed\b/i.test(`${stage && stage.authoritativeValue} ${stage && stage.value}`)) {
+    return value;
+  }
+  const items = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
+  const normalized = items.map((claim) => {
+    const rewritten = rewriteClosedFundraisingNarrative(claim && claim.value, targetFundSize && (targetFundSize.authoritativeValue || targetFundSize.value));
+    if (rewritten === cleanString(claim && claim.value, 2000)) return claim;
+    return {
+      ...claim,
+      value: rewritten,
+      authoritativeValue: claim.evidenceStatus === "verified" ? rewritten : "",
+      currentStatusApplied: true
+    };
+  });
+  return Array.isArray(value) ? normalized : normalized[0] || value;
 }
 
 function normalizeClaimList(value, sourceText, options = {}) {
@@ -305,7 +352,42 @@ function normalizeCurrentStatus(rawStage, sourceText, currentStatusOverride) {
     : emailStage;
 }
 
-function normalizeAmountRemaining(value, historicalValue, sourceText, currentStage) {
+function parseFinancialMillions(value) {
+  const match = cleanString(value, 200).match(/\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(B|BN|BILLION|M|MM|MILLION|K|THOUSAND)?\b/i);
+  if (!match) return null;
+  const amount = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(amount)) return null;
+  const unit = String(match[2] || "").toLowerCase();
+  if (["b", "bn", "billion"].includes(unit)) return amount * 1000;
+  if (["k", "thousand"].includes(unit)) return amount / 1000;
+  return amount;
+}
+
+function deriveHistoricalTargetDifference(targetFundSize, amountCommitted) {
+  if (
+    !targetFundSize || targetFundSize.evidenceStatus !== "verified" ||
+    !amountCommitted || amountCommitted.evidenceStatus !== "verified"
+  ) return null;
+  const target = parseFinancialMillions(targetFundSize.authoritativeValue || targetFundSize.value);
+  const committed = parseFinancialMillions(amountCommitted.authoritativeValue || amountCommitted.value);
+  if (target === null || committed === null || target <= committed) return null;
+  const difference = Math.round((target - committed) * 1000) / 1000;
+  return {
+    value: `$${difference.toLocaleString("en-US", { maximumFractionDigits: 3 })}MM`,
+    sourceEvidence: [targetFundSize.sourceEvidence, amountCommitted.sourceEvidence].filter(Boolean).join(" | "),
+    sourceLocation: "Derived from verified target and historical commitments",
+    evidenceStatus: "verified",
+    authoritativeValue: `$${difference.toLocaleString("en-US", { maximumFractionDigits: 3 })}MM`,
+    semanticMeaning: "historical-unfunded-target-difference",
+    currentAvailability: false,
+    derivedFrom: [
+      { field: "targetFundSize", value: targetFundSize.value, sourceEvidence: targetFundSize.sourceEvidence },
+      { field: "amountCommitted", value: amountCommitted.value, sourceEvidence: amountCommitted.sourceEvidence }
+    ]
+  };
+}
+
+function normalizeAmountRemaining(value, historicalValue, sourceText, currentStage, targetFundSize, amountCommitted) {
   const baseClaim = normalizeClaim(value, sourceText, { financial: true });
   const explicitHistorical = normalizeSemanticFinancialClaim(historicalValue, sourceText, {
     required: /\b(?:difference|unfunded|target)[\s\S]{0,100}\b(?:commit(?:ted|ments?)|capital)\b|\b(?:commit(?:ted|ments?)|capital)\b[\s\S]{0,100}\b(?:difference|unfunded|target)\b/i
@@ -319,9 +401,12 @@ function normalizeAmountRemaining(value, historicalValue, sourceText, currentSta
   const historicalDifference = /\b(?:difference|unfunded|target)[\s\S]{0,100}\b(?:commit(?:ted|ments?)|capital)\b|\b(?:commit(?:ted|ments?)|capital)\b[\s\S]{0,100}\b(?:difference|unfunded|target)\b/i.test(
     `${baseClaim.value} ${baseClaim.sourceEvidence}`
   );
+  const derivedHistorical = fundraisingClosed
+    ? deriveHistoricalTargetDifference(targetFundSize, amountCommitted)
+    : null;
   const historicalClaim = explicitHistorical.evidenceStatus === "verified"
     ? explicitHistorical
-    : historicalDifference ? baseClaim : normalizeClaim("", sourceText);
+    : historicalDifference ? baseClaim : derivedHistorical || normalizeClaim("", sourceText);
   const historical = historicalClaim.value
     ? {
         ...historicalClaim,
@@ -358,6 +443,11 @@ function deadlineHasEventContext(value) {
   );
 }
 
+function deadlineHasTemporalContext(value) {
+  const text = cleanString(value, 1000);
+  return /\b(?:20\d{2}|q[1-4](?:\s+20\d{2})?|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{1,2})?(?:,?\s+20\d{2})?|\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?|today|tomorrow|this\s+(?:week|month|quarter|year)|next\s+(?:week|month|quarter|year)|year[- ]end|month[- ]end|quarter[- ]end|within\s+\d+\s+(?:days?|weeks?|months?|years?)|in\s+\d+\s+(?:days?|weeks?|months?|years?)|by\s+(?:the\s+)?(?:end\s+of\s+)?(?:[a-z]+|\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?))\b/i.test(text);
+}
+
 function normalizeDeadlineList(value, sourceText) {
   return normalizeClaimList(value, sourceText).map((claim) => {
     if (deadlineHasEventContext(claim.value) || !deadlineHasEventContext(claim.sourceEvidence)) {
@@ -368,7 +458,7 @@ function normalizeDeadlineList(value, sourceText) {
       sourceEvidence: claim.sourceEvidence,
       sourceLocation: claim.sourceLocation
     }, sourceText);
-  });
+  }).filter((claim) => deadlineHasTemporalContext(`${claim.value} ${claim.sourceEvidence}`));
 }
 
 function rootDomainFromUrl(value) {
@@ -419,16 +509,24 @@ function normalizeDealAnalysis(raw, source, matchResult) {
     .concat(targetInvestorPoints)
     .slice(0, MAX_LIST_ITEMS);
   const normalizedNextSteps = normalizeNextSteps(raw && raw.nextSteps, sourceText);
-  const deadlines = normalizeDeadlineList(raw && raw.deadlines, sourceText)
-    .concat(normalizedNextSteps.issuerPlans)
+  const deadlines = normalizeDeadlineList(
+    [...(Array.isArray(raw && raw.deadlines) ? raw.deadlines : raw && raw.deadlines ? [raw.deadlines] : []), ...normalizedNextSteps.issuerPlans],
+    sourceText
+  )
     .filter((claim, index, items) => items.findIndex((item) => item.value === claim.value) === index)
     .slice(0, MAX_LIST_ITEMS);
   const stage = normalizeCurrentStatus(raw && raw.stage, sourceText, source && source.currentStatusOverride);
+  const targetFundSize = normalizeSemanticFinancialClaim(raw && raw.targetFundSize, sourceText, {
+    required: /\b(?:target(?:ed)?(?: fund)? size|fund target)\b/i
+  });
+  const amountCommitted = normalizeClaim(raw && raw.amountCommitted, sourceText, { financial: true });
   const remainingAmounts = normalizeAmountRemaining(
     raw && raw.amountRemaining,
     raw && raw.historicalTargetDifference,
     sourceText,
-    stage
+    stage,
+    targetFundSize,
+    amountCommitted
   );
   const dealData = {
     companyName,
@@ -447,9 +545,7 @@ function normalizeDealAnalysis(raw, source, matchResult) {
     tractionRevenue: normalizeStructuredClaimField(raw && raw.tractionRevenue, sourceText, { financial: true }),
     customersContractsDeployments: normalizedPortfolioActivity,
     roundType: normalizeClaim(raw && raw.roundType, sourceText),
-    targetFundSize: normalizeSemanticFinancialClaim(raw && raw.targetFundSize, sourceText, {
-      required: /\b(?:target(?:ed)?(?: fund)? size|fund target)\b/i
-    }),
+    targetFundSize,
     minimumLpCommitment: normalizeSemanticFinancialClaim(raw && raw.minimumLpCommitment, sourceText, {
       required: /\bminimum\b[\s\S]{0,80}\b(?:lp|commitment|investment)\b|\b(?:lp|commitment|investment)\b[\s\S]{0,80}\bminimum\b/i
     }),
@@ -457,7 +553,7 @@ function normalizeDealAnalysis(raw, source, matchResult) {
       required: /\bco[- ]?invest(?:ment)?\b[\s\S]{0,80}\b(?:available|availability|capacity)\b|\b(?:available|availability|capacity)\b[\s\S]{0,80}\bco[- ]?invest(?:ment)?\b/i
     }),
     amountBeingRaised: normalizeClaim(raw && raw.amountBeingRaised, sourceText, { financial: true }),
-    amountCommitted: normalizeClaim(raw && raw.amountCommitted, sourceText, { financial: true }),
+    amountCommitted,
     amountRemaining: remainingAmounts.current,
     historicalTargetDifference: remainingAmounts.historical,
     proposedCheckSize: normalizeProposedCheckSize(raw && raw.proposedCheckSize, sourceText),
@@ -473,6 +569,13 @@ function normalizeDealAnalysis(raw, source, matchResult) {
     relevantUrls: urls,
     unverifiedClaims: []
   };
+  [
+    "dealSummary", "whatCompanyDoes", "businessModel", "tractionRevenue",
+    "customersContractsDeployments", "roundType", "financingTerms", "useOfProceeds",
+    "keyInvestmentPoints", "keyRisks", "deadlines"
+  ].forEach((field) => {
+    dealData[field] = normalizeClosedFundraisingField(dealData[field], stage, targetFundSize);
+  });
   Object.entries(dealData).forEach(([field, item]) => {
     const values = Array.isArray(item) ? item : item && item.value !== undefined ? [item] : [];
     values.filter((claim) => claim.evidenceStatus !== "verified").forEach((claim) => {
@@ -519,10 +622,11 @@ function buildNewDealPrompt(source) {
     "For fund keyInvestmentPoints, extract concrete source-supported terms and characteristics such as fund target, minimum investment, term/extensions, investor classes, preferred return or cash distributions, portfolio allocation, deployment status, tax/depreciation strategy, target geography/assets, and disclosed fees/carry. Omit generic praise such as 'Strong projected returns for investors'.",
     "Returns shown only in an illustrative property, model, pro forma, hypothetical, or target scenario must be labeled illustrative or targeted. Never describe them as achieved, realized, guaranteed, or necessarily the fund-level expected return.",
     "Extract only source-disclosed risks. Prefer specific categories and mechanisms such as macro/rate, supply/concession, operational execution, construction/development, counterparty, regulatory/REIT/tax structure, liquidity, or concentration. Do not invent risks to fill the field.",
-    "nextSteps are Beaman Ventures review or communication actions only. Do not turn an issuer objective such as completing fundraising into our next step. Put issuer fundraising plans in deadlines with an 'Issuer plan:' label. An offer to answer questions or make an introduction can support an optional contact/request action, but never claim Beaman agreed to a meeting unless the source says so.",
+    "nextSteps are Beaman Ventures review or communication actions only and require explicit source support for that action. Do not infer review, diligence, or follow-up from performance facts alone. If no Beaman action is explicitly requested, offered, agreed, or stated, leave nextSteps empty. Do not turn an issuer objective such as completing fundraising into our next step. Put issuer fundraising plans in deadlines with an 'Issuer plan:' label. An offer to answer questions or make an introduction can support an optional contact/request action, but never claim Beaman agreed to a meeting unless the source says so.",
     "Do not reconcile materially conflicting source figures. For a conflicted claim, leave the main value non-authoritative and include conflictingEvidence as an array of objects with value, sourceEvidence, and sourceLocation for each competing statement.",
     "Keep targetFundSize, amountBeingRaised, amountCommitted, amountRemaining, historicalTargetDifference, minimumLpCommitment, coInvestmentAvailability, proposedCheckSize, and any third-party investment separate. Never copy one concept into another.",
     "amountRemaining means capital currently available or still being raised. If fundraising is closed, leave amountRemaining empty. A target-minus-historical-commitments calculation belongs in historicalTargetDifference and must never imply current availability.",
+    "When newer email evidence says fundraising is closed, every narrative field must use that current status. Describe the fund-size figure only as the fund target; never say the fund is currently raising, seeking to raise, or open for commitments. Preserve stale deck fundraising language only as superseded evidence on stage.",
     "proposedCheckSize must be empty unless SOURCE DATA explicitly states Beaman Ventures', Tyler's, Lee's, or the addressed recipient's intended or requested check, investment, allocation, or commitment. A fund minimum, fund target, total round, or total co-investment availability is never the recipient's proposed check.",
     "Every deadline value must name the associated event and preserve material context. For example, use 'Fundraise: $650K remaining to close by year end', never only 'by year end'.",
     "Schema keys: isPotentialNewDeal, classificationReason, companyName, contactName, contactEmail, dealSummary, whatCompanyDoes, businessModel, stage, tractionRevenue, customersContractsDeployments, roundType, targetFundSize, minimumLpCommitment, coInvestmentAvailability, amountBeingRaised, amountCommitted, amountRemaining, historicalTargetDifference, proposedCheckSize, valuationCap, securityType, financingTerms, leadInvestor, useOfProceeds, keyInvestmentPoints, keyRisks, nextSteps, deadlines, relevantUrls.",
@@ -590,7 +694,7 @@ function evidenceContextAppliesToOpportunity(bodyText, evidence, opportunityName
   return evidenceAppliesToOpportunity(context, opportunityName);
 }
 
-function deriveEmailCurrentStatus(bodyText, opportunityName, emailEvidence = []) {
+function deriveEmailCurrentStatus(bodyText, opportunityName, emailEvidence = [], { allowUnscopedFundraisingStatus = false } = {}) {
   const bodyCandidates = cleanString(bodyText, MAX_SOURCE_TEXT_LENGTH)
     .split(/(?<=[.!?])\s+|\n+/).map((item) => item.trim()).filter(Boolean);
   const statusPatterns = [
@@ -600,13 +704,13 @@ function deriveEmailCurrentStatus(bodyText, opportunityName, emailEvidence = [])
   ];
   for (const candidate of emailEvidence.concat(bodyCandidates)) {
     const isExplicitPartitionEvidence = emailEvidence.includes(candidate);
-    const applies = evidenceAppliesToOpportunity(candidate, opportunityName) ||
-      (isExplicitPartitionEvidence && evidenceContextAppliesToOpportunity(bodyText, candidate, opportunityName));
-    if (!applies) continue;
     const match = statusPatterns.find((item) => item.pattern.test(candidate));
-    if (match) {
-      return normalizeClaim({ value: match.value, sourceEvidence: candidate, sourceLocation: "Email body" }, bodyText);
-    }
+    if (!match) continue;
+    const applies = evidenceAppliesToOpportunity(candidate, opportunityName) ||
+      (isExplicitPartitionEvidence && evidenceContextAppliesToOpportunity(bodyText, candidate, opportunityName)) ||
+      (allowUnscopedFundraisingStatus && match.value === "Fundraising closed" && /\bfundrais|fund\s+memo/i.test(candidate));
+    if (!applies) continue;
+    return normalizeClaim({ value: match.value, sourceEvidence: candidate, sourceLocation: "Email body" }, bodyText);
   }
   return normalizeClaim("", bodyText);
 }
@@ -618,6 +722,15 @@ function normalizeOpportunityDecomposition(raw, source) {
   const bodyText = cleanString(source && source.emailBodyText, MAX_SOURCE_TEXT_LENGTH);
   const opportunities = [];
   const rawOpportunities = Array.isArray(raw && raw.opportunities) ? raw.opportunities.slice(0, 20) : [];
+  const fundCandidates = rawOpportunities.filter((item) => {
+    const name = canonicalOpportunityName(item && item.name);
+    const itemAttachments = (Array.isArray(item && item.attachmentIds) ? item.attachmentIds : [])
+      .map((id) => byId.get(cleanString(id, 500)))
+      .filter(Boolean);
+    return /\bfund\b/i.test(name) || itemAttachments.some((attachment) =>
+      /\b(?:private equity|venture|credit|real estate|investment) fund\b/i.test(`${attachment.name} ${attachment.text}`)
+    );
+  });
 
   rawOpportunities.forEach((item) => {
     const rawName = cleanString(item && item.name, 300);
@@ -639,11 +752,13 @@ function normalizeOpportunityDecomposition(raw, source) {
       evidenceAppliesToOpportunity(currentStatus.sourceEvidence, canonicalName)
       ? currentStatus
       : normalizeClaim("", bodyText);
-    const derivedCurrentStatus = deriveEmailCurrentStatus(bodyText, canonicalName, emailEvidence);
+    const allowUnscopedFundraisingStatus = fundCandidates.length === 1 && fundCandidates[0] === item;
+    const derivedCurrentStatus = deriveEmailCurrentStatus(bodyText, canonicalName, emailEvidence, { allowUnscopedFundraisingStatus });
     opportunities.push({
       name: canonicalName,
       opportunityId: opportunityIdentity(canonicalName),
       opportunityIdentityKeys: opportunityIdentityKeys(canonicalName, opportunityAttachments),
+      allowUnscopedFundraisingStatus,
       attachmentIds,
       emailEvidence,
       currentStatus: derivedCurrentStatus.evidenceStatus === "verified"

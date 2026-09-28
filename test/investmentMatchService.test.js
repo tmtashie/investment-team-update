@@ -110,3 +110,4 @@ test("sender domain substrings are not deterministic evidence", () => {
   assert.equal(result.status, "no-match");
   assert.equal(result.candidates.length, 0);
 });
+

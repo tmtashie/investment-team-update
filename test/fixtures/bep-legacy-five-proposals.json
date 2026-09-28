@@ -1,0 +1,37 @@
+[
+  {
+    "id": "bep-core-canonical", "proposalType": "new-deal", "sourceMessageKey": "<bep-source@example.test>",
+    "opportunityName": "BEP Core Fund VIII", "opportunityId": "0f06fa21c0054f4db8bde205a80c4e0e4368795bf5a4b582b9bd5c9a3e359a2d",
+    "opportunityIdentityKeys": [], "status": "pending", "updatedAt": "2026-09-22T20:00:00.000Z", "createdAt": "2026-09-22T19:00:00.000Z",
+    "documents": [{ "id": "core-doc", "name": "BEP Core Fund VIII.pdf", "hash": "core-hash", "graphAttachmentId": "core-fund-viii" }],
+    "dealData": { "companyName": { "value": "BEP Core Fund VIII" }, "stage": { "value": "Active fundraising" }, "amountRemaining": { "value": "" }, "historicalTargetDifference": { "value": "" } }
+  },
+  {
+    "id": "pure-canonical", "proposalType": "new-deal", "sourceMessageKey": "<bep-source@example.test>",
+    "opportunityName": "Project Pure", "opportunityId": "7c8b81005f96ce28a54b8c36013caeb8aad9c933ea89d0cab9e14b394c6f668c",
+    "opportunityIdentityKeys": [], "status": "pending", "updatedAt": "2026-09-22T20:00:00.000Z", "createdAt": "2026-09-22T19:00:00.000Z",
+    "documents": [{ "id": "pure-doc", "name": "Project Pure Co-Investment.pdf", "hash": "pure-hash", "graphAttachmentId": "project-pure" }],
+    "dealData": { "companyName": { "value": "Project Pure" } }
+  },
+  {
+    "id": "care-canonical", "proposalType": "new-deal", "sourceMessageKey": "<bep-source@example.test>",
+    "opportunityName": "Project Care", "opportunityId": "acf97a2a6c8c203454cef506bd3bda51a35817014ad10319f4a1d46683ce7733",
+    "opportunityIdentityKeys": [], "status": "pending", "updatedAt": "2026-09-22T20:00:00.000Z", "createdAt": "2026-09-22T19:00:00.000Z",
+    "documents": [{ "id": "care-doc", "name": "Project Care Co-Investment.pdf", "hash": "care-hash", "graphAttachmentId": "project-care" }],
+    "dealData": { "companyName": { "value": "Project Care" } }
+  },
+  {
+    "id": "pure-legacy-alias", "proposalType": "new-deal", "sourceMessageKey": "<bep-source@example.test>",
+    "opportunityName": "Project Pure Co-Investment", "opportunityId": "50c886a29d620647abe0a1127c9d7fb3e8fa24c4d4528f0541dbe6105807377b",
+    "opportunityIdentityKeys": [], "status": "pending", "updatedAt": "2026-09-22T20:00:00.000Z", "createdAt": "2026-09-22T19:05:00.000Z",
+    "documents": [{ "id": "pure-doc", "name": "Project Pure Co-Investment.pdf", "hash": "pure-hash", "graphAttachmentId": "project-pure" }],
+    "dealData": { "companyName": { "value": "Project Pure" } }
+  },
+  {
+    "id": "care-legacy-alias", "proposalType": "new-deal", "sourceMessageKey": "<bep-source@example.test>",
+    "opportunityName": "Project Care Co-Investment", "opportunityId": "c8646b3dfd92c75280866b48fed3af008c4149660f22d60c7772a4202284ac26",
+    "opportunityIdentityKeys": [], "status": "pending", "updatedAt": "2026-09-22T20:00:00.000Z", "createdAt": "2026-09-22T19:05:00.000Z",
+    "documents": [{ "id": "care-doc", "name": "Project Care Co-Investment.pdf", "hash": "care-hash", "graphAttachmentId": "project-care" }],
+    "dealData": { "companyName": { "value": "Project Care" } }
+  }
+]
