@@ -968,4 +968,3 @@ module.exports = {
   previewMessageEligibility,
   senderAllowlistOutcome
 };
-
