@@ -315,7 +315,7 @@ test("unmatched analysis is recorded as skipped instead of guessing an investmen
   assert.equal(harness.getStored()[0].analysisAudits[0].shouldCreateProposal, false);
 });
 
-test("automated explicit-match helper rejects warning-marked semantic matches", () => {
+test("automated explicit-match helper requires trusted evidence for the final investment", () => {
   assert.equal(
     hasAutomatedExplicitInvestmentMatch({
       investmentMatch: {
@@ -339,6 +339,20 @@ test("automated explicit-match helper rejects warning-marked semantic matches", 
       warnings: []
     }),
     true
+  );
+  assert.equal(
+    hasAutomatedExplicitInvestmentMatch({
+      investmentMatch: {
+        investmentId: "healing-id",
+        reason: "Model selected Healing Innovations."
+      },
+      deterministicEvidence: {
+        investmentId: "finsync-id",
+        types: ["subject", "senderDomain"]
+      },
+      warnings: []
+    }),
+    false
   );
 });
 
