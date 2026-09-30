@@ -19,6 +19,16 @@ function compactMatchText(value) {
   return normalizeMatchText(value).replace(/\s+/g, "");
 }
 
+function compactDomainAlias(value) {
+  return cleanString(value, 500)
+    .toLowerCase()
+    .replace(/\b(limited liability company|incorporated|corporation)\b\s*$/g, " ")
+    .replace(/\b(l\.?l\.?c\.?|inc\.?|corp\.?|co\.?|l\.?p\.?|llp|ltd\.?)\b\s*$/g, " ")
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
 function hasExplicitPhrase(sourceText, phrase) {
   const normalizedPhrase = normalizeMatchText(phrase);
   if (!normalizedPhrase || normalizedPhrase.length < 4) {
@@ -29,7 +39,20 @@ function hasExplicitPhrase(sourceText, phrase) {
     return true;
   }
   const compactPhrase = compactMatchText(phrase);
-  return compactPhrase.length >= 6 && compactMatchText(sourceText).includes(compactPhrase);
+  if (compactPhrase.length < 6) {
+    return false;
+  }
+  const sourceTokens = normalizeMatchText(sourceText).split(" ").filter(Boolean);
+  for (let start = 0; start < sourceTokens.length; start += 1) {
+    let compactSpan = "";
+    for (let end = start; end < sourceTokens.length && compactSpan.length < compactPhrase.length; end += 1) {
+      compactSpan += compactMatchText(sourceTokens[end]);
+      if (compactSpan === compactPhrase) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function uniqueValues(values) {
@@ -88,8 +111,8 @@ function scoreDomainEvidence(sender, aliases, houseDomains) {
   const rootDomain = getRootDomain(sender);
   if (!rootDomain || rootDomain.length < 4) return null;
   const matchedAlias = aliases.find((alias) => {
-    const compactAlias = compactMatchText(alias);
-    return compactAlias.length >= 4 && (compactAlias.includes(rootDomain) || rootDomain.includes(compactAlias));
+    const compactAlias = compactDomainAlias(alias);
+    return compactAlias.length >= 4 && compactAlias === compactDomainAlias(rootDomain);
   });
   return matchedAlias
     ? { alias: matchedAlias, domain: rootDomain, weight: 18, reason: `Sender domain '${rootDomain}' supports '${matchedAlias}'.` }
@@ -111,6 +134,17 @@ function generateInvestmentMatchCandidates({ source, investments = [], houseDoma
     const evidence = [];
     if (aliasMatch) evidence.push(`Exact ${aliasMatch.location} match for '${aliasMatch.alias}'.`);
     if (domainEvidence) evidence.push(domainEvidence.reason);
+    const evidenceTypes = [];
+    if (aliasMatch) {
+      evidenceTypes.push(
+        aliasMatch.location === "source body"
+          ? "sourceBody"
+          : aliasMatch.location === "subject"
+            ? "subject"
+            : "attachmentFilename"
+      );
+    }
+    if (domainEvidence) evidenceTypes.push("senderDomain");
     return {
       investment,
       investmentId: cleanString(investment && investment.id, 200),
@@ -119,6 +153,7 @@ function generateInvestmentMatchCandidates({ source, investments = [], houseDoma
       score,
       hasExplicitNameEvidence: Boolean(aliasMatch),
       hasDomainEvidence: Boolean(domainEvidence),
+      evidenceTypes,
       matchedAlias: aliasMatch ? aliasMatch.alias : "",
       reason: evidence.join(" ")
     };

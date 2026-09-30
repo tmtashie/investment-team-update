@@ -10,6 +10,7 @@ test("shared matcher returns a confident deterministic existing investment", () 
   });
   assert.equal(result.status, "existing-confident");
   assert.equal(result.best.investmentId, "acme");
+  assert.deepEqual(result.best.evidenceTypes, ["sourceBody", "senderDomain"]);
 });
 
 test("competing deterministic candidates are ambiguous", () => {
@@ -78,4 +79,34 @@ test("house-domain-only false match cannot pass automated proposal eligibility",
   };
 
   assert.equal(hasAutomatedExplicitInvestmentMatch(analysis), false);
+});
+
+test("compact aliases must occupy complete normalized source tokens", () => {
+  const result = generateInvestmentMatchCandidates({
+    source: { sourceText: "The integration uses a FINSYNChronization process." },
+    investments: [{ id: "finsync", company: "FINSYNC", entity: "Beaman Ventures" }]
+  });
+
+  assert.equal(result.status, "no-match");
+  assert.equal(result.candidates.length, 0);
+});
+
+test("compact aliases still match complete punctuation-normalized tokens", () => {
+  const result = generateInvestmentMatchCandidates({
+    source: { sourceText: "ELF Beauty issued its monthly investor update." },
+    investments: [{ id: "elf", company: "E.L.F. Beauty", entity: "Beaman Ventures" }]
+  });
+
+  assert.equal(result.status, "existing-confident");
+  assert.deepEqual(result.best.evidenceTypes, ["sourceBody"]);
+});
+
+test("sender domain substrings are not deterministic evidence", () => {
+  const result = generateInvestmentMatchCandidates({
+    source: { sender: "updates@sunbeam.com", sourceText: "Monthly investor report." },
+    investments: [{ id: "beam", company: "Beam", entity: "Beaman Ventures" }]
+  });
+
+  assert.equal(result.status, "no-match");
+  assert.equal(result.candidates.length, 0);
 });
