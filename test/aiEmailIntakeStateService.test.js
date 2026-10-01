@@ -64,6 +64,24 @@ test("message reservation prevents concurrent and completed reprocessing", () =>
   assert.equal(service.claimMessage(message).claimed, false);
 });
 
+test("completion preserves the original message reservation timestamp", () => {
+  const { service } = createMemoryStateService();
+  const message = { id: "graph-1", internetMessageId: "<mail-1@example.test>" };
+  const reservedAt = new Date("2026-10-01T12:00:00.000Z");
+
+  assert.equal(service.claimMessage(message, reservedAt).claimed, true);
+  service.upsertEntry({
+    graphMessageId: message.id,
+    internetMessageId: message.internetMessageId,
+    status: "processed",
+    processedAt: "2026-10-01T12:01:00.000Z"
+  });
+
+  const entry = service.findByMessage(message);
+  assert.equal(entry.reservedAt, reservedAt.toISOString());
+  assert.equal(entry.processedAt, "2026-10-01T12:01:00.000Z");
+});
+
 test("preserved attachment metadata is reusable by content hash", () => {
   const { service } = createMemoryStateService();
   service.upsertEntry({

@@ -180,6 +180,7 @@ function createAiEmailIntakeStateService({
       entries[index] = {
         ...entries[index],
         ...normalized,
+        reservedAt: normalized.reservedAt || entries[index].reservedAt,
         attachmentHashes: Array.from(new Set(entries[index].attachmentHashes.concat(normalized.attachmentHashes))),
         attachments: Array.from(new Map(entries[index].attachments.concat(normalized.attachments).map((attachment) => [
           attachment.hash || attachment.storedName || attachment.name,
