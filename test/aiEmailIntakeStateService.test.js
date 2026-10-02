@@ -70,7 +70,7 @@ test("completion preserves the original message reservation timestamp", () => {
   const reservedAt = new Date("2026-10-01T12:00:00.000Z");
 
   assert.equal(service.claimMessage(message, reservedAt).claimed, true);
-  service.upsertEntry({
+  const completed = service.upsertEntry({
     graphMessageId: message.id,
     internetMessageId: message.internetMessageId,
     status: "processed",
@@ -78,6 +78,7 @@ test("completion preserves the original message reservation timestamp", () => {
   });
 
   const entry = service.findByMessage(message);
+  assert.equal(completed.reservedAt, reservedAt.toISOString());
   assert.equal(entry.reservedAt, reservedAt.toISOString());
   assert.equal(entry.processedAt, "2026-10-01T12:01:00.000Z");
 });

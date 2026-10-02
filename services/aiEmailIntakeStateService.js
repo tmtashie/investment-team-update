@@ -191,7 +191,7 @@ function createAiEmailIntakeStateService({
       };
     }
     writeState(entries);
-    return normalized;
+    return index === -1 ? entries[0] : entries[index];
   }
 
   return {
