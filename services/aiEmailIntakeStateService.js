@@ -105,15 +105,14 @@ function createAiEmailIntakeStateService({
   }
 
   function findByMessage(message) {
-    const key = messageDedupeKey(message);
-    if (!key) {
+    const internetMessageId = cleanString(message && message.internetMessageId, 500);
+    const graphMessageId = cleanString(message && (message.id || message.graphMessageId), 500);
+    if (!internetMessageId && !graphMessageId) {
       return null;
     }
     return readState().find((entry) =>
-      entry.internetMessageId === key ||
-      entry.graphMessageId === key ||
-      (entry.internetMessageId && entry.internetMessageId === cleanString(message && message.internetMessageId, 500)) ||
-      (entry.graphMessageId && entry.graphMessageId === cleanString(message && message.id, 500))
+      (internetMessageId && entry.internetMessageId === internetMessageId) ||
+      (graphMessageId && entry.graphMessageId === graphMessageId)
     ) || null;
   }
 
@@ -168,9 +167,7 @@ function createAiEmailIntakeStateService({
   function upsertEntry(entry) {
     const normalized = normalizeStateEntry(entry);
     const entries = readState();
-    const key = normalized.internetMessageId || normalized.graphMessageId;
     const index = entries.findIndex((item) =>
-      (key && (item.internetMessageId === key || item.graphMessageId === key)) ||
       (normalized.internetMessageId && item.internetMessageId === normalized.internetMessageId) ||
       (normalized.graphMessageId && item.graphMessageId === normalized.graphMessageId)
     );
