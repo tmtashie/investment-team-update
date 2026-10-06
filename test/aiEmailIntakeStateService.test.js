@@ -27,6 +27,37 @@ test("message dedupe key prefers internetMessageId before Graph id", () => {
   assert.equal(messageDedupeKey({ id: "graph-id" }), "graph-id");
 });
 
+test("message identity matching does not cross Graph and internet ID namespaces", () => {
+  const { service, getStored } = createMemoryStateService([
+    {
+      graphMessageId: "<older@example.test>",
+      internetMessageId: "<newer@example.test>",
+      subject: "Newer message",
+      status: "processed"
+    },
+    {
+      graphMessageId: "graph-older",
+      internetMessageId: "<older@example.test>",
+      subject: "Older message",
+      status: "processed"
+    }
+  ]);
+
+  const older = service.findByMessage({
+    id: "graph-older",
+    internetMessageId: "<older@example.test>"
+  });
+  assert.equal(older.subject, "Older message");
+
+  service.upsertEntry({
+    graphMessageId: "graph-older",
+    internetMessageId: "<older@example.test>",
+    status: "skipped"
+  });
+  assert.equal(getStored()[0].status, "processed");
+  assert.equal(getStored()[1].status, "skipped");
+});
+
 test("intake state upserts by message and merges proposal ids and attachment hashes", () => {
   const { service, getStored } = createMemoryStateService();
 
