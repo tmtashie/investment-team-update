@@ -90,6 +90,8 @@ function messageDedupeKey(message) {
     cleanString(message && message.graphMessageId, 500);
 }
 
+const MESSAGE_IDENTITY_CONFLICT = "Message identifiers resolve to different intake state entries.";
+
 function createAiEmailIntakeStateService({
   STATE_FILE,
   readJsonFile,
@@ -104,16 +106,31 @@ function createAiEmailIntakeStateService({
     writeJsonFile(STATE_FILE, entries.map(normalizeStateEntry));
   }
 
-  function findByMessage(message) {
+  function resolveMessageIndex(entries, message) {
     const internetMessageId = cleanString(message && message.internetMessageId, 500);
     const graphMessageId = cleanString(message && (message.id || message.graphMessageId), 500);
-    if (!internetMessageId && !graphMessageId) {
+    const internetIndex = internetMessageId
+      ? entries.findIndex((entry) => entry.internetMessageId === internetMessageId)
+      : -1;
+    const graphIndex = graphMessageId
+      ? entries.findIndex((entry) => entry.graphMessageId === graphMessageId)
+      : -1;
+    return {
+      conflict: internetIndex !== -1 && graphIndex !== -1 && internetIndex !== graphIndex,
+      index: internetIndex !== -1 ? internetIndex : graphIndex
+    };
+  }
+
+  function findByMessage(message) {
+    if (!messageDedupeKey(message)) {
       return null;
     }
-    return readState().find((entry) =>
-      (internetMessageId && entry.internetMessageId === internetMessageId) ||
-      (graphMessageId && entry.graphMessageId === graphMessageId)
-    ) || null;
+    const entries = readState();
+    const resolution = resolveMessageIndex(entries, message);
+    if (resolution.conflict) {
+      throw new Error(MESSAGE_IDENTITY_CONFLICT);
+    }
+    return resolution.index === -1 ? null : entries[resolution.index];
   }
 
   function hasAttachmentHash(hash) {
@@ -137,7 +154,12 @@ function createAiEmailIntakeStateService({
   function claimMessage(message, now = new Date()) {
     const key = messageDedupeKey(message);
     if (!key) return { claimed: false, reason: "Message has no stable identifier." };
-    const existing = findByMessage(message);
+    const entries = readState();
+    const resolution = resolveMessageIndex(entries, message);
+    if (resolution.conflict) {
+      return { claimed: false, reason: MESSAGE_IDENTITY_CONFLICT };
+    }
+    const existing = resolution.index === -1 ? null : entries[resolution.index];
     if (existing && ["processed", "skipped"].includes(existing.status)) {
       return { claimed: false, reason: "Duplicate message already processed.", entry: existing };
     }
@@ -167,10 +189,11 @@ function createAiEmailIntakeStateService({
   function upsertEntry(entry) {
     const normalized = normalizeStateEntry(entry);
     const entries = readState();
-    const index = entries.findIndex((item) =>
-      (normalized.internetMessageId && item.internetMessageId === normalized.internetMessageId) ||
-      (normalized.graphMessageId && item.graphMessageId === normalized.graphMessageId)
-    );
+    const resolution = resolveMessageIndex(entries, normalized);
+    if (resolution.conflict) {
+      throw new Error(MESSAGE_IDENTITY_CONFLICT);
+    }
+    const index = resolution.index;
     if (index === -1) {
       entries.unshift(normalized);
     } else {

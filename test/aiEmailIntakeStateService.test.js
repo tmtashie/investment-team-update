@@ -58,6 +58,45 @@ test("message identity matching does not cross Graph and internet ID namespaces"
   assert.equal(getStored()[1].status, "skipped");
 });
 
+test("conflicting message identifiers fail closed without mutating state", () => {
+  const initial = [
+    {
+      graphMessageId: "graph-a",
+      internetMessageId: "<mail-a@example.test>",
+      subject: "Message A",
+      status: "processed"
+    },
+    {
+      graphMessageId: "graph-b",
+      internetMessageId: "<mail-b@example.test>",
+      subject: "Message B",
+      status: "processed"
+    }
+  ];
+  const { service, getStored } = createMemoryStateService(initial);
+  const conflicting = {
+    id: "graph-b",
+    internetMessageId: "<mail-a@example.test>"
+  };
+
+  assert.throws(
+    () => service.findByMessage(conflicting),
+    /identifiers resolve to different intake state entries/i
+  );
+  const reservation = service.claimMessage(conflicting);
+  assert.equal(reservation.claimed, false);
+  assert.match(reservation.reason, /identifiers resolve to different intake state entries/i);
+  assert.throws(
+    () => service.upsertEntry({
+      graphMessageId: conflicting.id,
+      internetMessageId: conflicting.internetMessageId,
+      status: "skipped"
+    }),
+    /identifiers resolve to different intake state entries/i
+  );
+  assert.deepEqual(getStored(), initial);
+});
+
 test("intake state upserts by message and merges proposal ids and attachment hashes", () => {
   const { service, getStored } = createMemoryStateService();
 
