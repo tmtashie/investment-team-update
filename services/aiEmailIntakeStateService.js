@@ -90,7 +90,7 @@ function messageDedupeKey(message) {
     cleanString(message && message.graphMessageId, 500);
 }
 
-const MESSAGE_IDENTITY_CONFLICT = "Message identifiers resolve to different intake state entries.";
+const MESSAGE_IDENTITY_CONFLICT = "Message identifiers resolve ambiguously across intake state entries.";
 
 function createAiEmailIntakeStateService({
   STATE_FILE,
@@ -109,15 +109,16 @@ function createAiEmailIntakeStateService({
   function resolveMessageIndex(entries, message) {
     const internetMessageId = cleanString(message && message.internetMessageId, 500);
     const graphMessageId = cleanString(message && (message.id || message.graphMessageId), 500);
-    const internetIndex = internetMessageId
-      ? entries.findIndex((entry) => entry.internetMessageId === internetMessageId)
-      : -1;
-    const graphIndex = graphMessageId
-      ? entries.findIndex((entry) => entry.graphMessageId === graphMessageId)
-      : -1;
+    const internetIndexes = internetMessageId
+      ? entries.flatMap((entry, index) => entry.internetMessageId === internetMessageId ? [index] : [])
+      : [];
+    const graphIndexes = graphMessageId
+      ? entries.flatMap((entry, index) => entry.graphMessageId === graphMessageId ? [index] : [])
+      : [];
+    const matchingIndexes = Array.from(new Set(internetIndexes.concat(graphIndexes)));
     return {
-      conflict: internetIndex !== -1 && graphIndex !== -1 && internetIndex !== graphIndex,
-      index: internetIndex !== -1 ? internetIndex : graphIndex
+      conflict: internetIndexes.length > 1 || graphIndexes.length > 1 || matchingIndexes.length > 1,
+      index: matchingIndexes.length === 1 ? matchingIndexes[0] : -1
     };
   }
 

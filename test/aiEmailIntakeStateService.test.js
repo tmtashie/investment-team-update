@@ -81,20 +81,64 @@ test("conflicting message identifiers fail closed without mutating state", () =>
 
   assert.throws(
     () => service.findByMessage(conflicting),
-    /identifiers resolve to different intake state entries/i
+    /identifiers resolve ambiguously across intake state entries/i
   );
   const reservation = service.claimMessage(conflicting);
   assert.equal(reservation.claimed, false);
-  assert.match(reservation.reason, /identifiers resolve to different intake state entries/i);
+  assert.match(reservation.reason, /identifiers resolve ambiguously across intake state entries/i);
   assert.throws(
     () => service.upsertEntry({
       graphMessageId: conflicting.id,
       internetMessageId: conflicting.internetMessageId,
       status: "skipped"
     }),
-    /identifiers resolve to different intake state entries/i
+    /identifiers resolve ambiguously across intake state entries/i
   );
   assert.deepEqual(getStored(), initial);
+});
+
+test("duplicate identifiers within one namespace fail closed without mutating state", () => {
+  for (const identity of [
+    {
+      field: "internetMessageId",
+      value: "<duplicate@example.test>",
+      message: { internetMessageId: "<duplicate@example.test>" }
+    },
+    {
+      field: "graphMessageId",
+      value: "graph-duplicate",
+      message: { id: "graph-duplicate" }
+    }
+  ]) {
+    const initial = [
+      {
+        graphMessageId: identity.field === "graphMessageId" ? identity.value : "graph-a",
+        internetMessageId: identity.field === "internetMessageId" ? identity.value : "<mail-a@example.test>",
+        subject: "Message A",
+        status: "processed"
+      },
+      {
+        graphMessageId: identity.field === "graphMessageId" ? identity.value : "graph-b",
+        internetMessageId: identity.field === "internetMessageId" ? identity.value : "<mail-b@example.test>",
+        subject: "Message B",
+        status: "processed"
+      }
+    ];
+    const { service, getStored } = createMemoryStateService(initial);
+
+    assert.throws(
+      () => service.findByMessage(identity.message),
+      /identifiers resolve ambiguously across intake state entries/i
+    );
+    const reservation = service.claimMessage(identity.message);
+    assert.equal(reservation.claimed, false);
+    assert.match(reservation.reason, /identifiers resolve ambiguously across intake state entries/i);
+    assert.throws(
+      () => service.upsertEntry({ [identity.field]: identity.value, status: "skipped" }),
+      /identifiers resolve ambiguously across intake state entries/i
+    );
+    assert.deepEqual(getStored(), initial);
+  }
 });
 
 test("intake state upserts by message and merges proposal ids and attachment hashes", () => {
