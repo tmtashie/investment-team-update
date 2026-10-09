@@ -108,7 +108,8 @@ function createAiEmailIntakeStateService({
 
   function resolveMessageIndex(entries, message) {
     const internetMessageId = cleanString(message && message.internetMessageId, 500);
-    const graphMessageId = cleanString(message && (message.id || message.graphMessageId), 500);
+    const graphMessageId = cleanString(message && message.id, 500) ||
+      cleanString(message && message.graphMessageId, 500);
     const internetIndexes = internetMessageId
       ? entries.flatMap((entry, index) => entry.internetMessageId === internetMessageId ? [index] : [])
       : [];
@@ -171,7 +172,8 @@ function createAiEmailIntakeStateService({
       }
     }
     const entry = upsertEntry({
-      graphMessageId: message && (message.id || message.graphMessageId),
+      graphMessageId: cleanString(message && message.id, 500) ||
+        cleanString(message && message.graphMessageId, 500),
       internetMessageId: message && message.internetMessageId,
       conversationId: message && message.conversationId,
       mailbox: message && message.mailbox,

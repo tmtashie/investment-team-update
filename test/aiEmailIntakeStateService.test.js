@@ -27,6 +27,22 @@ test("message dedupe key prefers internetMessageId before Graph id", () => {
   assert.equal(messageDedupeKey({ id: "graph-id" }), "graph-id");
 });
 
+test("blank Graph id falls back to graphMessageId for reservation and deduplication", () => {
+  const { service, getStored } = createMemoryStateService();
+  const message = { id: "   ", graphMessageId: "graph-valid" };
+
+  const firstReservation = service.claimMessage(message);
+  assert.equal(firstReservation.claimed, true);
+  assert.equal(firstReservation.entry.graphMessageId, "graph-valid");
+  assert.equal(getStored().length, 1);
+  assert.equal(getStored()[0].graphMessageId, "graph-valid");
+
+  const secondReservation = service.claimMessage(message);
+  assert.equal(secondReservation.claimed, false);
+  assert.match(secondReservation.reason, /already in progress/i);
+  assert.equal(getStored().length, 1);
+});
+
 test("message identity matching does not cross Graph and internet ID namespaces", () => {
   const { service, getStored } = createMemoryStateService([
     {
