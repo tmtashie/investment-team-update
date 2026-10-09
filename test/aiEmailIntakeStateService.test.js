@@ -27,6 +27,136 @@ test("message dedupe key prefers internetMessageId before Graph id", () => {
   assert.equal(messageDedupeKey({ id: "graph-id" }), "graph-id");
 });
 
+test("blank Graph id falls back to graphMessageId for reservation and deduplication", () => {
+  const { service, getStored } = createMemoryStateService();
+  const message = { id: "   ", graphMessageId: "graph-valid" };
+
+  const firstReservation = service.claimMessage(message);
+  assert.equal(firstReservation.claimed, true);
+  assert.equal(firstReservation.entry.graphMessageId, "graph-valid");
+  assert.equal(getStored().length, 1);
+  assert.equal(getStored()[0].graphMessageId, "graph-valid");
+
+  const secondReservation = service.claimMessage(message);
+  assert.equal(secondReservation.claimed, false);
+  assert.match(secondReservation.reason, /already in progress/i);
+  assert.equal(getStored().length, 1);
+});
+
+test("message identity matching does not cross Graph and internet ID namespaces", () => {
+  const { service, getStored } = createMemoryStateService([
+    {
+      graphMessageId: "<older@example.test>",
+      internetMessageId: "<newer@example.test>",
+      subject: "Newer message",
+      status: "processed"
+    },
+    {
+      graphMessageId: "graph-older",
+      internetMessageId: "<older@example.test>",
+      subject: "Older message",
+      status: "processed"
+    }
+  ]);
+
+  const older = service.findByMessage({
+    id: "graph-older",
+    internetMessageId: "<older@example.test>"
+  });
+  assert.equal(older.subject, "Older message");
+
+  service.upsertEntry({
+    graphMessageId: "graph-older",
+    internetMessageId: "<older@example.test>",
+    status: "skipped"
+  });
+  assert.equal(getStored()[0].status, "processed");
+  assert.equal(getStored()[1].status, "skipped");
+});
+
+test("conflicting message identifiers fail closed without mutating state", () => {
+  const initial = [
+    {
+      graphMessageId: "graph-a",
+      internetMessageId: "<mail-a@example.test>",
+      subject: "Message A",
+      status: "processed"
+    },
+    {
+      graphMessageId: "graph-b",
+      internetMessageId: "<mail-b@example.test>",
+      subject: "Message B",
+      status: "processed"
+    }
+  ];
+  const { service, getStored } = createMemoryStateService(initial);
+  const conflicting = {
+    id: "graph-b",
+    internetMessageId: "<mail-a@example.test>"
+  };
+
+  assert.throws(
+    () => service.findByMessage(conflicting),
+    /identifiers resolve ambiguously across intake state entries/i
+  );
+  const reservation = service.claimMessage(conflicting);
+  assert.equal(reservation.claimed, false);
+  assert.match(reservation.reason, /identifiers resolve ambiguously across intake state entries/i);
+  assert.throws(
+    () => service.upsertEntry({
+      graphMessageId: conflicting.id,
+      internetMessageId: conflicting.internetMessageId,
+      status: "skipped"
+    }),
+    /identifiers resolve ambiguously across intake state entries/i
+  );
+  assert.deepEqual(getStored(), initial);
+});
+
+test("duplicate identifiers within one namespace fail closed without mutating state", () => {
+  for (const identity of [
+    {
+      field: "internetMessageId",
+      value: "<duplicate@example.test>",
+      message: { internetMessageId: "<duplicate@example.test>" }
+    },
+    {
+      field: "graphMessageId",
+      value: "graph-duplicate",
+      message: { id: "graph-duplicate" }
+    }
+  ]) {
+    const initial = [
+      {
+        graphMessageId: identity.field === "graphMessageId" ? identity.value : "graph-a",
+        internetMessageId: identity.field === "internetMessageId" ? identity.value : "<mail-a@example.test>",
+        subject: "Message A",
+        status: "processed"
+      },
+      {
+        graphMessageId: identity.field === "graphMessageId" ? identity.value : "graph-b",
+        internetMessageId: identity.field === "internetMessageId" ? identity.value : "<mail-b@example.test>",
+        subject: "Message B",
+        status: "processed"
+      }
+    ];
+    const { service, getStored } = createMemoryStateService(initial);
+
+    assert.throws(
+      () => service.findByMessage(identity.message),
+      /identifiers resolve ambiguously across intake state entries/i
+    );
+    const reservation = service.claimMessage(identity.message);
+    assert.equal(reservation.claimed, false);
+    assert.match(reservation.reason, /identifiers resolve ambiguously across intake state entries/i);
+    assert.throws(
+      () => service.upsertEntry({ [identity.field]: identity.value, status: "skipped" }),
+      /identifiers resolve ambiguously across intake state entries/i
+    );
+    assert.deepEqual(getStored(), initial);
+  }
+});
+
 test("intake state upserts by message and merges proposal ids and attachment hashes", () => {
   const { service, getStored } = createMemoryStateService();
 

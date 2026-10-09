@@ -90,6 +90,8 @@ function messageDedupeKey(message) {
     cleanString(message && message.graphMessageId, 500);
 }
 
+const MESSAGE_IDENTITY_CONFLICT = "Message identifiers resolve ambiguously across intake state entries.";
+
 function createAiEmailIntakeStateService({
   STATE_FILE,
   readJsonFile,
@@ -104,17 +106,33 @@ function createAiEmailIntakeStateService({
     writeJsonFile(STATE_FILE, entries.map(normalizeStateEntry));
   }
 
+  function resolveMessageIndex(entries, message) {
+    const internetMessageId = cleanString(message && message.internetMessageId, 500);
+    const graphMessageId = cleanString(message && message.id, 500) ||
+      cleanString(message && message.graphMessageId, 500);
+    const internetIndexes = internetMessageId
+      ? entries.flatMap((entry, index) => entry.internetMessageId === internetMessageId ? [index] : [])
+      : [];
+    const graphIndexes = graphMessageId
+      ? entries.flatMap((entry, index) => entry.graphMessageId === graphMessageId ? [index] : [])
+      : [];
+    const matchingIndexes = Array.from(new Set(internetIndexes.concat(graphIndexes)));
+    return {
+      conflict: internetIndexes.length > 1 || graphIndexes.length > 1 || matchingIndexes.length > 1,
+      index: matchingIndexes.length === 1 ? matchingIndexes[0] : -1
+    };
+  }
+
   function findByMessage(message) {
-    const key = messageDedupeKey(message);
-    if (!key) {
+    if (!messageDedupeKey(message)) {
       return null;
     }
-    return readState().find((entry) =>
-      entry.internetMessageId === key ||
-      entry.graphMessageId === key ||
-      (entry.internetMessageId && entry.internetMessageId === cleanString(message && message.internetMessageId, 500)) ||
-      (entry.graphMessageId && entry.graphMessageId === cleanString(message && message.id, 500))
-    ) || null;
+    const entries = readState();
+    const resolution = resolveMessageIndex(entries, message);
+    if (resolution.conflict) {
+      throw new Error(MESSAGE_IDENTITY_CONFLICT);
+    }
+    return resolution.index === -1 ? null : entries[resolution.index];
   }
 
   function hasAttachmentHash(hash) {
@@ -138,7 +156,12 @@ function createAiEmailIntakeStateService({
   function claimMessage(message, now = new Date()) {
     const key = messageDedupeKey(message);
     if (!key) return { claimed: false, reason: "Message has no stable identifier." };
-    const existing = findByMessage(message);
+    const entries = readState();
+    const resolution = resolveMessageIndex(entries, message);
+    if (resolution.conflict) {
+      return { claimed: false, reason: MESSAGE_IDENTITY_CONFLICT };
+    }
+    const existing = resolution.index === -1 ? null : entries[resolution.index];
     if (existing && ["processed", "skipped"].includes(existing.status)) {
       return { claimed: false, reason: "Duplicate message already processed.", entry: existing };
     }
@@ -149,7 +172,8 @@ function createAiEmailIntakeStateService({
       }
     }
     const entry = upsertEntry({
-      graphMessageId: message && (message.id || message.graphMessageId),
+      graphMessageId: cleanString(message && message.id, 500) ||
+        cleanString(message && message.graphMessageId, 500),
       internetMessageId: message && message.internetMessageId,
       conversationId: message && message.conversationId,
       mailbox: message && message.mailbox,
@@ -168,12 +192,11 @@ function createAiEmailIntakeStateService({
   function upsertEntry(entry) {
     const normalized = normalizeStateEntry(entry);
     const entries = readState();
-    const key = normalized.internetMessageId || normalized.graphMessageId;
-    const index = entries.findIndex((item) =>
-      (key && (item.internetMessageId === key || item.graphMessageId === key)) ||
-      (normalized.internetMessageId && item.internetMessageId === normalized.internetMessageId) ||
-      (normalized.graphMessageId && item.graphMessageId === normalized.graphMessageId)
-    );
+    const resolution = resolveMessageIndex(entries, normalized);
+    if (resolution.conflict) {
+      throw new Error(MESSAGE_IDENTITY_CONFLICT);
+    }
+    const index = resolution.index;
     if (index === -1) {
       entries.unshift(normalized);
     } else {
