@@ -355,3 +355,28 @@ test("exact-message reanalysis fetches by Graph ID and requires the configured i
   assert.match(fetchImpl.calls[2].url, /messages\/bep-graph-id\?\$select=/);
   assert.equal(fetchImpl.calls.every((call) => !call.options.method || call.options.method === "GET" || call.url.includes("oauth2")), true);
 });
+
+test("fractional message limits are normalized before building the Graph query", async () => {
+  const fetchImpl = createFetchMock([
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({ value: [] })
+  ]);
+  const service = createMicrosoftGraphMailService({
+    tenantId: "tenant",
+    clientId: "client",
+    clientSecret: "secret",
+    mailboxUser: "updates@example.test",
+    maxMessagesPerRun: "2.9",
+    fetchImpl,
+    graphBaseUrl: "https://graph.test/v1.0",
+    tokenBaseUrl: "https://login.test"
+  });
+
+  const result = await service.previewIntakeMessages();
+
+  assert.equal(result.maxMessagesPerRun, 2);
+  assert.match(fetchImpl.calls[2].url, /\$top=2&/);
+  assert.equal(fetchImpl.calls[2].url.includes("$top=2.9"), false);
+});
+
