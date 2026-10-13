@@ -355,3 +355,52 @@ test("exact-message reanalysis fetches by Graph ID and requires the configured i
   assert.match(fetchImpl.calls[2].url, /messages\/bep-graph-id\?\$select=/);
   assert.equal(fetchImpl.calls.every((call) => !call.options.method || call.options.method === "GET" || call.url.includes("oauth2")), true);
 });
+
+test("fractional message limits are normalized before building the Graph query", async () => {
+  const fetchImpl = createFetchMock([
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({ value: [] })
+  ]);
+  const service = createMicrosoftGraphMailService({
+    tenantId: "tenant",
+    clientId: "client",
+    clientSecret: "secret",
+    mailboxUser: "updates@example.test",
+    maxMessagesPerRun: "2.9",
+    fetchImpl,
+    graphBaseUrl: "https://graph.test/v1.0",
+    tokenBaseUrl: "https://login.test"
+  });
+
+  const result = await service.previewIntakeMessages();
+
+  assert.equal(result.maxMessagesPerRun, 2);
+  assert.match(fetchImpl.calls[2].url, /\$top=2&/);
+  assert.equal(fetchImpl.calls[2].url.includes("$top=2.9"), false);
+});
+
+
+test("message limit normalization preserves defaults and configured bounds", () => {
+  const cases = [
+    { value: undefined, expected: 10 },
+    { value: "", expected: 10 },
+    { value: "not-a-number", expected: 10 },
+    { value: "0", expected: 10 },
+    { value: "-4.8", expected: 1 },
+    { value: "0.9", expected: 1 },
+    { value: "50.9", expected: 50 },
+    { value: "999", expected: 50 },
+    { value: "Infinity", expected: 50 },
+    { value: "-Infinity", expected: 1 }
+  ];
+
+  for (const { value, expected } of cases) {
+    const service = createMicrosoftGraphMailService({ maxMessagesPerRun: value });
+    assert.equal(
+      service.getSafeConfigStatus().maxMessagesPerRun,
+      expected,
+      `expected ${String(value)} to normalize to ${expected}`
+    );
+  }
+});

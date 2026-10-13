@@ -48,6 +48,12 @@ function attachmentLimitReason(attachment) {
   return `Attachment exceeds the ${limitMb} MB per-file limit.`;
 }
 
+function normalizeMaxMessagesPerRun(value) {
+  const numeric = Number(value);
+  const wholeNumber = numeric ? Math.trunc(numeric) : 10;
+  return Math.max(1, Math.min(50, wholeNumber));
+}
+
 function decodedByteLength(contentBytes) {
   try {
     return Buffer.from(String(contentBytes || ""), "base64").length;
@@ -96,7 +102,7 @@ function createMicrosoftGraphMailService({
     clientSecret: cleanString(clientSecret, 2000),
     mailboxUser: cleanString(mailboxUser, 320),
     folderName: cleanString(folderName, 200) || "AI Investment Updates",
-    maxMessagesPerRun: Math.max(1, Math.min(50, Number(maxMessagesPerRun) || 10))
+    maxMessagesPerRun: normalizeMaxMessagesPerRun(maxMessagesPerRun)
   };
 
   function isConfigured() {
