@@ -48,6 +48,17 @@ function attachmentLimitReason(attachment) {
   return `Attachment exceeds the ${limitMb} MB per-file limit.`;
 }
 
+function attachmentSize(attachment) {
+  const size = attachment && attachment.size;
+  return typeof size === "number" && Number.isSafeInteger(size) && size >= 0
+    ? size
+    : null;
+}
+
+function invalidAttachmentSizeReason() {
+  return "Attachment size metadata is missing or invalid; attachment was not downloaded.";
+}
+
 function decodedByteLength(contentBytes) {
   try {
     return Buffer.from(String(contentBytes || ""), "base64").length;
@@ -62,6 +73,9 @@ function attachmentPreviewOutcome(attachment, messageBytes, runBytes) {
   }
   if (!attachment.isSupported) {
     return { status: "unresolved", reason: "Unsupported attachment type would not be downloaded.", countedBytes: 0 };
+  }
+  if (attachmentSize(attachment) === null) {
+    return { status: "unresolved", reason: invalidAttachmentSizeReason(), countedBytes: 0 };
   }
   if (attachment.size > maxAttachmentBytes(attachment)) {
     return { status: "unresolved", reason: attachmentLimitReason(attachment), countedBytes: 0 };
@@ -249,17 +263,20 @@ function createMicrosoftGraphMailService({
       token
     );
     const allAttachments = parseGraphCollection(payload);
-    const attachments = allAttachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE).map((attachment) => ({
-      id: cleanString(attachment.id, 500),
-      name: cleanString(attachment.name, 500),
-      contentType: cleanString(attachment.contentType, 200),
-      size: Number(attachment.size) || 0,
-      isInline: Boolean(attachment.isInline),
-      contentBytes: "",
-      attachmentType: cleanString(attachment["@odata.type"], 120),
-      isPdf: isPdfAttachment(attachment),
-      isSupported: isSupportedAttachment(attachment)
-    }));
+    const attachments = allAttachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE).map((attachment) => {
+      const size = attachmentSize(attachment);
+      return {
+        id: cleanString(attachment.id, 500),
+        name: cleanString(attachment.name, 500),
+        contentType: cleanString(attachment.contentType, 200),
+        size,
+        isInline: Boolean(attachment.isInline),
+        contentBytes: "",
+        attachmentType: cleanString(attachment["@odata.type"], 120),
+        isPdf: isPdfAttachment(attachment),
+        isSupported: isSupportedAttachment(attachment)
+      };
+    });
     attachments.truncated = Boolean(payload["@odata.nextLink"] || allAttachments.length > MAX_ATTACHMENTS_PER_MESSAGE);
     return attachments;
   }
@@ -391,6 +408,15 @@ function createMicrosoftGraphMailService({
           });
           continue;
         }
+        if (attachmentSize(attachment) === null) {
+          unresolvedAttachments.push({
+            ...attachment,
+            contentBytes: "",
+            preservationStatus: "unresolved",
+            reason: invalidAttachmentSizeReason()
+          });
+          continue;
+        }
         if (attachment.size > maxAttachmentBytes(attachment)) {
           unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: attachmentLimitReason(attachment) });
           continue;
@@ -470,6 +496,10 @@ function createMicrosoftGraphMailService({
       }
       if (!attachment.isSupported) {
         unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Unsupported attachment type was not parsed or downloaded." });
+        continue;
+      }
+      if (attachmentSize(attachment) === null) {
+        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: invalidAttachmentSizeReason() });
         continue;
       }
       if (attachment.size > maxAttachmentBytes(attachment) || messageAttachmentBytes + attachment.size > MAX_ATTACHMENT_MESSAGE_BYTES) {
