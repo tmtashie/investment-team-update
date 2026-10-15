@@ -161,6 +161,7 @@ test("Microsoft Graph mail APIs address configured mailbox UPN directly without 
           id: "attachment-1",
           name: "Deck.pdf",
           contentType: "application/pdf",
+          size: 3,
           isInline: false,
           contentBytes: Buffer.from("pdf").toString("base64")
         }
@@ -170,6 +171,7 @@ test("Microsoft Graph mail APIs address configured mailbox UPN directly without 
       id: "attachment-1",
       name: "Deck.pdf",
       contentType: "application/pdf",
+      size: 3,
       isInline: false,
       contentBytes: Buffer.from("pdf").toString("base64")
     })
@@ -292,6 +294,75 @@ test("oversized and unsupported attachments are visible as unresolved without do
   assert.match(result.messages[0].unresolvedAttachments[0].reason, /25 MB/);
   assert.match(result.messages[0].unresolvedAttachments[1].reason, /Unsupported/);
   assert.equal(fetchImpl.calls.length, 4);
+});
+
+test("invalid attachment sizes fail closed without changing byte budgets or downloading content", async () => {
+  const graphResponses = () => [
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({ value: [{
+      id: "message-1", internetMessageId: "<message-1@example.test>", subject: "Opportunity",
+      from: { emailAddress: { address: "sender@example.test" } }, receivedDateTime: "2026-09-16T12:00:00Z",
+      hasAttachments: true, body: { contentType: "text", content: "Opportunity" }
+    }] }),
+    graphResponse({ value: [
+      { id: "negative", name: "Negative.pdf", contentType: "application/pdf", size: -1024, isInline: false },
+      { id: "missing", name: "Missing.pdf", contentType: "application/pdf", isInline: false },
+      { id: "fractional", name: "Fractional.pdf", contentType: "application/pdf", size: 1.5, isInline: false },
+      { id: "string", name: "String.pdf", contentType: "application/pdf", size: "1024", isInline: false },
+      { id: "unsafe", name: "Unsafe.pdf", contentType: "application/pdf", size: Number.MAX_SAFE_INTEGER + 1, isInline: false }
+    ] })
+  ];
+  const createService = (fetchImpl) => createMicrosoftGraphMailService({
+    tenantId: "tenant", clientId: "client", clientSecret: "secret", mailboxUser: "updates@example.test",
+    fetchImpl, graphBaseUrl: "https://graph.test/v1.0", tokenBaseUrl: "https://login.test"
+  });
+
+  const previewFetch = createFetchMock(graphResponses());
+  const preview = await createService(previewFetch).previewIntakeMessages();
+  assert.deepEqual(
+    preview.messages[0].attachments.map((attachment) => attachment.status),
+    ["unresolved", "unresolved", "unresolved", "unresolved", "unresolved"]
+  );
+  assert.deepEqual(
+    preview.messages[0].attachments.map((attachment) => attachment.projectedCountedBytes),
+    [0, 0, 0, 0, 0]
+  );
+  assert.deepEqual(
+    preview.messages[0].attachments.map((attachment) => attachment.size),
+    [null, null, null, null, null]
+  );
+  assert.equal(preview.messages[0].projectedMessageAttachmentBytes, 0);
+  assert.equal(preview.messages[0].projectedRunAttachmentBytesAfterMessage, 0);
+
+  const intakeFetch = createFetchMock(graphResponses());
+  const intake = await createService(intakeFetch).fetchIntakeMessages();
+  assert.equal(intake.messages[0].attachments.length, 0);
+  assert.equal(intake.messages[0].unresolvedAttachments.length, 5);
+  assert.equal(
+    intake.messages[0].unresolvedAttachments.every((attachment) => /size metadata/.test(attachment.reason)),
+    true
+  );
+  assert.equal(intakeFetch.calls.length, 4);
+
+  const reanalysisFetch = createFetchMock([
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({
+      id: "message-1", parentFolderId: "folder-1", internetMessageId: "<message-1@example.test>",
+      subject: "Opportunity", from: { emailAddress: { address: "sender@example.test" } },
+      receivedDateTime: "2026-09-16T12:00:00Z", hasAttachments: true,
+      body: { contentType: "text", content: "Opportunity" }
+    }),
+    graphResponse({ value: [
+      { id: "string", name: "String.pdf", contentType: "application/pdf", size: "1024", isInline: false }
+    ] })
+  ]);
+  const reanalysis = await createService(reanalysisFetch).fetchIntakeMessageById("message-1");
+  assert.equal(reanalysis.attachments.length, 0);
+  assert.equal(reanalysis.unresolvedAttachments.length, 1);
+  assert.match(reanalysis.unresolvedAttachments[0].reason, /size metadata/);
+  assert.equal(reanalysisFetch.calls.length, 4);
 });
 
 test("intake preview reads message and attachment metadata without downloading attachment content", async () => {
