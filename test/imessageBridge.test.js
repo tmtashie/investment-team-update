@@ -228,6 +228,26 @@ test("non-visible-only message text is omitted even when SQLite length is positi
   assert.equal(messages.every((message) => message.text.length > 0), true);
 });
 
+test("invisible-only rows do not consume the requested message limit", (t) => {
+  const fixture = buildFixture();
+  t.after(fixture.cleanup);
+  const writer = new DatabaseSync(fixture.databasePath);
+  const chatId = writer.prepare("SELECT ROWID FROM chat WHERE guid = ?").get(THREAD_ONE_GUID).rowid;
+  const result = writer.prepare("INSERT INTO message (guid, handle_id, is_from_me, date, text) VALUES (?, 1, 0, ?, ?)")
+    .run("newer-invisible", 704780020, "\u200B\u2060");
+  writer.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)")
+    .run(chatId, result.lastInsertRowid);
+  writer.close();
+
+  const database = openReadOnlyMessagesDatabase(fixture.databasePath);
+  t.after(() => database.close());
+  const service = createImessageBridgeService({ database, allowlist: allowlist() });
+  assert.deepEqual(
+    service.readRecentMessages({ threadId: THREAD_ONE, limit: 1 }).messages.map((message) => message.messageId),
+    ["message-later"]
+  );
+});
+
 test("group conversations require an exact current participant match", (t) => {
   const { service, databasePath } = (() => {
     const fixture = buildFixture();

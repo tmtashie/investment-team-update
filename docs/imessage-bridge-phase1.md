@@ -28,6 +28,8 @@ Each entry binds an opaque operator-chosen `threadId` alias to an exact private 
 
 All tools declare `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`. Every schema has `additionalProperties: false`. The stdio handler provides a `server/discover` compatibility probe that advertises only the fully implemented MCP 2025-11-25 initialization handshake.
 
+The current MCP specification also has a 2026-07-28 revision. This prototype intentionally retains the legacy 2025-11-25 stdio handshake that was used for its isolated compatibility testing; it does not claim 2026-07-28 support. Client compatibility, protocol migration, transport, authentication, and Chief of Staff integration require separate review and approval before any live connection.
+
 ### `list_allowed_message_threads`
 
 Input: an empty object.
