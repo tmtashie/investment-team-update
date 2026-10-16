@@ -77,6 +77,15 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
   if (!database || !allowlist || !Array.isArray(allowlist.threads)) {
     throw bridgeError("INVALID_CONFIGURATION", "The iMessage bridge is not configured.");
   }
+  try {
+    database.function(
+      "imessage_has_readable_text",
+      { deterministic: true, directOnly: true },
+      (value) => hasReadableMessageText(value) ? 1 : 0
+    );
+  } catch {
+    throw bridgeError("INVALID_CONFIGURATION", "The iMessage bridge is not configured.");
+  }
   const allowedThreads = new Map(allowlist.threads.map((thread) => [thread.threadId, thread]));
 
   function log(event, metadata) {
@@ -147,6 +156,7 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
       rows = database.prepare(`
         SELECT * FROM (
           SELECT
+            m.ROWID AS source_rowid,
             m.guid AS message_id,
             m.thread_originator_guid AS reply_to_message_id,
             m.text AS text,
@@ -163,15 +173,16 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
           WHERE c.guid = ?
             AND m.text IS NOT NULL
             AND length(m.text) > 0
+            AND imessage_has_readable_text(m.text) = 1
             AND coalesce(m.associated_message_type, 0) = 0
             AND coalesce(m.item_type, 0) = 0
             AND coalesce(m.date_retracted, 0) = 0
             AND NOT (coalesce(m.is_empty, 0) = 1 AND coalesce(m.date_edited, 0) != 0)
             ${searchClause}
-          ORDER BY m.date DESC, m.ROWID DESC
+          ORDER BY apple_seconds DESC, m.ROWID DESC
           LIMIT ?
         ) AS recent
-        ORDER BY apple_seconds ASC, message_id ASC
+        ORDER BY apple_seconds ASC, source_rowid ASC
       `).all(...parameters);
     } catch {
       throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
