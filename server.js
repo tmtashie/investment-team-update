@@ -83,7 +83,13 @@ function normalizeNextStepReminderDays(value) {
     return 14;
   }
   const days = Number(text);
-  return Number.isFinite(days) ? days : 14;
+  if (!Number.isFinite(days)) {
+    return 14;
+  }
+
+  const projectedDate = new Date();
+  projectedDate.setDate(projectedDate.getDate() + days);
+  return Number.isFinite(projectedDate.getTime()) ? days : 14;
 }
 const DATA_SCHEMA_VERSION = 2;
 const NEXT_STEP_REMINDER_DAYS = normalizeNextStepReminderDays(process.env.NEXT_STEP_REMINDER_DAYS);
