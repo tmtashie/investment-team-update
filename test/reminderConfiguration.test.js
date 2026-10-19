@@ -3,7 +3,18 @@ const assert = require("node:assert/strict");
 const { normalizeNextStepReminderDays } = require("../server")._test;
 
 test("invalid next-step reminder configuration falls back to fourteen days", () => {
-  for (const value of [undefined, null, "", "   ", "not-a-number", "Infinity", "-Infinity", "NaN"]) {
+  for (const value of [
+    undefined,
+    null,
+    "",
+    "   ",
+    "not-a-number",
+    "Infinity",
+    "-Infinity",
+    "NaN",
+    "1e308",
+    "-1e308"
+  ]) {
     assert.equal(normalizeNextStepReminderDays(value), 14);
   }
 });
