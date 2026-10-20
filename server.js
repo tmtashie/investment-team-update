@@ -76,8 +76,23 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const AI_EMAIL_HOUSE_DOMAINS = process.env.AI_EMAIL_HOUSE_DOMAINS || "beamanventures.com";
 const AI_ANALYST_SYSTEM_PROMPT =
   "You are an internal investment analyst for Beaman Ventures. Your job is to produce concise, Lee-ready investment analysis. Be clear, practical, and decision-oriented. Do not make up facts. If data is missing, say what is missing and suggest what to ask for.";
+
+function normalizeNextStepReminderDays(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return 14;
+  }
+  const days = Number(text);
+  if (!Number.isFinite(days)) {
+    return 14;
+  }
+
+  const projectedDate = new Date();
+  projectedDate.setDate(projectedDate.getDate() + days);
+  return Number.isFinite(projectedDate.getTime()) ? days : 14;
+}
 const DATA_SCHEMA_VERSION = 2;
-const NEXT_STEP_REMINDER_DAYS = Number(process.env.NEXT_STEP_REMINDER_DAYS || 14);
+const NEXT_STEP_REMINDER_DAYS = normalizeNextStepReminderDays(process.env.NEXT_STEP_REMINDER_DAYS);
 const DIGEST_WINDOW_DAYS = 14;
 const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
 const AI_EMAIL_INTAKE_ENABLED = String(process.env.AI_EMAIL_INTAKE_ENABLED || "")
@@ -6354,6 +6369,7 @@ module.exports = {
     applyNewDealEdits,
     canApprovePotentialNewDeal,
     canViewStoredUpload,
-    isPipelinePerformanceRecord
+    isPipelinePerformanceRecord,
+    normalizeNextStepReminderDays
   }
 };

@@ -47,6 +47,7 @@ node server.js
 - `RESEND_API_KEY`: API key for Resend
 - `OPENAI_API_KEY`: API key for deck summarization and investment email analysis
 - `OPENAI_MODEL`: optional override for the summarization and analysis model
+- `NEXT_STEP_REMINDER_DAYS`: number of days added when scheduling an automatic next-step reminder; defaults to `14`, and blank, non-numeric, non-finite, or date-unrepresentable values fall back to that default
 - `AI_EMAIL_INTAKE_ENABLED`: opt-in switch for Microsoft 365 investment email intake; defaults to disabled and must be set to `true` to enable the manual check
 - `MICROSOFT_TENANT_ID`: Microsoft Entra tenant identifier used for client-credentials authentication
 - `MICROSOFT_CLIENT_ID`: application client identifier used for Microsoft Graph authentication
