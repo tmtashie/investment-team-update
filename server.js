@@ -2049,7 +2049,11 @@ function parseCookies(request) {
       return cookies;
     }
 
-    cookies[name] = decodeURIComponent(rest.join("="));
+    try {
+      cookies[name] = decodeURIComponent(rest.join("="));
+    } catch {
+      return cookies;
+    }
     return cookies;
   }, {});
 }
@@ -6354,6 +6358,7 @@ module.exports = {
     applyNewDealEdits,
     canApprovePotentialNewDeal,
     canViewStoredUpload,
-    isPipelinePerformanceRecord
+    isPipelinePerformanceRecord,
+    parseCookies
   }
 };
