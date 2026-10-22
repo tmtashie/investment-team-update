@@ -57,7 +57,7 @@ function isMeaningfulBody(text) {
 function attachmentHash(contentBytes) {
   return crypto
     .createHash("sha256")
-    .update(Buffer.from(cleanString(contentBytes, 20 * 1024 * 1024), "base64"))
+    .update(Buffer.from(String(contentBytes || "").trim(), "base64"))
     .digest("hex");
 }
 

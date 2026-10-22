@@ -761,6 +761,15 @@ test("attachment hash is stable for dedupe", () => {
   assert.notEqual(attachmentHash(PDF_BYTES), attachmentHash(Buffer.from("different").toString("base64")));
 });
 
+test("attachment hash includes content beyond the former 20 MiB base64 cutoff", () => {
+  const commonPrefix = "A".repeat(20 * 1024 * 1024);
+
+  assert.notEqual(
+    attachmentHash(`${commonPrefix}AAAA`),
+    attachmentHash(`${commonPrefix}BBBB`)
+  );
+});
+
 test("potential new deal creates one pending proposal with preserved and unresolved attachments", async () => {
   const message = createMessage({
     subject: "NewCo seed opportunity",
