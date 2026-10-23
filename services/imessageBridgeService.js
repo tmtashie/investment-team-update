@@ -99,13 +99,17 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
     let rows;
     try {
       rows = database.prepare(`
-        SELECT DISTINCT h.id AS handle
+        SELECT CAST(c.ROWID AS TEXT) AS chat_row_id, h.id AS handle
         FROM chat AS c
-        JOIN chat_handle_join AS chj ON chj.chat_id = c.ROWID
-        JOIN handle AS h ON h.ROWID = chj.handle_id
+        LEFT JOIN chat_handle_join AS chj ON chj.chat_id = c.ROWID
+        LEFT JOIN handle AS h ON h.ROWID = chj.handle_id
         WHERE c.guid = ?
       `).all(thread.chatGuid);
     } catch {
+      throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
+    }
+    const chatRowIds = new Set(rows.map((row) => row.chat_row_id));
+    if (chatRowIds.size !== 1) {
       throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
     }
     const actualHandles = new Set(rows.map((row) => row.handle));
@@ -113,7 +117,7 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
     if (actualHandles.size !== configuredHandles.size || [...actualHandles].some((handle) => !configuredHandles.has(handle))) {
       throw bridgeError("PARTICIPANTS_CHANGED", "Conversation participants do not match the allowlist.");
     }
-    return thread;
+    return { ...thread, chatRowId: [...chatRowIds][0] };
   }
 
   function normalizeMessage(row, thread) {
@@ -149,8 +153,8 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
   function selectMessages(thread, { limit, query = null }) {
     const searchClause = query === null ? "" : "AND instr(lower(m.text), lower(?)) > 0";
     const parameters = query === null
-      ? [thread.chatGuid, limit]
-      : [thread.chatGuid, query, limit];
+      ? [thread.chatRowId, limit]
+      : [thread.chatRowId, query, limit];
     let rows;
     try {
       rows = database.prepare(`
@@ -166,11 +170,10 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
             END AS apple_seconds,
             m.is_from_me AS is_from_me,
             h.id AS sender_handle
-          FROM chat AS c
-          JOIN chat_message_join AS cmj ON cmj.chat_id = c.ROWID
+          FROM chat_message_join AS cmj
           JOIN message AS m ON m.ROWID = cmj.message_id
           LEFT JOIN handle AS h ON h.ROWID = m.handle_id
-          WHERE c.guid = ?
+          WHERE cmj.chat_id = ?
             AND m.text IS NOT NULL
             AND length(m.text) > 0
             AND imessage_has_readable_text(m.text) = 1

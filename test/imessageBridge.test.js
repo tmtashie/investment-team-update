@@ -248,6 +248,27 @@ test("invisible-only rows do not consume the requested message limit", (t) => {
   );
 });
 
+test("duplicate database chat identifiers fail closed before messages are read", (t) => {
+  const fixture = buildFixture();
+  t.after(fixture.cleanup);
+  const writer = new DatabaseSync(fixture.databasePath);
+  const duplicateChatId = writer.prepare("INSERT INTO chat (guid) VALUES (?)").run(THREAD_ONE_GUID).lastInsertRowid;
+  writer.prepare("INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?, 1)").run(duplicateChatId);
+  const hiddenMessageId = writer.prepare(
+    "INSERT INTO message (guid, handle_id, is_from_me, date, text) VALUES (?, 1, 0, ?, ?)"
+  ).run("duplicate-guid-message", 704780030, "Duplicate GUID hidden body").lastInsertRowid;
+  writer.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)").run(duplicateChatId, hiddenMessageId);
+  writer.close();
+
+  const database = openReadOnlyMessagesDatabase(fixture.databasePath);
+  t.after(() => database.close());
+  const service = createImessageBridgeService({ database, allowlist: allowlist() });
+  assert.throws(
+    () => service.readRecentMessages({ threadId: THREAD_ONE }),
+    (error) => error.code === "MESSAGES_DATABASE_UNAVAILABLE" && !error.message.includes("hidden body")
+  );
+});
+
 test("group conversations require an exact current participant match", (t) => {
   const { service, databasePath } = (() => {
     const fixture = buildFixture();
