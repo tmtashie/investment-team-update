@@ -13,8 +13,9 @@ Run `bin/imessage-readonly-mcp.js` as a local stdio MCP child process on the Mac
 1. Reads one fixed allowlist file at `~/.config/beaman-ventures/imessage-bridge/allowlist.json`.
 2. Opens only `~/Library/Messages/chat.db` with SQLite `readOnly: true`, extension loading disabled, defensive mode enabled, `PRAGMA query_only = ON`, and an authorizer that denies write, schema, transaction, attach, detach, and non-query pragma operations.
 3. Executes only source-controlled SQL with bound parameters.
-4. Revalidates the current database participant set against the allowlist before each list, read, or search operation.
-5. Writes newline-delimited MCP JSON-RPC responses to stdout. It creates no server socket and persists no message history.
+4. Requires each configured chat GUID to resolve to exactly one database chat row, then revalidates that row's current participant set against the allowlist before each list, read, or search operation.
+5. Reads messages only through the already authorized internal chat row identifier; a duplicate or ambiguous GUID fails closed before any message query.
+6. Writes newline-delimited MCP JSON-RPC responses to stdout. It creates no server socket and persists no message history.
 
 Do not use SQLite `immutable=1` against the live Messages database. Immutable mode disables locking and change detection; SQLite warns that results can be incorrect or appear corrupt if the database changes. Messages is an active database, so ordinary read-only access is the safer choice.
 
@@ -27,6 +28,8 @@ Each entry binds an opaque operator-chosen `threadId` alias to an exact private 
 ## MCP tools
 
 All tools declare `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: false`. Every schema has `additionalProperties: false`. The stdio handler provides a `server/discover` compatibility probe that advertises only the fully implemented MCP 2025-11-25 initialization handshake.
+
+The current MCP specification also has a 2026-07-28 revision. This prototype intentionally retains the legacy 2025-11-25 stdio handshake that was used for its isolated compatibility testing; it does not claim 2026-07-28 support. Client compatibility, protocol migration, transport, authentication, and Chief of Staff integration require separate review and approval before any live connection.
 
 ### `list_allowed_message_threads`
 

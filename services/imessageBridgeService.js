@@ -77,6 +77,15 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
   if (!database || !allowlist || !Array.isArray(allowlist.threads)) {
     throw bridgeError("INVALID_CONFIGURATION", "The iMessage bridge is not configured.");
   }
+  try {
+    database.function(
+      "imessage_has_readable_text",
+      { deterministic: true, directOnly: true },
+      (value) => hasReadableMessageText(value) ? 1 : 0
+    );
+  } catch {
+    throw bridgeError("INVALID_CONFIGURATION", "The iMessage bridge is not configured.");
+  }
   const allowedThreads = new Map(allowlist.threads.map((thread) => [thread.threadId, thread]));
 
   function log(event, metadata) {
@@ -90,13 +99,17 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
     let rows;
     try {
       rows = database.prepare(`
-        SELECT DISTINCT h.id AS handle
+        SELECT CAST(c.ROWID AS TEXT) AS chat_row_id, h.id AS handle
         FROM chat AS c
-        JOIN chat_handle_join AS chj ON chj.chat_id = c.ROWID
-        JOIN handle AS h ON h.ROWID = chj.handle_id
+        LEFT JOIN chat_handle_join AS chj ON chj.chat_id = c.ROWID
+        LEFT JOIN handle AS h ON h.ROWID = chj.handle_id
         WHERE c.guid = ?
       `).all(thread.chatGuid);
     } catch {
+      throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
+    }
+    const chatRowIds = new Set(rows.map((row) => row.chat_row_id));
+    if (chatRowIds.size !== 1) {
       throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
     }
     const actualHandles = new Set(rows.map((row) => row.handle));
@@ -104,7 +117,7 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
     if (actualHandles.size !== configuredHandles.size || [...actualHandles].some((handle) => !configuredHandles.has(handle))) {
       throw bridgeError("PARTICIPANTS_CHANGED", "Conversation participants do not match the allowlist.");
     }
-    return thread;
+    return { ...thread, chatRowId: [...chatRowIds][0] };
   }
 
   function normalizeMessage(row, thread) {
@@ -140,13 +153,14 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
   function selectMessages(thread, { limit, query = null }) {
     const searchClause = query === null ? "" : "AND instr(lower(m.text), lower(?)) > 0";
     const parameters = query === null
-      ? [thread.chatGuid, limit]
-      : [thread.chatGuid, query, limit];
+      ? [thread.chatRowId, limit]
+      : [thread.chatRowId, query, limit];
     let rows;
     try {
       rows = database.prepare(`
         SELECT * FROM (
           SELECT
+            m.ROWID AS source_rowid,
             m.guid AS message_id,
             m.thread_originator_guid AS reply_to_message_id,
             m.text AS text,
@@ -156,22 +170,22 @@ function createImessageBridgeService({ database, allowlist, logger = null }) {
             END AS apple_seconds,
             m.is_from_me AS is_from_me,
             h.id AS sender_handle
-          FROM chat AS c
-          JOIN chat_message_join AS cmj ON cmj.chat_id = c.ROWID
+          FROM chat_message_join AS cmj
           JOIN message AS m ON m.ROWID = cmj.message_id
           LEFT JOIN handle AS h ON h.ROWID = m.handle_id
-          WHERE c.guid = ?
+          WHERE cmj.chat_id = ?
             AND m.text IS NOT NULL
             AND length(m.text) > 0
+            AND imessage_has_readable_text(m.text) = 1
             AND coalesce(m.associated_message_type, 0) = 0
             AND coalesce(m.item_type, 0) = 0
             AND coalesce(m.date_retracted, 0) = 0
             AND NOT (coalesce(m.is_empty, 0) = 1 AND coalesce(m.date_edited, 0) != 0)
             ${searchClause}
-          ORDER BY m.date DESC, m.ROWID DESC
+          ORDER BY apple_seconds DESC, m.ROWID DESC
           LIMIT ?
         ) AS recent
-        ORDER BY apple_seconds ASC, message_id ASC
+        ORDER BY apple_seconds ASC, source_rowid ASC
       `).all(...parameters);
     } catch {
       throw bridgeError("MESSAGES_DATABASE_UNAVAILABLE", "The Messages database is unavailable or incompatible.");
