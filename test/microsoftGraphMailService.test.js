@@ -390,6 +390,8 @@ test("exact-message reanalysis leaves failed attachment downloads unresolved", a
   assert.equal(message.pdfAttachments.length, 1);
   assert.equal(message.unresolvedAttachments.length, 1);
   assert.equal(message.unresolvedAttachments[0].name, "Board Deck.pdf");
+  assert.equal(message.unresolvedAttachments[0].contentBytes, "");
+  assert.equal(message.unresolvedAttachments[0].preservationStatus, "unresolved");
   assert.equal(message.unresolvedAttachments[0].reason, "Attachment unavailable");
 });
 
