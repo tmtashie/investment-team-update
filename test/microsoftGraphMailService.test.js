@@ -355,3 +355,43 @@ test("exact-message reanalysis fetches by Graph ID and requires the configured i
   assert.match(fetchImpl.calls[2].url, /messages\/bep-graph-id\?\$select=/);
   assert.equal(fetchImpl.calls.every((call) => !call.options.method || call.options.method === "GET" || call.url.includes("oauth2")), true);
 });
+
+test("exact-message reanalysis leaves failed attachment downloads unresolved", async () => {
+  const fetchImpl = createFetchMock([
+    graphResponse({ access_token: "token-value" }),
+    graphResponse({ value: [{ id: "folder-1", displayName: "AI Investment Updates" }] }),
+    graphResponse({
+      id: "message-1", parentFolderId: "folder-1", internetMessageId: "<message-1@example.test>",
+      subject: "Quarterly update", from: { emailAddress: { address: "sender@example.test" } },
+      receivedDateTime: "2026-10-23T12:00:00Z", hasAttachments: true,
+      body: { contentType: "text", content: "Current portfolio update evidence." }
+    }),
+    graphResponse({
+      value: [
+        { id: "deck", name: "Board Deck.pdf", contentType: "application/pdf", size: 3, isInline: false },
+        { id: "notes", name: "Notes.pdf", contentType: "application/pdf", size: 3, isInline: false }
+      ]
+    }),
+    graphResponse({ error: { message: "Attachment unavailable" } }, 503),
+    graphResponse({
+      id: "notes", name: "Notes.pdf", contentType: "application/pdf", size: 3,
+      isInline: false, contentBytes: Buffer.from("pdf").toString("base64")
+    })
+  ]);
+  const service = createMicrosoftGraphMailService({
+    tenantId: "tenant", clientId: "client", clientSecret: "secret", mailboxUser: "updates@example.test",
+    fetchImpl, graphBaseUrl: "https://graph.test/v1.0", tokenBaseUrl: "https://login.test"
+  });
+
+  const message = await service.fetchIntakeMessageById("message-1");
+
+  assert.equal(message.attachments.length, 1);
+  assert.equal(message.attachments[0].name, "Notes.pdf");
+  assert.equal(message.pdfAttachments.length, 1);
+  assert.equal(message.unresolvedAttachments.length, 1);
+  assert.equal(message.unresolvedAttachments[0].name, "Board Deck.pdf");
+  assert.equal(message.unresolvedAttachments[0].contentBytes, "");
+  assert.equal(message.unresolvedAttachments[0].preservationStatus, "unresolved");
+  assert.equal(message.unresolvedAttachments[0].reason, "Attachment unavailable");
+});
+

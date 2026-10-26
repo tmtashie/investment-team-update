@@ -476,16 +476,20 @@ function createMicrosoftGraphMailService({
         unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: attachment.size > maxAttachmentBytes(attachment) ? attachmentLimitReason(attachment) : "Attachment exceeds the 30 MB per-message limit." });
         continue;
       }
-      const fetched = await fetchAttachment(token, message.id, attachment);
-      const actualSize = decodedByteLength(fetched.contentBytes);
-      if (!actualSize || actualSize > maxAttachmentBytes(fetched) || messageAttachmentBytes + actualSize > MAX_ATTACHMENT_MESSAGE_BYTES) {
-        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment data exceeded a configured preservation limit." });
-        continue;
+      try {
+        const fetched = await fetchAttachment(token, message.id, attachment);
+        const actualSize = decodedByteLength(fetched.contentBytes);
+        if (!actualSize || actualSize > maxAttachmentBytes(fetched) || messageAttachmentBytes + actualSize > MAX_ATTACHMENT_MESSAGE_BYTES) {
+          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment data exceeded a configured preservation limit." });
+          continue;
+        }
+        const preserved = { ...fetched, size: actualSize, preservationStatus: "preserved", extractionStatus: fetched.isPdf ? "pending" : "not-parsed" };
+        messageAttachmentBytes += actualSize;
+        preservedAttachments.push(preserved);
+        if (fetched.isPdf) pdfAttachments.push(preserved);
+      } catch (error) {
+        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: error.message || "Attachment could not be preserved." });
       }
-      const preserved = { ...fetched, size: actualSize, preservationStatus: "preserved", extractionStatus: fetched.isPdf ? "pending" : "not-parsed" };
-      messageAttachmentBytes += actualSize;
-      preservedAttachments.push(preserved);
-      if (fetched.isPdf) pdfAttachments.push(preserved);
     }
     return {
       ...message,
