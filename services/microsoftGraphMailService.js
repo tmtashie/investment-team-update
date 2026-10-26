@@ -525,4 +525,3 @@ module.exports = {
   attachmentPreviewOutcome,
   createMicrosoftGraphMailService
 };
-
