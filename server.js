@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { StringDecoder } = require("node:string_decoder");
 const { createJsonStore } = require("./storage/jsonStore");
 const { createBackupService } = require("./services/backupService");
 const { createInvestmentService } = require("./services/investmentService");
@@ -3659,17 +3660,22 @@ function serveStaticFile(response, filePath) {
 
 function parseRequestBody(request) {
   return new Promise((resolve, reject) => {
+    const decoder = new StringDecoder("utf8");
     let body = "";
+    let bodyBytes = 0;
 
     request.on("data", (chunk) => {
-      body += chunk.toString();
-      if (body.length > MAX_BODY_SIZE_BYTES) {
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_BODY_SIZE_BYTES) {
         reject(new Error("Request body too large"));
         request.destroy();
+        return;
       }
+      body += decoder.write(chunk);
     });
 
     request.on("end", () => {
+      body += decoder.end();
       if (!body) {
         resolve({});
         return;
@@ -6354,6 +6360,7 @@ module.exports = {
     applyNewDealEdits,
     canApprovePotentialNewDeal,
     canViewStoredUpload,
-    isPipelinePerformanceRecord
+    isPipelinePerformanceRecord,
+    parseRequestBody
   }
 };
