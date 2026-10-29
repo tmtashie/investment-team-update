@@ -142,3 +142,8 @@ Upload a deck as a PDF in the app, then click `Summarize deck into notes`. The a
 
 PowerPoint decks should be exported to PDF first for the most reliable results.
 
+
+
+### Phase 2 deployment prerequisites (polling remains disabled)
+
+The polling checkpoint, message deduplication state, and lease files must reside on persistent storage. A Render ephemeral filesystem is insufficient. Before enabling polling, verify the actual file paths, persistent disk mount, durable backups, and restore behavior; confirm a **single application writer** owns these files. Filesystem locks are not a distributed locking solution for multiple Render instances. Configure a single worker or replace the lock with a transactional shared lease before scaling. Validate recovery across restart and redeploy, including Graph page replay and idempotent proposal creation. Monitor `processingComplete`, `requiresFollowUp`, checkpoint age, backlog, and consecutive failures; HTTP 202/409/429 indicate accepted/deferred work, **not successful completion**. The checked-in `AI_EMAIL_AUTO_MONITOR_ENABLED=false` setting must remain unchanged until approved.
