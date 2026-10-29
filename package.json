@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "poll-email": "node bin/run-ai-email-scheduler.js",
     "test": "node --test"
   },
   "dependencies": {
@@ -15,3 +16,4 @@
     "node": ">=18"
   }
 }
+

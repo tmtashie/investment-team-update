@@ -12,6 +12,10 @@ const {
 } = require("./services/aiUpdateProposalApplyService");
 const { createAiEmailIntakeService } = require("./services/aiEmailIntakeService");
 const { createAiEmailIntakeStateService } = require("./services/aiEmailIntakeStateService");
+const {
+  createAiEmailPollingService,
+  verifySchedulerBearerToken
+} = require("./services/aiEmailPollingService");
 const { createAiUpdateAnalysisService } = require("./services/aiUpdateAnalysisService");
 const { createMicrosoftGraphMailService } = require("./services/microsoftGraphMailService");
 const { createNewDealAnalysisService } = require("./services/newDealAnalysisService");
@@ -59,6 +63,8 @@ const DATA_FILE = path.join(DATA_DIR, "investments.json");
 const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
 const AI_UPDATE_PROPOSALS_FILE = path.join(DATA_DIR, "ai-update-proposals.json");
 const AI_EMAIL_INTAKE_STATE_FILE = path.join(DATA_DIR, "ai-email-intake-state.json");
+const AI_EMAIL_POLLING_STATE_FILE = path.join(DATA_DIR, "ai-email-polling-state.json");
+const AI_EMAIL_POLLING_LOCK_FILE = path.join(DATA_DIR, "ai-email-polling.lock");
 const COMPANY_DOCUMENTS_FILE = path.join(DATA_DIR, "company-documents.json");
 const METADATA_FILE = path.join(DATA_DIR, "metadata.json");
 const BACKUPS_DIR = path.join(DATA_DIR, "backups");
@@ -83,6 +89,11 @@ const UPDATE_REQUEST_FOLLOW_UP_DAYS = 7;
 const AI_EMAIL_INTAKE_ENABLED = String(process.env.AI_EMAIL_INTAKE_ENABLED || "")
   .trim()
   .toLowerCase() === "true";
+const AI_EMAIL_AUTO_MONITOR_ENABLED = String(process.env.AI_EMAIL_AUTO_MONITOR_ENABLED || "")
+  .trim()
+  .toLowerCase() === "true";
+const AI_EMAIL_SCHEDULER_TOKEN = process.env.AI_EMAIL_SCHEDULER_TOKEN || "";
+const AI_EMAIL_MONITOR_USER = String(process.env.AI_EMAIL_MONITOR_USER || "").trim().toLowerCase();
 const INVESTMENT_ENTITIES = [
   "Beaman Ventures",
   "Lee Beaman",
@@ -339,6 +350,15 @@ function parseTeamUsers(value) {
 }
 
 const TEAM_USERS = parseTeamUsers(process.env.TEAM_USERS || "");
+function getConfiguredAiEmailMonitorUser() {
+  const configured = TEAM_USERS[AI_EMAIL_MONITOR_USER];
+  if (!AI_EMAIL_MONITOR_USER || !configured) return null;
+  return {
+    email: configured.email,
+    role: normalizeUserRole(configured.role)
+  };
+}
+
 const ALLOWED_EMAILS = Array.from(
   new Set(
     splitCsv(process.env.TEAM_ALLOWED_EMAILS || "")
@@ -1478,6 +1498,21 @@ const aiEmailIntakeService = createAiEmailIntakeService({
   saveUpload: saveAiEmailIntakeUpload,
   allowedSenders: process.env.AI_EMAIL_ALLOWED_SENDERS || "",
   allowedDomains: process.env.AI_EMAIL_ALLOWED_DOMAINS || ""
+});
+
+const aiEmailPollingService = createAiEmailPollingService({
+  stateFile: AI_EMAIL_POLLING_STATE_FILE,
+  lockFile: AI_EMAIL_POLLING_LOCK_FILE,
+  checkForNewEmails: (options) => aiEmailIntakeService.checkForNewEmails(options),
+  readJsonFile,
+  writeJsonFile,
+  enabled: AI_EMAIL_AUTO_MONITOR_ENABLED,
+  initialLookbackMinutes: process.env.AI_EMAIL_POLL_INITIAL_LOOKBACK_MINUTES,
+  overlapMinutes: process.env.AI_EMAIL_POLL_OVERLAP_MINUTES,
+  maxPagesPerRun: process.env.AI_EMAIL_POLL_MAX_PAGES_PER_RUN,
+  maxRetries: process.env.AI_EMAIL_POLL_MAX_RETRIES,
+  retryBaseMs: process.env.AI_EMAIL_POLL_RETRY_BASE_MS,
+  lockTtlMinutes: process.env.AI_EMAIL_POLL_LOCK_TTL_MINUTES
 });
 
 function serializeAiUpdateProposal(proposal, investments) {
@@ -4834,7 +4869,18 @@ const server = http.createServer(async (request, response) => {
           : 0,
         allowedSendersConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_SENDERS),
         allowedDomainsConfigured: Boolean(process.env.AI_EMAIL_ALLOWED_DOMAINS),
-        houseDomains: AI_EMAIL_HOUSE_DOMAINS.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
+        houseDomains: AI_EMAIL_HOUSE_DOMAINS.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean),
+        automaticMonitoring: {
+          enabled: AI_EMAIL_AUTO_MONITOR_ENABLED,
+          configured: Boolean(
+            AI_EMAIL_AUTO_MONITOR_ENABLED &&
+            AI_EMAIL_INTAKE_ENABLED &&
+            microsoftGraphMailService.isConfigured() &&
+            String(AI_EMAIL_SCHEDULER_TOKEN).trim().length >= 32 &&
+            getConfiguredAiEmailMonitorUser()
+          ),
+          monitorUserConfigured: Boolean(getConfiguredAiEmailMonitorUser())
+        }
       },
       entities: INVESTMENT_ENTITIES.filter((entity) => canViewEntity(user, entity)),
       familyOfficeWorkbookAvailable: fs.existsSync(FAMILY_OFFICE_WORKBOOK_FILE),
@@ -5006,6 +5052,41 @@ const server = http.createServer(async (request, response) => {
       }, {}),
       user
     });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ai-email-intake/scheduled-check") {
+    if (!verifySchedulerBearerToken(request.headers.authorization, AI_EMAIL_SCHEDULER_TOKEN)) {
+      sendJson(response, 401, { error: "Scheduler authentication failed." });
+      return;
+    }
+    if (!AI_EMAIL_AUTO_MONITOR_ENABLED || !AI_EMAIL_INTAKE_ENABLED) {
+      sendJson(response, 503, { error: "Automatic Microsoft 365 intake is disabled." });
+      return;
+    }
+    const monitorUser = getConfiguredAiEmailMonitorUser();
+    if (!monitorUser) {
+      sendJson(response, 503, { error: "The configured monitor user is unavailable." });
+      return;
+    }
+    try {
+      const result = await aiEmailPollingService.runScheduled({ user: monitorUser });
+      if (result.status === "error") {
+        console.error(`Scheduled Microsoft 365 intake failed; run ${result.runId || "unknown"}.`);
+      }
+      sendJson(response, result.httpStatus || 200, result);
+      return;
+    } catch (error) {
+      console.error("Scheduled Microsoft 365 intake failed before completion.");
+      sendJson(response, 500, { error: "Scheduled Microsoft 365 intake failed safely." });
+      return;
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ai-email-intake/monitor-status") {
+    const user = requireMasterEditor(request, response);
+    if (!user) return;
+    sendJson(response, 200, aiEmailPollingService.getStatus());
     return;
   }
 
@@ -6357,3 +6438,4 @@ module.exports = {
     isPipelinePerformanceRecord
   }
 };
+

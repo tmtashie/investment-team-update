@@ -31,5 +31,42 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: AI_EMAIL_INTAKE_ENABLED
+        sync: false
+      - key: AI_EMAIL_AUTO_MONITOR_ENABLED
+        value: "false"
+      - key: AI_EMAIL_SCHEDULER_TOKEN
+        sync: false
+      - key: AI_EMAIL_MONITOR_USER
+        sync: false
+      - key: MICROSOFT_TENANT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_MAILBOX_USER
+        sync: false
+      - key: MICROSOFT_MAIL_FOLDER_NAME
+        sync: false
+      - key: AI_EMAIL_MAX_MESSAGES_PER_RUN
+        sync: false
+      - key: AI_EMAIL_POLL_INITIAL_LOOKBACK_MINUTES
+        value: "1440"
+      - key: AI_EMAIL_POLL_OVERLAP_MINUTES
+        value: "5"
+      - key: AI_EMAIL_POLL_MAX_PAGES_PER_RUN
+        value: "10"
+      - key: AI_EMAIL_POLL_MAX_RETRIES
+        value: "2"
+      - key: AI_EMAIL_POLL_RETRY_BASE_MS
+        value: "1000"
+      - key: AI_EMAIL_POLL_LOCK_TTL_MINUTES
+        value: "30"
       - key: NEXT_STEP_REMINDER_DAYS
         value: "14"
+

@@ -57,6 +57,16 @@ node server.js
 - `AI_EMAIL_ALLOWED_SENDERS`: optional comma-separated list of exact sender email addresses accepted for analysis
 - `AI_EMAIL_ALLOWED_DOMAINS`: optional comma-separated list of sender domains accepted for analysis
 - `AI_EMAIL_HOUSE_DOMAINS`: comma-separated house domains that cannot provide positive company-domain match evidence; defaults to `beamanventures.com` and includes its subdomains
+- `AI_EMAIL_AUTO_MONITOR_ENABLED`: separate opt-in switch for the scheduler trigger; defaults to disabled
+- `AI_EMAIL_SCHEDULER_TOKEN`: random bearer credential of at least 32 characters used only by the scheduler trigger
+- `AI_EMAIL_APP_BASE_URL`: HTTPS origin used by the external scheduler client; it always calls the fixed scheduled-check path
+- `AI_EMAIL_MONITOR_USER`: existing `TEAM_USERS` email whose normal role and portfolio visibility apply to scheduled intake
+- `AI_EMAIL_POLL_INITIAL_LOOKBACK_MINUTES`: first-run lookback window; defaults to 1440 minutes
+- `AI_EMAIL_POLL_OVERLAP_MINUTES`: checkpoint overlap used to tolerate clock and delivery timing; defaults to 5 minutes
+- `AI_EMAIL_POLL_MAX_PAGES_PER_RUN`: maximum chronological Graph pages handled by one trigger; defaults to 10
+- `AI_EMAIL_POLL_MAX_RETRIES`: retries for one failed Graph/intake page; defaults to 2
+- `AI_EMAIL_POLL_RETRY_BASE_MS`: exponential retry base delay; defaults to 1000 milliseconds
+- `AI_EMAIL_POLL_LOCK_TTL_MINUTES`: stale scheduler-lease recovery threshold; defaults to 30 minutes and is refreshed between pages
 
 ## Microsoft 365 investment email intake
 
@@ -79,6 +89,18 @@ One source email may describe multiple investment opportunities. Intake first pa
 For a legacy pending proposal created before opportunity partitioning, a master editor can explicitly select `Reanalyze source into opportunities`. The server fetches the exact preserved Graph message, verifies its Internet Message ID and configured intake folder, reuses attachment hashes, and creates only pending replacement proposals. The legacy proposal is marked `superseded` only after replacements exist. Reanalysis never approves a proposal or creates an investment.
 
 Automated intake must find explicit portfolio evidence before it creates a proposal, and the existing source-evidence safety checks still apply. Successful analysis creates a `pending` proposal only. It never approves or applies an investment update: an authorized human must review and approve or reject each proposal in the AI Update Inbox.
+
+### Unattended polling
+
+Unattended polling is independently gated by `AI_EMAIL_AUTO_MONITOR_ENABLED` and remains disabled in checked-in deployment configuration. A scheduler invokes `POST /api/ai-email-intake/scheduled-check` with `Authorization: Bearer <AI_EMAIL_SCHEDULER_TOKEN>`. The token is accepted only when it is at least 32 characters, and the configured monitor user must resolve to an existing `TEAM_USERS` entry. The scheduler credential cannot call proposal approval, investment, email-delivery, or general application endpoints.
+
+Scheduled runs use an atomic file lease to prevent overlap, a persistent chronological checkpoint with a small overlap window, and Graph continuation links restricted to the configured Graph host, mailbox, folder, and message collection. Each successfully processed page persists its continuation before the next page. A restart can safely replay the current page because the intake message and attachment deduplication state remains authoritative. Stale leases are recovered after the configured TTL.
+
+Page failures are retried with bounded exponential backoff. A failed page does not advance the checkpoint. Sanitized failures and stale-lease recoveries are stored as operational alerts in `ai-email-polling-state.json`; a master editor can inspect them through `GET /api/ai-email-intake/monitor-status`. This path does not send alert emails. An external scheduler should continue invoking the trigger while a backlog remains; a `202` response indicates that another bounded catch-up run is required.
+
+Before production enablement, create a long random scheduler token, select the least-privileged existing monitor user that has the required portfolio visibility, validate the initial lookback in a non-production mailbox folder, and configure the external scheduler. Do not place the scheduler token in source control, command output, query strings, or logs.
+
+The repository includes `npm run poll-email` for a Render Cron Job or equivalent scheduler. Configure only `AI_EMAIL_APP_BASE_URL` and the same `AI_EMAIL_SCHEDULER_TOKEN` on that job. A successful complete run returns HTTP 200; HTTP 202 means bounded catch-up remains; HTTP 409 and 429 are safe lock/backoff no-ops for the next scheduled delivery. The cron job itself is intentionally absent from `render.yaml` so merging or deploying this code cannot activate monitoring.
 
 ### Potential New Deal intake
 
@@ -119,3 +141,4 @@ Open the deployed app in your phone browser and add it to your home screen for a
 Upload a deck as a PDF in the app, then click `Summarize deck into notes`. The app sends the PDF to OpenAI and fills the Notes field with a structured summary that can be included in the team email.
 
 PowerPoint decks should be exported to PDF first for the most reliable results.
+
