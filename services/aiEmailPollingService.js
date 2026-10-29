@@ -209,13 +209,16 @@ function createAiEmailPollingService({
     if (!current || current.runId !== runId) {
       throw new Error("Scheduled intake lost its persistent lease.");
     }
-    fsImpl.writeFileSync(lockFile, JSON.stringify({
-      ...current,
-      heartbeatAt: now().toISOString()
-    }) + "\n", {
-      encoding: "utf8",
-      mode: 0o600
-    });
+    // Refresh the existing inode rather than replacing the lock pathname.
+    // A different owner must never be overwritten by an old worker.
+    const descriptor = fsImpl.openSync(lockFile, "r+");
+    try {
+      const onDisk = JSON.parse(fsImpl.readFileSync(descriptor, "utf8"));
+      if (onDisk.runId !== runId) throw new Error("Scheduled intake lost its persistent lease.");
+      fsImpl.ftruncateSync(descriptor, 0);
+      fsImpl.writeSync(descriptor, JSON.stringify({ ...onDisk, heartbeatAt: now().toISOString() }) + "\n", 0, "utf8");
+      fsImpl.fsyncSync(descriptor);
+    } finally { fsImpl.closeSync(descriptor); }
   }
 
   async function runPageWithRetries({ user, since, continuationCursor }) {
@@ -277,11 +280,18 @@ function createAiEmailPollingService({
       lastRunId: runId,
       lastError: ""
     });
+    let leaseLost = false;
+    const heartbeat = setInterval(() => {
+      try { refreshLock(runId); } catch (error) { leaseLost = true; }
+    }, Math.max(1000, Math.floor(config.lockTtlMinutes * 60000 / 3)));
+    if (typeof heartbeat.unref === "function") heartbeat.unref();
     try {
       while (pageCount < config.maxPagesPerRun) {
+        if (leaseLost) throw new Error("Scheduled intake lost its persistent lease.");
         refreshLock(runId);
         const page = await runPageWithRetries({ user, since: windowStartedAt, continuationCursor: cursor });
         refreshLock(runId);
+        if (leaseLost) throw new Error("Scheduled intake lost its persistent lease.");
         totals = addCounts(totals, page);
         pageCount += 1;
         cursor = cleanString(page.continuationCursor, 8000);
@@ -345,6 +355,7 @@ function createAiEmailPollingService({
         counts: totals
       };
     } finally {
+      clearInterval(heartbeat);
       releaseLock(runId);
     }
   }
