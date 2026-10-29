@@ -55,7 +55,10 @@ async function runSchedulerTrigger({
     }
     if ([200, 202, 409, 429].includes(response.status)) {
       return {
-        ok: true,
+        ok: response.status === 200,
+        delivered: true,
+        processingComplete: response.status === 200,
+        requiresFollowUp: response.status !== 200,
         httpStatus: response.status,
         status: cleanString(payload.status, 40) || "accepted",
         backlogRemaining: Boolean(payload.backlogRemaining),
