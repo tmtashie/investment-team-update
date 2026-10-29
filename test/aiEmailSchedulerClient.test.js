@@ -38,7 +38,8 @@ test("scheduler client sends the bearer token only in the authorization header",
     }
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.requiresFollowUp, true);
   assert.equal(result.status, "catching-up");
   assert.equal(calls[0].url.includes(token), false);
   assert.equal(calls[0].options.headers.Authorization, `Bearer ${token}`);
@@ -53,7 +54,9 @@ test("scheduler client treats lock and retry deferrals as safe no-op deliveries"
       token,
       fetchImpl: async () => response(status, { status: status === 409 ? "locked" : "deferred" })
     });
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.delivered, true);
+    assert.equal(result.requiresFollowUp, true);
     assert.equal(result.httpStatus, status);
   }
 });
