@@ -311,3 +311,23 @@ test("scheduled route is independently authenticated and cannot approve or apply
   assert.match(envSource, /AI_EMAIL_AUTO_MONITOR_ENABLED=false/);
   assert.match(renderSource, /AI_EMAIL_AUTO_MONITOR_ENABLED\n\s+value: "false"/);
 });
+
+
+test("long-running Graph request retains lease via heartbeat and blocks concurrent worker", async (t) => {
+  let resolvePage;
+  const first = createHarness(t, {
+    lockTtlMinutes: 1,
+    checkForNewEmails: () => new Promise((resolve) => { resolvePage = resolve; })
+  });
+  const pending = first.service.runScheduled({ user: monitorUser });
+  const second = createAiEmailPollingService({
+    stateFile: first.stateFile, lockFile: first.lockFile,
+    readJsonFile: first.readJsonFile, writeJsonFile: first.writeJsonFile,
+    enabled: true, lockTtlMinutes: 1,
+    now: () => new Date(first.current.value),
+    checkForNewEmails: async () => { throw new Error("must not run"); }
+  });
+  assert.equal((await second.runScheduled({ user: monitorUser })).status, "locked");
+  resolvePage({ configured: true, checked: 0, processed: 0, skipped: 0, failed: 0, proposalsCreated: 0 });
+  assert.equal((await pending).status, "completed");
+});
