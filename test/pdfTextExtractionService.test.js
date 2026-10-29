@@ -55,6 +55,19 @@ test("rejects corrupt PDF uploads", () => {
   );
 });
 
+test("rejects malformed Base64 instead of accepting a decodable PDF prefix", () => {
+  const validPrefix = makeTinyPdf(["Quarterly update"]).toString("base64");
+
+  assert.throws(
+    () => validatePdfUpload({
+      filename: "update.pdf",
+      mimeType: "application/pdf",
+      fileData: `${validPrefix}!!!!`
+    }),
+    /not valid Base64/
+  );
+});
+
 test("rejects PDFs with no extractable text", async () => {
   await assert.rejects(
     () => extractPdfTextFromUpload(asUpload(Buffer.from("%PDF-1.4\n%%EOF", "latin1"))),

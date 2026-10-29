@@ -58,6 +58,24 @@ function normalizeBase64(value) {
   return asString(value, MAX_PDF_UPLOAD_BYTES * 2).replace(/^data:application\/pdf;base64,/i, "");
 }
 
+function decodeBase64Pdf(value) {
+  const compact = value.replace(/\s/g, "");
+  const hasValidAlphabet = /^[A-Za-z0-9+/]*={0,2}$/.test(compact);
+  const hasValidLength = compact.length % 4 !== 1 &&
+    (!compact.includes("=") || compact.length % 4 === 0);
+  if (!compact || !hasValidAlphabet || !hasValidLength) {
+    throw new Error("PDF file data is not valid Base64.");
+  }
+
+  const buffer = Buffer.from(compact, "base64");
+  const canonicalInput = compact.replace(/=+$/, "");
+  const canonicalDecoded = buffer.toString("base64").replace(/=+$/, "");
+  if (!buffer.length || canonicalInput !== canonicalDecoded) {
+    throw new Error("PDF file data is not valid Base64.");
+  }
+  return buffer;
+}
+
 function validatePdfUpload({ filename, mimeType, fileData }) {
   const cleanFilename = asString(filename, 240);
   const cleanMimeType = asString(mimeType, 120).toLowerCase();
@@ -76,10 +94,7 @@ function validatePdfUpload({ filename, mimeType, fileData }) {
     throw new Error("PDF file data is required.");
   }
 
-  const buffer = Buffer.from(cleanFileData, "base64");
-  if (!buffer.length) {
-    throw new Error("PDF file data is required.");
-  }
+  const buffer = decodeBase64Pdf(cleanFileData);
   if (buffer.length > MAX_PDF_UPLOAD_BYTES) {
     throw new Error("PDF uploads are limited to 25 MB.");
   }
