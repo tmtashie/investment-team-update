@@ -48,6 +48,23 @@ function attachmentLimitReason(attachment) {
   return `Attachment exceeds the ${limitMb} MB per-file limit.`;
 }
 
+function normalizeMaxMessagesPerRun(value) {
+  const numeric = Number(value);
+  const wholeNumber = numeric ? Math.trunc(numeric) : 10;
+  return Math.max(1, Math.min(50, wholeNumber));
+}
+
+function attachmentSize(attachment) {
+  const size = attachment && attachment.size;
+  return typeof size === "number" && Number.isSafeInteger(size) && size >= 0
+    ? size
+    : null;
+}
+
+function invalidAttachmentSizeReason() {
+  return "Attachment size metadata is missing or invalid; attachment was not downloaded.";
+}
+
 function decodedByteLength(contentBytes) {
   try {
     return Buffer.from(String(contentBytes || ""), "base64").length;
@@ -62,6 +79,9 @@ function attachmentPreviewOutcome(attachment, messageBytes, runBytes) {
   }
   if (!attachment.isSupported) {
     return { status: "unresolved", reason: "Unsupported attachment type would not be downloaded.", countedBytes: 0 };
+  }
+  if (attachmentSize(attachment) === null) {
+    return { status: "unresolved", reason: invalidAttachmentSizeReason(), countedBytes: 0 };
   }
   if (attachment.size > maxAttachmentBytes(attachment)) {
     return { status: "unresolved", reason: attachmentLimitReason(attachment), countedBytes: 0 };
@@ -96,7 +116,7 @@ function createMicrosoftGraphMailService({
     clientSecret: cleanString(clientSecret, 2000),
     mailboxUser: cleanString(mailboxUser, 320),
     folderName: cleanString(folderName, 200) || "AI Investment Updates",
-    maxMessagesPerRun: Math.max(1, Math.min(50, Number(maxMessagesPerRun) || 10))
+    maxMessagesPerRun: normalizeMaxMessagesPerRun(maxMessagesPerRun)
   };
 
   function isConfigured() {
@@ -183,6 +203,35 @@ function createMicrosoftGraphMailService({
     return `/users/${encodeURIComponent(config.mailboxUser)}`;
   }
 
+  function validateContinuationUrl(value, folderId) {
+    const raw = cleanString(value, 8000);
+    if (!raw) return "";
+    let candidate;
+    let base;
+    try {
+      candidate = new URL(raw);
+      base = new URL(graphBaseUrl);
+    } catch (error) {
+      throw graphError("Microsoft Graph returned an invalid continuation cursor.", 502);
+    }
+    const expectedPath = `${base.pathname.replace(/\/$/, "")}${mailboxMailApiPath()}/mailFolders/${encodeURIComponent(folderId)}/messages`;
+    if (candidate.origin !== base.origin || candidate.pathname !== expectedPath) {
+      throw graphError("Microsoft Graph returned an untrusted continuation cursor.", 502);
+    }
+    return candidate.toString();
+  }
+
+  async function graphGetContinuation(value, token, folderId) {
+    const url = validateContinuationUrl(value, folderId);
+    return requestJson(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json"
+      }
+    });
+  }
+
   function normalizeGraphMessage(message) {
     return {
       id: cleanString(message.id, 500),
@@ -243,23 +292,66 @@ function createMicrosoftGraphMailService({
     return parseGraphCollection(await graphGet(path, token)).map(normalizeGraphMessage);
   }
 
+  async function listScheduledMessages(token, folderId, { since, continuationCursor } = {}) {
+    let payload;
+    if (continuationCursor) {
+      payload = await graphGetContinuation(continuationCursor, token, folderId);
+    } else {
+      const sinceDate = new Date(since || 0);
+      if (!Number.isFinite(sinceDate.getTime())) {
+        throw graphError("Scheduled intake requires a valid checkpoint timestamp.", 400);
+      }
+      const select = [
+        "id",
+        "internetMessageId",
+        "conversationId",
+        "subject",
+        "from",
+        "sender",
+        "receivedDateTime",
+        "hasAttachments",
+        "body",
+        "bodyPreview"
+      ].join(",");
+      const query = new URLSearchParams();
+      query.set("$top", String(config.maxMessagesPerRun));
+      query.set("$orderby", "receivedDateTime asc");
+      query.set("$filter", `receivedDateTime ge ${sinceDate.toISOString()}`);
+      query.set("$select", select);
+      payload = await graphGet(
+        `${mailboxMailApiPath()}/mailFolders/${encodeURIComponent(folderId)}/messages?${query.toString()}`,
+        token
+      );
+    }
+    const nextLink = payload && payload["@odata.nextLink"]
+      ? validateContinuationUrl(payload["@odata.nextLink"], folderId)
+      : "";
+    return {
+      messages: parseGraphCollection(payload).map(normalizeGraphMessage),
+      continuationCursor: nextLink
+    };
+  }
+
   async function listAttachments(token, messageId) {
     const payload = await graphGet(
       `${mailboxMailApiPath()}/messages/${encodeURIComponent(messageId)}/attachments?$top=${MAX_ATTACHMENTS_PER_MESSAGE + 1}&$select=id,name,contentType,size,isInline`,
       token
     );
     const allAttachments = parseGraphCollection(payload);
-    const attachments = allAttachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE).map((attachment) => ({
-      id: cleanString(attachment.id, 500),
-      name: cleanString(attachment.name, 500),
-      contentType: cleanString(attachment.contentType, 200),
-      size: Number(attachment.size) || 0,
-      isInline: Boolean(attachment.isInline),
-      contentBytes: "",
-      attachmentType: cleanString(attachment["@odata.type"], 120),
-      isPdf: isPdfAttachment(attachment),
-      isSupported: isSupportedAttachment(attachment)
-    }));
+    const attachments = allAttachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE).map((attachment) => {
+      const size = attachmentSize(attachment);
+      return {
+        id: cleanString(attachment.id, 500),
+        name: cleanString(attachment.name, 500),
+        contentType: cleanString(attachment.contentType, 200),
+        size,
+        isInline: Boolean(attachment.isInline),
+        contentBytes: "",
+        attachmentType: cleanString(attachment["@odata.type"], 120),
+        isPdf: isPdfAttachment(attachment),
+        isSupported: isSupportedAttachment(attachment)
+      };
+    });
     attachments.truncated = Boolean(payload["@odata.nextLink"] || allAttachments.length > MAX_ATTACHMENTS_PER_MESSAGE);
     return attachments;
   }
@@ -353,10 +445,15 @@ function createMicrosoftGraphMailService({
     };
   }
 
-  async function fetchIntakeMessages() {
+  async function fetchIntakeMessages({ since = "", continuationCursor = "" } = {}) {
     const token = await getAccessToken();
     const folder = await resolveFolder(token);
-    const messages = await listMessagesInFolder(token, folder.id);
+    const scheduledPage = since || continuationCursor
+      ? await listScheduledMessages(token, folder.id, { since, continuationCursor })
+      : null;
+    const messages = scheduledPage
+      ? scheduledPage.messages
+      : await listMessagesInFolder(token, folder.id);
     const messagesWithAttachments = [];
     let runAttachmentBytes = 0;
     for (const message of messages) {
@@ -388,6 +485,15 @@ function createMicrosoftGraphMailService({
             attachmentType: attachment.attachmentType,
             preservationStatus: "unresolved",
             reason: "Unsupported attachment type was not parsed or downloaded."
+          });
+          continue;
+        }
+        if (attachmentSize(attachment) === null) {
+          unresolvedAttachments.push({
+            ...attachment,
+            contentBytes: "",
+            preservationStatus: "unresolved",
+            reason: invalidAttachmentSizeReason()
           });
           continue;
         }
@@ -433,6 +539,7 @@ function createMicrosoftGraphMailService({
     return {
       mailbox: config.mailboxUser,
       folder,
+      continuationCursor: scheduledPage ? scheduledPage.continuationCursor : "",
       messages: messagesWithAttachments
     };
   }
@@ -472,20 +579,28 @@ function createMicrosoftGraphMailService({
         unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Unsupported attachment type was not parsed or downloaded." });
         continue;
       }
+      if (attachmentSize(attachment) === null) {
+        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: invalidAttachmentSizeReason() });
+        continue;
+      }
       if (attachment.size > maxAttachmentBytes(attachment) || messageAttachmentBytes + attachment.size > MAX_ATTACHMENT_MESSAGE_BYTES) {
         unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: attachment.size > maxAttachmentBytes(attachment) ? attachmentLimitReason(attachment) : "Attachment exceeds the 30 MB per-message limit." });
         continue;
       }
-      const fetched = await fetchAttachment(token, message.id, attachment);
-      const actualSize = decodedByteLength(fetched.contentBytes);
-      if (!actualSize || actualSize > maxAttachmentBytes(fetched) || messageAttachmentBytes + actualSize > MAX_ATTACHMENT_MESSAGE_BYTES) {
-        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment data exceeded a configured preservation limit." });
-        continue;
+      try {
+        const fetched = await fetchAttachment(token, message.id, attachment);
+        const actualSize = decodedByteLength(fetched.contentBytes);
+        if (!actualSize || actualSize > maxAttachmentBytes(fetched) || messageAttachmentBytes + actualSize > MAX_ATTACHMENT_MESSAGE_BYTES) {
+          unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: "Attachment data exceeded a configured preservation limit." });
+          continue;
+        }
+        const preserved = { ...fetched, size: actualSize, preservationStatus: "preserved", extractionStatus: fetched.isPdf ? "pending" : "not-parsed" };
+        messageAttachmentBytes += actualSize;
+        preservedAttachments.push(preserved);
+        if (fetched.isPdf) pdfAttachments.push(preserved);
+      } catch (error) {
+        unresolvedAttachments.push({ ...attachment, contentBytes: "", preservationStatus: "unresolved", reason: error.message || "Attachment could not be preserved." });
       }
-      const preserved = { ...fetched, size: actualSize, preservationStatus: "preserved", extractionStatus: fetched.isPdf ? "pending" : "not-parsed" };
-      messageAttachmentBytes += actualSize;
-      preservedAttachments.push(preserved);
-      if (fetched.isPdf) pdfAttachments.push(preserved);
     }
     return {
       ...message,
@@ -507,6 +622,7 @@ function createMicrosoftGraphMailService({
     isConfigured,
     listAttachments,
     listMessagesInFolder,
+    listScheduledMessages,
     previewIntakeMessages,
     resolveFolder
   };
@@ -521,3 +637,4 @@ module.exports = {
   attachmentPreviewOutcome,
   createMicrosoftGraphMailService
 };
+

@@ -109,6 +109,10 @@ function createHarness({
               confidence: 96,
               reason: "Exact source body match for 'Healing Innovations'."
             },
+            deterministicEvidence: {
+              investmentId: "healing-id",
+              types: ["sourceBody"]
+            },
             entityMatch: {
               entityId: "beaman-ventures",
               entityName: "Beaman Ventures",
@@ -311,7 +315,7 @@ test("unmatched analysis is recorded as skipped instead of guessing an investmen
   assert.equal(harness.getStored()[0].analysisAudits[0].shouldCreateProposal, false);
 });
 
-test("automated explicit-match helper rejects warning-marked semantic matches", () => {
+test("automated explicit-match helper requires trusted evidence for the final investment", () => {
   assert.equal(
     hasAutomatedExplicitInvestmentMatch({
       investmentMatch: {
@@ -328,9 +332,46 @@ test("automated explicit-match helper rejects warning-marked semantic matches", 
         investmentId: "finsync-id",
         reason: "Exact subject match for 'FINSYNC'. Sender domain 'finsync' supports 'FINSYNC'."
       },
+      deterministicEvidence: {
+        investmentId: "finsync-id",
+        types: ["subject", "senderDomain"]
+      },
       warnings: []
     }),
     true
+  );
+  assert.equal(
+    hasAutomatedExplicitInvestmentMatch({
+      investmentMatch: {
+        investmentId: "healing-id",
+        reason: "Model selected Healing Innovations."
+      },
+      deterministicEvidence: {
+        investmentId: "finsync-id",
+        types: ["subject", "senderDomain"]
+      },
+      warnings: []
+    }),
+    false
+  );
+});
+
+test("automated explicit-match helper does not trust model-authored reason text", () => {
+  assert.equal(
+    hasAutomatedExplicitInvestmentMatch({
+      investmentMatch: {
+        investmentId: "healing-id",
+        reason: "Exact source body match for 'Healing Innovations'."
+      },
+      candidates: [
+        {
+          investmentId: "healing-id",
+          reason: "Sender domain 'healing' supports 'Healing Innovations'."
+        }
+      ],
+      warnings: []
+    }),
+    false
   );
 });
 
@@ -437,6 +478,10 @@ test("valid deterministic FINSYNC match with no actionable content stores safe s
         confidence: 98,
         reason: "Exact subject match for 'FINSYNC'. Sender domain 'finsync' supports 'FINSYNC'."
       },
+      deterministicEvidence: {
+        investmentId: "finsync-id",
+        types: ["subject", "senderDomain"]
+      },
       entityMatch: {
         entityId: "Beaman Ventures",
         entityName: "Beaman Ventures",
@@ -531,6 +576,10 @@ test("automated email intake accepts a valid deterministic explicit match", asyn
         investmentName: "FINSYNC",
         confidence: 98,
         reason: "Exact subject match for 'FINSYNC'. Sender domain 'finsync' supports 'FINSYNC'."
+      },
+      deterministicEvidence: {
+        investmentId: "finsync-id",
+        types: ["subject", "senderDomain"]
       },
       entityMatch: {
         entityId: "Beaman Ventures",
@@ -759,6 +808,15 @@ test("email body normalization strips obvious markup, signatures, and quoted thr
 test("attachment hash is stable for dedupe", () => {
   assert.equal(attachmentHash(PDF_BYTES), attachmentHash(PDF_BYTES));
   assert.notEqual(attachmentHash(PDF_BYTES), attachmentHash(Buffer.from("different").toString("base64")));
+});
+
+test("attachment hash includes content beyond the former 20 MiB base64 cutoff", () => {
+  const commonPrefix = "A".repeat(20 * 1024 * 1024);
+
+  assert.notEqual(
+    attachmentHash(`${commonPrefix}AAAA`),
+    attachmentHash(`${commonPrefix}BBBB`)
+  );
 });
 
 test("potential new deal creates one pending proposal with preserved and unresolved attachments", async () => {
@@ -1085,3 +1143,4 @@ test("intake preview explains blocked, reserved, terminal, and retryable state",
   assert.equal(previewMessageEligibility(message, { status: "failed" }, allowed, now).status, "eligible");
   assert.equal(previewMessageEligibility(message, null, { allowed: false }, now).status, "skipped");
 });
+
