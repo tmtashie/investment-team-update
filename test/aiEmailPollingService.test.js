@@ -313,13 +313,28 @@ test("scheduled route is independently authenticated and cannot approve or apply
 });
 
 
-test("long-running Graph request retains lease via heartbeat and blocks concurrent worker", async (t) => {
+test("long-running Graph request refreshes its lease and blocks stale recovery by a concurrent worker", async (t) => {
   let resolvePage;
+  let heartbeat;
+  let heartbeatCleared = false;
   const first = createHarness(t, {
     lockTtlMinutes: 1,
+    setIntervalImpl: (callback) => {
+      heartbeat = callback;
+      return { unref() {} };
+    },
+    clearIntervalImpl: () => {
+      heartbeatCleared = true;
+    },
     checkForNewEmails: () => new Promise((resolve) => { resolvePage = resolve; })
   });
   const pending = first.service.runScheduled({ user: monitorUser });
+
+  assert.equal(typeof heartbeat, "function");
+  first.current.value = new Date("2026-10-29T12:00:20.000Z");
+  heartbeat();
+  first.current.value = new Date("2026-10-29T12:01:10.000Z");
+
   const second = createAiEmailPollingService({
     stateFile: first.stateFile, lockFile: first.lockFile,
     readJsonFile: first.readJsonFile, writeJsonFile: first.writeJsonFile,
@@ -328,6 +343,8 @@ test("long-running Graph request retains lease via heartbeat and blocks concurre
     checkForNewEmails: async () => { throw new Error("must not run"); }
   });
   assert.equal((await second.runScheduled({ user: monitorUser })).status, "locked");
+
   resolvePage({ configured: true, checked: 0, processed: 0, skipped: 0, failed: 0, proposalsCreated: 0 });
   assert.equal((await pending).status, "completed");
+  assert.equal(heartbeatCleared, true);
 });

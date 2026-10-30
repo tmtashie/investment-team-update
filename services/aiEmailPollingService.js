@@ -113,6 +113,8 @@ function createAiEmailPollingService({
   lockTtlMinutes = 30,
   now = () => new Date(),
   sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  setIntervalImpl = setInterval,
+  clearIntervalImpl = clearInterval,
   fsImpl = fs
 } = {}) {
   if (!stateFile || !lockFile || typeof checkForNewEmails !== "function") {
@@ -281,7 +283,7 @@ function createAiEmailPollingService({
       lastError: ""
     });
     let leaseLost = false;
-    const heartbeat = setInterval(() => {
+    const heartbeat = setIntervalImpl(() => {
       try { refreshLock(runId); } catch (error) { leaseLost = true; }
     }, Math.max(1000, Math.floor(config.lockTtlMinutes * 60000 / 3)));
     if (typeof heartbeat.unref === "function") heartbeat.unref();
@@ -355,7 +357,7 @@ function createAiEmailPollingService({
         counts: totals
       };
     } finally {
-      clearInterval(heartbeat);
+      clearIntervalImpl(heartbeat);
       releaseLock(runId);
     }
   }
