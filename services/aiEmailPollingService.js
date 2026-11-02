@@ -267,32 +267,77 @@ function createAiEmailPollingService({
   }
 
   function releaseLock(runId) {
-    const current = readLock();
-    if (!current || current.runId !== runId) return false;
+    const recoveryFile = `${lockFile}.recovery`;
+    let recoveryDescriptor;
     try {
-      fsImpl.unlinkSync(lockFile);
-      return true;
+      recoveryDescriptor = fsImpl.openSync(recoveryFile, "wx", 0o600);
     } catch (error) {
-      if (error && error.code === "ENOENT") return false;
+      if (error && error.code === "EEXIST") return false;
       throw error;
+    }
+    try {
+      fsImpl.writeFileSync(recoveryDescriptor, JSON.stringify({ runId }) + "\n", "utf8");
+      fsImpl.closeSync(recoveryDescriptor);
+      recoveryDescriptor = null;
+      const current = readLock();
+      if (!current || current.runId !== runId) return false;
+      try {
+        fsImpl.unlinkSync(lockFile);
+        return true;
+      } catch (error) {
+        if (error && error.code === "ENOENT") return false;
+        throw error;
+      }
+    } finally {
+      if (recoveryDescriptor !== null && recoveryDescriptor !== undefined) {
+        fsImpl.closeSync(recoveryDescriptor);
+      }
+      try {
+        fsImpl.unlinkSync(recoveryFile);
+      } catch (error) {
+        if (!error || error.code !== "ENOENT") throw error;
+      }
     }
   }
 
   function refreshLock(runId) {
-    const current = readLock();
-    if (!current || current.runId !== runId) {
+    const recoveryFile = `${lockFile}.recovery`;
+    let recoveryDescriptor;
+    try {
+      recoveryDescriptor = fsImpl.openSync(recoveryFile, "wx", 0o600);
+    } catch (error) {
+      if (!error || error.code !== "EEXIST") throw error;
+      if (clearStaleRecoveryGuard(recoveryFile)) return refreshLock(runId);
       throw new Error("Scheduled intake lost its persistent lease.");
     }
-    // Refresh the existing inode rather than replacing the lock pathname.
-    // A different owner must never be overwritten by an old worker.
-    const descriptor = fsImpl.openSync(lockFile, "r+");
     try {
-      const onDisk = JSON.parse(fsImpl.readFileSync(descriptor, "utf8"));
-      if (onDisk.runId !== runId) throw new Error("Scheduled intake lost its persistent lease.");
-      fsImpl.ftruncateSync(descriptor, 0);
-      fsImpl.writeSync(descriptor, JSON.stringify({ ...onDisk, heartbeatAt: now().toISOString() }) + "\n", 0, "utf8");
-      fsImpl.fsyncSync(descriptor);
-    } finally { fsImpl.closeSync(descriptor); }
+      fsImpl.writeFileSync(recoveryDescriptor, JSON.stringify({ runId }) + "\n", "utf8");
+      fsImpl.closeSync(recoveryDescriptor);
+      recoveryDescriptor = null;
+      const current = readLock();
+      if (!current || current.runId !== runId) {
+        throw new Error("Scheduled intake lost its persistent lease.");
+      }
+      // Refresh the existing inode rather than replacing the lock pathname.
+      // A different owner must never be overwritten by an old worker.
+      const descriptor = fsImpl.openSync(lockFile, "r+");
+      try {
+        const onDisk = JSON.parse(fsImpl.readFileSync(descriptor, "utf8"));
+        if (onDisk.runId !== runId) throw new Error("Scheduled intake lost its persistent lease.");
+        fsImpl.ftruncateSync(descriptor, 0);
+        fsImpl.writeSync(descriptor, JSON.stringify({ ...onDisk, heartbeatAt: now().toISOString() }) + "\n", 0, "utf8");
+        fsImpl.fsyncSync(descriptor);
+      } finally { fsImpl.closeSync(descriptor); }
+    } finally {
+      if (recoveryDescriptor !== null && recoveryDescriptor !== undefined) {
+        fsImpl.closeSync(recoveryDescriptor);
+      }
+      try {
+        fsImpl.unlinkSync(recoveryFile);
+      } catch (error) {
+        if (!error || error.code !== "ENOENT") throw error;
+      }
+    }
   }
 
   async function runPageWithRetries({ user, since, continuationCursor }) {

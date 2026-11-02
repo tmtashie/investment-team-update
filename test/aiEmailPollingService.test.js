@@ -824,5 +824,111 @@ test("a crashed stale-recovery guard cannot block lease recovery forever", (t) =
   );
 });
 
+test("lease heartbeat serializes with competing stale recovery", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-heartbeat-race-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const current = { value: new Date("2026-11-01T12:00:00.000Z") };
+  let heartbeat;
+  let finishPage;
+  let triggerCompetition = false;
+  let competitorResult;
+  const serviceOptions = {
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (error) { return fallback; }
+    },
+    writeJsonFile: (file, value) => value,
+    enabled: true,
+    lockTtlMinutes: 1,
+    maxRetries: 0,
+    now: () => new Date(current.value),
+    checkForNewEmails: async () => ({ configured: true })
+  };
+  const competitor = createAiEmailPollingService(serviceOptions);
+  const worker = createAiEmailPollingService({
+    ...serviceOptions,
+    checkForNewEmails: () => new Promise((resolve) => { finishPage = resolve; }),
+    setIntervalImpl: (callback) => {
+      heartbeat = callback;
+      return { unref() {} };
+    },
+    clearIntervalImpl: () => {},
+    fsImpl: {
+      ...fs,
+      openSync(file, flags, ...args) {
+        const descriptor = fs.openSync(file, flags, ...args);
+        if (file === lockFile && flags === "r+" && triggerCompetition) {
+          triggerCompetition = false;
+          competitorResult = competitor.tryAcquireLock("replacement-worker");
+        }
+        return descriptor;
+      }
+    }
+  });
+
+  const pending = worker.runScheduled({ user: { email: "worker@example.test", role: "master-editor" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  current.value = new Date("2026-11-01T12:01:01.000Z");
+  triggerCompetition = true;
+  heartbeat();
+
+  assert.equal(competitorResult.acquired, false);
+  assert.notEqual(JSON.parse(fs.readFileSync(lockFile, "utf8")).runId, "replacement-worker");
+  finishPage({ configured: true, checked: 0, processed: 0, skipped: 0, failed: 0, proposalsCreated: 0 });
+  assert.equal((await pending).status, "completed");
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.equal(fs.existsSync(`${lockFile}.recovery`), false);
+});
+
+test("lease release serializes with competing stale recovery", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-release-race-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const staleAt = new Date("2026-11-01T11:00:00.000Z");
+  fs.writeFileSync(lockFile, JSON.stringify({
+    runId: "finishing-worker",
+    startedAt: staleAt.toISOString(),
+    heartbeatAt: staleAt.toISOString()
+  }) + "\n");
+
+  const serviceOptions = {
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (error) { return fallback; }
+    },
+    writeJsonFile: (file, value) => value,
+    checkForNewEmails: async () => ({ configured: true }),
+    enabled: true,
+    lockTtlMinutes: 1,
+    now: () => new Date("2026-11-01T12:00:00.000Z")
+  };
+  const competitor = createAiEmailPollingService(serviceOptions);
+  let competitorResult;
+  let triggerCompetition = true;
+  const releasingWorker = createAiEmailPollingService({
+    ...serviceOptions,
+    fsImpl: {
+      ...fs,
+      readFileSync(file, ...args) {
+        const content = fs.readFileSync(file, ...args);
+        if (file === lockFile && triggerCompetition) {
+          triggerCompetition = false;
+          competitorResult = competitor.tryAcquireLock("replacement-worker");
+        }
+        return content;
+      }
+    }
+  });
+
+  assert.equal(releasingWorker.releaseLock("finishing-worker"), true);
+  assert.equal(competitorResult.acquired, false);
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.equal(fs.existsSync(`${lockFile}.recovery`), false);
+});
 
 
