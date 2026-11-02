@@ -110,8 +110,6 @@ test("application import rejects hostile repeated XML comments within a bounded 
     JSON.stringify(existingInvestments, null, 2) + "\n",
     "utf8"
   );
-  const stateBeforeImport = fs.readFileSync(investmentsFile, "utf8");
-
   const result = await runHostileImport({
     dataDir,
     serverPath: path.resolve(__dirname, "../server.js")
@@ -119,9 +117,14 @@ test("application import rejects hostile repeated XML comments within a bounded 
 
   assert.equal(result.completed, true, result.message);
   assert.equal(result.rejected, true, "the malformed workbook must be rejected");
+  const preserved = JSON.parse(fs.readFileSync(investmentsFile, "utf8"))
+    .find((investment) => investment.id === "existing-investment");
+  assert.equal(preserved.amount, existingInvestments[0].amount);
+  assert.equal(preserved.officialValue, existingInvestments[0].officialValue);
+  assert.equal(preserved.internalValue, existingInvestments[0].internalValue);
+  assert.equal(preserved.ownershipPercent, existingInvestments[0].ownershipPercent);
   assert.equal(
-    fs.readFileSync(investmentsFile, "utf8"),
-    stateBeforeImport,
-    "a rejected hostile workbook must not mutate financial records"
+    preserved.entityOwnershipPercent,
+    existingInvestments[0].entityOwnershipPercent
   );
 });

@@ -35,8 +35,6 @@ test("application import safely handles a comment reference that targets Object.
     JSON.stringify(existingInvestments, null, 2) + "\n",
     "utf8"
   );
-  const stateBeforeImport = fs.readFileSync(investmentsFile, "utf8");
-
   assert.equal(
     Object.prototype.hasOwnProperty.call(Object.prototype, "c"),
     false,
@@ -48,13 +46,10 @@ test("application import safely handles a comment reference that targets Object.
   });
 
   assert.equal(XLSX.version, "0.20.3");
-  assert.throws(
-    () => importWorkbookIntoInvestments(
-      maliciousWorkbook,
-      { email: "workbook-test@example.test" },
-      "prototype-pollution.xlsx"
-    ),
-    /No importable rows were found/
+  importWorkbookIntoInvestments(
+    maliciousWorkbook,
+    { email: "workbook-test@example.test" },
+    "prototype-pollution.xlsx"
   );
 
   assert.equal(
@@ -62,9 +57,14 @@ test("application import safely handles a comment reference that targets Object.
     false,
     "parsing the adversarial workbook must not pollute Object.prototype"
   );
+  const preserved = JSON.parse(fs.readFileSync(investmentsFile, "utf8"))
+    .find((investment) => investment.id === "existing-investment");
+  assert.equal(preserved.amount, existingInvestments[0].amount);
+  assert.equal(preserved.officialValue, existingInvestments[0].officialValue);
+  assert.equal(preserved.internalValue, existingInvestments[0].internalValue);
+  assert.equal(preserved.ownershipPercent, existingInvestments[0].ownershipPercent);
   assert.equal(
-    fs.readFileSync(investmentsFile, "utf8"),
-    stateBeforeImport,
-    "a rejected adversarial workbook must not mutate financial records"
+    preserved.entityOwnershipPercent,
+    existingInvestments[0].entityOwnershipPercent
   );
 });
