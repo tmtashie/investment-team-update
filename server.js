@@ -4784,7 +4784,10 @@ process.on("unhandledRejection", (error) => {
 const server = http.createServer(async (request, response) => {
   const rawPath = request.url || "/";
 
-  if (request.method === "GET" && rawPath.startsWith("/api/health")) {
+  if (
+    request.method === "GET" &&
+    (rawPath === "/api/health" || rawPath.startsWith("/api/health?"))
+  ) {
     sendJson(response, 200, { ok: true });
     return;
   }
