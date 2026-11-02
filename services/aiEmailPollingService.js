@@ -169,6 +169,47 @@ function createAiEmailPollingService({
     }
   }
 
+  function lockFileAgeMs() {
+    try {
+      const modifiedAt = Number(fsImpl.statSync(lockFile).mtimeMs);
+      return Number.isFinite(modifiedAt) ? now().getTime() - modifiedAt : null;
+    } catch (error) {
+      return error && error.code === "ENOENT" ? Number.POSITIVE_INFINITY : null;
+    }
+  }
+
+  function clearStaleRecoveryGuard(recoveryFile) {
+    const claimFile = `${recoveryFile}.${process.pid}.${crypto.randomUUID()}.claim`;
+    try {
+      fsImpl.linkSync(recoveryFile, claimFile);
+    } catch (error) {
+      if (error && error.code === "ENOENT") return true;
+      throw error;
+    }
+    try {
+      const claim = fsImpl.statSync(claimFile);
+      const ageMs = now().getTime() - Number(claim.mtimeMs);
+      if (!Number.isFinite(ageMs) || ageMs <= config.lockTtlMinutes * 60 * 1000) {
+        return false;
+      }
+      try {
+        const current = fsImpl.statSync(recoveryFile);
+        if (current.dev === claim.dev && current.ino === claim.ino) {
+          fsImpl.unlinkSync(recoveryFile);
+        }
+      } catch (error) {
+        if (!error || error.code !== "ENOENT") throw error;
+      }
+      return true;
+    } finally {
+      try {
+        fsImpl.unlinkSync(claimFile);
+      } catch (error) {
+        if (!error || error.code !== "ENOENT") throw error;
+      }
+    }
+  }
+
   function tryAcquireLock(runId) {
     fsImpl.mkdirSync(path.dirname(lockFile), { recursive: true });
     const startedAt = now().toISOString();
@@ -181,16 +222,47 @@ function createAiEmailPollingService({
     } catch (error) {
       if (!error || error.code !== "EEXIST") throw error;
       const existing = readLock();
-      if (lockAgeMs(existing) <= config.lockTtlMinutes * 60 * 1000) {
+      const ageMs = existing ? lockAgeMs(existing) : lockFileAgeMs();
+      if (ageMs === null || ageMs <= config.lockTtlMinutes * 60 * 1000) {
         return { acquired: false, recovered: false, lock: existing };
       }
+      const recoveryFile = `${lockFile}.recovery`;
+      let recoveryDescriptor;
       try {
-        fsImpl.unlinkSync(lockFile);
-      } catch (unlinkError) {
-        if (!unlinkError || unlinkError.code !== "ENOENT") throw unlinkError;
+        recoveryDescriptor = fsImpl.openSync(recoveryFile, "wx", 0o600);
+      } catch (recoveryError) {
+        if (!recoveryError || recoveryError.code !== "EEXIST") throw recoveryError;
+        if (clearStaleRecoveryGuard(recoveryFile)) {
+          return tryAcquireLock(runId);
+        }
+        return { acquired: false, recovered: false, lock: readLock() };
       }
-      const acquired = tryAcquireLock(runId);
-      return { ...acquired, recovered: acquired.acquired };
+      try {
+        fsImpl.writeFileSync(recoveryDescriptor, JSON.stringify({ runId }) + "\n", "utf8");
+        fsImpl.closeSync(recoveryDescriptor);
+        recoveryDescriptor = null;
+        const current = readLock();
+        const currentAgeMs = current ? lockAgeMs(current) : lockFileAgeMs();
+        if (currentAgeMs === null || currentAgeMs <= config.lockTtlMinutes * 60 * 1000) {
+          return { acquired: false, recovered: false, lock: current };
+        }
+        try {
+          fsImpl.unlinkSync(lockFile);
+        } catch (unlinkError) {
+          if (!unlinkError || unlinkError.code !== "ENOENT") throw unlinkError;
+        }
+        const acquired = tryAcquireLock(runId);
+        return { ...acquired, recovered: acquired.acquired };
+      } finally {
+        if (recoveryDescriptor !== null && recoveryDescriptor !== undefined) {
+          fsImpl.closeSync(recoveryDescriptor);
+        }
+        try {
+          fsImpl.unlinkSync(recoveryFile);
+        } catch (cleanupError) {
+          if (!cleanupError || cleanupError.code !== "ENOENT") throw cleanupError;
+        }
+      }
     }
   }
 
@@ -337,6 +409,17 @@ function createAiEmailPollingService({
       const consecutiveFailures = state.consecutiveFailures + 1;
       const retryDelay = Math.min(60 * 60 * 1000, config.retryBaseMs * (2 ** Math.min(consecutiveFailures, 10)));
       const message = safeErrorMessage(error);
+      const currentLock = readLock();
+      if (!currentLock || currentLock.runId !== runId) {
+        return {
+          status: "error",
+          httpStatus: 503,
+          runId,
+          error: message,
+          nextRetryAt: "",
+          counts: totals
+        };
+      }
       state = appendAlert({
         ...state,
         status: "error",
@@ -384,3 +467,5 @@ module.exports = {
   normalizeState,
   verifySchedulerBearerToken
 };
+
+
