@@ -272,8 +272,9 @@ function createAiEmailPollingService({
     try {
       recoveryDescriptor = fsImpl.openSync(recoveryFile, "wx", 0o600);
     } catch (error) {
-      if (error && error.code === "EEXIST") return false;
-      throw error;
+      if (!error || error.code !== "EEXIST") throw error;
+      if (clearStaleRecoveryGuard(recoveryFile)) return releaseLock(runId);
+      return false;
     }
     try {
       fsImpl.writeFileSync(recoveryDescriptor, JSON.stringify({ runId }) + "\n", "utf8");
@@ -512,5 +513,6 @@ module.exports = {
   normalizeState,
   verifySchedulerBearerToken
 };
+
 
 

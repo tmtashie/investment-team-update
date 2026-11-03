@@ -824,6 +824,35 @@ test("a crashed stale-recovery guard cannot block lease recovery forever", (t) =
   );
 });
 
+test("a crashed stale-recovery guard cannot strand a releasable lease", (t) => {
+  const current = { value: new Date("2026-11-01T12:00:00.000Z") };
+  const { service, lockFile } = createHarness(t, {
+    current,
+    lockTtlMinutes: 1,
+    checkForNewEmails: async () => ({ configured: true })
+  });
+  const acquired = service.tryAcquireLock("finishing-worker");
+  assert.equal(acquired.acquired, true);
+
+  const recoveryFile = `${lockFile}.recovery`;
+  const staleAt = new Date("2026-11-01T11:00:00.000Z");
+  fs.writeFileSync(
+    recoveryFile,
+    JSON.stringify({ runId: "crashed-recovery" }) + "\n"
+  );
+  fs.utimesSync(recoveryFile, staleAt, staleAt);
+
+  const released = service.releaseLock("finishing-worker");
+
+  assert.equal(released, true);
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.equal(fs.existsSync(recoveryFile), false);
+  assert.deepEqual(
+    fs.readdirSync(path.dirname(lockFile)).filter((name) => name.includes(".claim")),
+    []
+  );
+});
+
 test("lease heartbeat serializes with competing stale recovery", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-heartbeat-race-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -930,5 +959,6 @@ test("lease release serializes with competing stale recovery", (t) => {
   assert.equal(fs.existsSync(lockFile), false);
   assert.equal(fs.existsSync(`${lockFile}.recovery`), false);
 });
+
 
 
