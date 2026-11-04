@@ -130,6 +130,28 @@ test("a failed run preserves its checkpoint and records a sanitized operational 
   assert.ok(state.nextRetryAt);
 });
 
+test("a polling-state write failure does not strand the acquired lease", async (t) => {
+  const persistenceError = new Error("polling state storage unavailable");
+  const harness = createHarness(t, {
+    fsImpl: {
+      ...fs,
+      writeFileSync(file, ...args) {
+        if (String(file).includes("polling-state.json.")) throw persistenceError;
+        return fs.writeFileSync(file, ...args);
+      }
+    },
+    checkForNewEmails: async () => {
+      throw new Error("intake must not run without durable polling state");
+    }
+  });
+
+  await assert.rejects(
+    harness.service.runScheduled({ user: monitorUser }),
+    persistenceError
+  );
+  assert.equal(fs.existsSync(harness.lockFile), false);
+});
+
 test("a restarted service resumes a persisted continuation cursor without replaying completed work", async (t) => {
   let firstPageProcessed = 0;
   const first = createHarness(t, {

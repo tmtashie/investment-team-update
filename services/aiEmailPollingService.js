@@ -392,20 +392,21 @@ function createAiEmailPollingService({
     let cursor = state.continuationCursor;
     let totals = normalizeCounts();
     let pageCount = 0;
-    state = writeState({
-      ...state,
-      status: "running",
-      windowStartedAt,
-      lastAttemptAt: currentTime.toISOString(),
-      lastRunId: runId,
-      lastError: ""
-    });
     let leaseLost = false;
-    const heartbeat = setIntervalImpl(() => {
-      try { refreshLock(runId); } catch (error) { leaseLost = true; }
-    }, Math.max(1000, Math.floor(config.lockTtlMinutes * 60000 / 3)));
-    if (typeof heartbeat.unref === "function") heartbeat.unref();
+    let heartbeat = null;
     try {
+      state = writeState({
+        ...state,
+        status: "running",
+        windowStartedAt,
+        lastAttemptAt: currentTime.toISOString(),
+        lastRunId: runId,
+        lastError: ""
+      });
+      heartbeat = setIntervalImpl(() => {
+        try { refreshLock(runId); } catch (error) { leaseLost = true; }
+      }, Math.max(1000, Math.floor(config.lockTtlMinutes * 60000 / 3)));
+      if (typeof heartbeat.unref === "function") heartbeat.unref();
       while (pageCount < config.maxPagesPerRun) {
         if (leaseLost) throw new Error("Scheduled intake lost its persistent lease.");
         refreshLock(runId);
@@ -486,7 +487,7 @@ function createAiEmailPollingService({
         counts: totals
       };
     } finally {
-      clearIntervalImpl(heartbeat);
+      if (heartbeat !== null) clearIntervalImpl(heartbeat);
       releaseLock(runId);
     }
   }
