@@ -152,6 +152,35 @@ test("a polling-state write failure does not strand the acquired lease", async (
   assert.equal(fs.existsSync(harness.lockFile), false);
 });
 
+test("a lease initialization write failure removes and closes the new lease", async (t) => {
+  const persistenceError = new Error("lease storage unavailable");
+  let lockDescriptor;
+  const harness = createHarness(t, {
+    fsImpl: {
+      ...fs,
+      openSync(file, ...args) {
+        const descriptor = fs.openSync(file, ...args);
+        if (String(file).endsWith("polling.lock")) lockDescriptor = descriptor;
+        return descriptor;
+      },
+      writeFileSync(file, ...args) {
+        if (file === lockDescriptor) throw persistenceError;
+        return fs.writeFileSync(file, ...args);
+      }
+    },
+    checkForNewEmails: async () => {
+      throw new Error("intake must not run without a durable lease");
+    }
+  });
+
+  await assert.rejects(
+    harness.service.runScheduled({ user: monitorUser }),
+    persistenceError
+  );
+  assert.equal(fs.existsSync(harness.lockFile), false);
+  assert.throws(() => fs.fstatSync(lockDescriptor), { code: "EBADF" });
+});
+
 test("a restarted service resumes a persisted continuation cursor without replaying completed work", async (t) => {
   let firstPageProcessed = 0;
   const first = createHarness(t, {
@@ -981,6 +1010,7 @@ test("lease release serializes with competing stale recovery", (t) => {
   assert.equal(fs.existsSync(lockFile), false);
   assert.equal(fs.existsSync(`${lockFile}.recovery`), false);
 });
+
 
 
 

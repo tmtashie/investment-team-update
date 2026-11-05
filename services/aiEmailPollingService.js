@@ -214,11 +214,9 @@ function createAiEmailPollingService({
     fsImpl.mkdirSync(path.dirname(lockFile), { recursive: true });
     const startedAt = now().toISOString();
     const lock = { runId, startedAt, heartbeatAt: startedAt };
+    let descriptor;
     try {
-      const descriptor = fsImpl.openSync(lockFile, "wx", 0o600);
-      fsImpl.writeFileSync(descriptor, JSON.stringify(lock) + "\n", "utf8");
-      fsImpl.closeSync(descriptor);
-      return { acquired: true, recovered: false, lock };
+      descriptor = fsImpl.openSync(lockFile, "wx", 0o600);
     } catch (error) {
       if (!error || error.code !== "EEXIST") throw error;
       const existing = readLock();
@@ -263,6 +261,33 @@ function createAiEmailPollingService({
           if (!cleanupError || cleanupError.code !== "ENOENT") throw cleanupError;
         }
       }
+    }
+    let createdLockStat;
+    try {
+      createdLockStat = fsImpl.fstatSync(descriptor);
+      fsImpl.writeFileSync(descriptor, JSON.stringify(lock) + "\n", "utf8");
+      fsImpl.closeSync(descriptor);
+      descriptor = null;
+      return { acquired: true, recovered: false, lock };
+    } catch (error) {
+      let cleanupFailure = null;
+      try {
+        if (descriptor !== null) fsImpl.closeSync(descriptor);
+      } catch (cleanupError) {
+        cleanupFailure = cleanupError;
+      }
+      try {
+        const current = fsImpl.statSync(lockFile);
+        if (createdLockStat && current.dev === createdLockStat.dev && current.ino === createdLockStat.ino) {
+          fsImpl.unlinkSync(lockFile);
+        }
+      } catch (cleanupError) {
+        if ((!cleanupError || cleanupError.code !== "ENOENT") && !cleanupFailure) cleanupFailure = cleanupError;
+      }
+      if (cleanupFailure && error && !Object.prototype.hasOwnProperty.call(error, "cause")) {
+        error.cause = cleanupFailure;
+      }
+      throw error;
     }
   }
 
@@ -514,6 +539,7 @@ module.exports = {
   normalizeState,
   verifySchedulerBearerToken
 };
+
 
 
 
