@@ -169,6 +169,15 @@ function createAiEmailPollingService({
     }
   }
 
+  function lockPathExists() {
+    try {
+      fsImpl.lstatSync(lockFile);
+      return true;
+    } catch (error) {
+      return !error || error.code !== "ENOENT";
+    }
+  }
+
   function lockFileAgeMs() {
     try {
       const modifiedAt = Number(fsImpl.statSync(lockFile).mtimeMs);
@@ -526,7 +535,7 @@ function createAiEmailPollingService({
         continuationCursor: "",
         hasContinuationCursor: Boolean(state.continuationCursor)
       },
-      lock: readLock() ? { active: true } : { active: false }
+      lock: { active: lockPathExists() }
     };
   }
 

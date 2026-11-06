@@ -785,6 +785,17 @@ test("an unreadable lease fails closed when its filesystem age cannot be inspect
   assert.equal(fs.readFileSync(lockFile, "utf8"), "{");
 });
 
+test("status reports a malformed lease path as active", (t) => {
+  const { service, lockFile } = createHarness(t, {
+    checkForNewEmails: async () => ({ configured: true })
+  });
+
+  assert.equal(service.getStatus().lock.active, false);
+  fs.writeFileSync(lockFile, "{", { encoding: "utf8", mode: 0o600 });
+
+  assert.equal(service.getStatus().lock.active, true);
+});
+
 test("stale recovery rechecks filesystem age when a heartbeat becomes unreadable", (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-recovery-heartbeat-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
