@@ -169,58 +169,210 @@ function createAiEmailPollingService({
     }
   }
 
+  function lockPathExists() {
+    try {
+      fsImpl.lstatSync(lockFile);
+      return true;
+    } catch (error) {
+      return !error || error.code !== "ENOENT";
+    }
+  }
+
+  function lockFileAgeMs() {
+    try {
+      const modifiedAt = Number(fsImpl.statSync(lockFile).mtimeMs);
+      return Number.isFinite(modifiedAt) ? now().getTime() - modifiedAt : null;
+    } catch (error) {
+      return error && error.code === "ENOENT" ? Number.POSITIVE_INFINITY : null;
+    }
+  }
+
+  function clearStaleRecoveryGuard(recoveryFile) {
+    const claimFile = `${recoveryFile}.${process.pid}.${crypto.randomUUID()}.claim`;
+    try {
+      fsImpl.linkSync(recoveryFile, claimFile);
+    } catch (error) {
+      if (error && error.code === "ENOENT") return true;
+      throw error;
+    }
+    try {
+      const claim = fsImpl.statSync(claimFile);
+      const ageMs = now().getTime() - Number(claim.mtimeMs);
+      if (!Number.isFinite(ageMs) || ageMs <= config.lockTtlMinutes * 60 * 1000) {
+        return false;
+      }
+      try {
+        const current = fsImpl.statSync(recoveryFile);
+        if (current.dev === claim.dev && current.ino === claim.ino) {
+          fsImpl.unlinkSync(recoveryFile);
+        }
+      } catch (error) {
+        if (!error || error.code !== "ENOENT") throw error;
+      }
+      return true;
+    } finally {
+      try {
+        fsImpl.unlinkSync(claimFile);
+      } catch (error) {
+        if (!error || error.code !== "ENOENT") throw error;
+      }
+    }
+  }
+
   function tryAcquireLock(runId) {
     fsImpl.mkdirSync(path.dirname(lockFile), { recursive: true });
     const startedAt = now().toISOString();
     const lock = { runId, startedAt, heartbeatAt: startedAt };
+    let descriptor;
     try {
-      const descriptor = fsImpl.openSync(lockFile, "wx", 0o600);
-      fsImpl.writeFileSync(descriptor, JSON.stringify(lock) + "\n", "utf8");
-      fsImpl.closeSync(descriptor);
-      return { acquired: true, recovered: false, lock };
+      descriptor = fsImpl.openSync(lockFile, "wx", 0o600);
     } catch (error) {
       if (!error || error.code !== "EEXIST") throw error;
       const existing = readLock();
-      if (lockAgeMs(existing) <= config.lockTtlMinutes * 60 * 1000) {
+      const ageMs = existing ? lockAgeMs(existing) : lockFileAgeMs();
+      if (ageMs === null || ageMs <= config.lockTtlMinutes * 60 * 1000) {
         return { acquired: false, recovered: false, lock: existing };
       }
+      const recoveryFile = `${lockFile}.recovery`;
+      let recoveryDescriptor;
       try {
-        fsImpl.unlinkSync(lockFile);
-      } catch (unlinkError) {
-        if (!unlinkError || unlinkError.code !== "ENOENT") throw unlinkError;
+        recoveryDescriptor = fsImpl.openSync(recoveryFile, "wx", 0o600);
+      } catch (recoveryError) {
+        if (!recoveryError || recoveryError.code !== "EEXIST") throw recoveryError;
+        if (clearStaleRecoveryGuard(recoveryFile)) {
+          return tryAcquireLock(runId);
+        }
+        return { acquired: false, recovered: false, lock: readLock() };
       }
-      const acquired = tryAcquireLock(runId);
-      return { ...acquired, recovered: acquired.acquired };
+      try {
+        fsImpl.writeFileSync(recoveryDescriptor, JSON.stringify({ runId }) + "\n", "utf8");
+        fsImpl.closeSync(recoveryDescriptor);
+        recoveryDescriptor = null;
+        const current = readLock();
+        const currentAgeMs = current ? lockAgeMs(current) : lockFileAgeMs();
+        if (currentAgeMs === null || currentAgeMs <= config.lockTtlMinutes * 60 * 1000) {
+          return { acquired: false, recovered: false, lock: current };
+        }
+        try {
+          fsImpl.unlinkSync(lockFile);
+        } catch (unlinkError) {
+          if (!unlinkError || unlinkError.code !== "ENOENT") throw unlinkError;
+        }
+        const acquired = tryAcquireLock(runId);
+        return { ...acquired, recovered: acquired.acquired };
+      } finally {
+        if (recoveryDescriptor !== null && recoveryDescriptor !== undefined) {
+          fsImpl.closeSync(recoveryDescriptor);
+        }
+        try {
+          fsImpl.unlinkSync(recoveryFile);
+        } catch (cleanupError) {
+          if (!cleanupError || cleanupError.code !== "ENOENT") throw cleanupError;
+        }
+      }
     }
-  }
-
-  function releaseLock(runId) {
-    const current = readLock();
-    if (!current || current.runId !== runId) return false;
+    let createdLockStat;
     try {
-      fsImpl.unlinkSync(lockFile);
-      return true;
+      createdLockStat = fsImpl.fstatSync(descriptor);
+      fsImpl.writeFileSync(descriptor, JSON.stringify(lock) + "\n", "utf8");
+      fsImpl.closeSync(descriptor);
+      descriptor = null;
+      return { acquired: true, recovered: false, lock };
     } catch (error) {
-      if (error && error.code === "ENOENT") return false;
+      let cleanupFailure = null;
+      try {
+        if (descriptor !== null) fsImpl.closeSync(descriptor);
+      } catch (cleanupError) {
+        cleanupFailure = cleanupError;
+      }
+      try {
+        const current = fsImpl.statSync(lockFile);
+        if (createdLockStat && current.dev === createdLockStat.dev && current.ino === createdLockStat.ino) {
+          fsImpl.unlinkSync(lockFile);
+        }
+      } catch (cleanupError) {
+        if ((!cleanupError || cleanupError.code !== "ENOENT") && !cleanupFailure) cleanupFailure = cleanupError;
+      }
+      if (cleanupFailure && error && !Object.prototype.hasOwnProperty.call(error, "cause")) {
+        error.cause = cleanupFailure;
+      }
       throw error;
     }
   }
 
+  function releaseLock(runId) {
+    const recoveryFile = `${lockFile}.recovery`;
+    let recoveryDescriptor;
+    try {
+      recoveryDescriptor = fsImpl.openSync(recoveryFile, "wx", 0o600);
+    } catch (error) {
+      if (!error || error.code !== "EEXIST") throw error;
+      if (clearStaleRecoveryGuard(recoveryFile)) return releaseLock(runId);
+      return false;
+    }
+    try {
+      fsImpl.writeFileSync(recoveryDescriptor, JSON.stringify({ runId }) + "\n", "utf8");
+      fsImpl.closeSync(recoveryDescriptor);
+      recoveryDescriptor = null;
+      const current = readLock();
+      if (!current || current.runId !== runId) return false;
+      try {
+        fsImpl.unlinkSync(lockFile);
+        return true;
+      } catch (error) {
+        if (error && error.code === "ENOENT") return false;
+        throw error;
+      }
+    } finally {
+      if (recoveryDescriptor !== null && recoveryDescriptor !== undefined) {
+        fsImpl.closeSync(recoveryDescriptor);
+      }
+      try {
+        fsImpl.unlinkSync(recoveryFile);
+      } catch (error) {
+        if (!error || error.code !== "ENOENT") throw error;
+      }
+    }
+  }
+
   function refreshLock(runId) {
-    const current = readLock();
-    if (!current || current.runId !== runId) {
+    const recoveryFile = `${lockFile}.recovery`;
+    let recoveryDescriptor;
+    try {
+      recoveryDescriptor = fsImpl.openSync(recoveryFile, "wx", 0o600);
+    } catch (error) {
+      if (!error || error.code !== "EEXIST") throw error;
+      if (clearStaleRecoveryGuard(recoveryFile)) return refreshLock(runId);
       throw new Error("Scheduled intake lost its persistent lease.");
     }
-    // Refresh the existing inode rather than replacing the lock pathname.
-    // A different owner must never be overwritten by an old worker.
-    const descriptor = fsImpl.openSync(lockFile, "r+");
     try {
-      const onDisk = JSON.parse(fsImpl.readFileSync(descriptor, "utf8"));
-      if (onDisk.runId !== runId) throw new Error("Scheduled intake lost its persistent lease.");
-      fsImpl.ftruncateSync(descriptor, 0);
-      fsImpl.writeSync(descriptor, JSON.stringify({ ...onDisk, heartbeatAt: now().toISOString() }) + "\n", 0, "utf8");
-      fsImpl.fsyncSync(descriptor);
-    } finally { fsImpl.closeSync(descriptor); }
+      fsImpl.writeFileSync(recoveryDescriptor, JSON.stringify({ runId }) + "\n", "utf8");
+      fsImpl.closeSync(recoveryDescriptor);
+      recoveryDescriptor = null;
+      const current = readLock();
+      if (!current || current.runId !== runId) {
+        throw new Error("Scheduled intake lost its persistent lease.");
+      }
+      // Refresh the existing inode rather than replacing the lock pathname.
+      // A different owner must never be overwritten by an old worker.
+      const descriptor = fsImpl.openSync(lockFile, "r+");
+      try {
+        const onDisk = JSON.parse(fsImpl.readFileSync(descriptor, "utf8"));
+        if (onDisk.runId !== runId) throw new Error("Scheduled intake lost its persistent lease.");
+        fsImpl.ftruncateSync(descriptor, 0);
+        fsImpl.writeSync(descriptor, JSON.stringify({ ...onDisk, heartbeatAt: now().toISOString() }) + "\n", 0, "utf8");
+        fsImpl.fsyncSync(descriptor);
+      } finally { fsImpl.closeSync(descriptor); }
+    } finally {
+      if (recoveryDescriptor !== null && recoveryDescriptor !== undefined) {
+        fsImpl.closeSync(recoveryDescriptor);
+      }
+      try {
+        fsImpl.unlinkSync(recoveryFile);
+      } catch (error) {
+        if (!error || error.code !== "ENOENT") throw error;
+      }
+    }
   }
 
   async function runPageWithRetries({ user, since, continuationCursor }) {
@@ -274,20 +426,21 @@ function createAiEmailPollingService({
     let cursor = state.continuationCursor;
     let totals = normalizeCounts();
     let pageCount = 0;
-    state = writeState({
-      ...state,
-      status: "running",
-      windowStartedAt,
-      lastAttemptAt: currentTime.toISOString(),
-      lastRunId: runId,
-      lastError: ""
-    });
     let leaseLost = false;
-    const heartbeat = setIntervalImpl(() => {
-      try { refreshLock(runId); } catch (error) { leaseLost = true; }
-    }, Math.max(1000, Math.floor(config.lockTtlMinutes * 60000 / 3)));
-    if (typeof heartbeat.unref === "function") heartbeat.unref();
+    let heartbeat = null;
     try {
+      state = writeState({
+        ...state,
+        status: "running",
+        windowStartedAt,
+        lastAttemptAt: currentTime.toISOString(),
+        lastRunId: runId,
+        lastError: ""
+      });
+      heartbeat = setIntervalImpl(() => {
+        try { refreshLock(runId); } catch (error) { leaseLost = true; }
+      }, Math.max(1000, Math.floor(config.lockTtlMinutes * 60000 / 3)));
+      if (typeof heartbeat.unref === "function") heartbeat.unref();
       while (pageCount < config.maxPagesPerRun) {
         if (leaseLost) throw new Error("Scheduled intake lost its persistent lease.");
         refreshLock(runId);
@@ -337,6 +490,17 @@ function createAiEmailPollingService({
       const consecutiveFailures = state.consecutiveFailures + 1;
       const retryDelay = Math.min(60 * 60 * 1000, config.retryBaseMs * (2 ** Math.min(consecutiveFailures, 10)));
       const message = safeErrorMessage(error);
+      const currentLock = readLock();
+      if (!currentLock || currentLock.runId !== runId) {
+        return {
+          status: "error",
+          httpStatus: 503,
+          runId,
+          error: message,
+          nextRetryAt: "",
+          counts: totals
+        };
+      }
       state = appendAlert({
         ...state,
         status: "error",
@@ -357,7 +521,7 @@ function createAiEmailPollingService({
         counts: totals
       };
     } finally {
-      clearIntervalImpl(heartbeat);
+      if (heartbeat !== null) clearIntervalImpl(heartbeat);
       releaseLock(runId);
     }
   }
@@ -371,7 +535,7 @@ function createAiEmailPollingService({
         continuationCursor: "",
         hasContinuationCursor: Boolean(state.continuationCursor)
       },
-      lock: readLock() ? { active: true } : { active: false }
+      lock: { active: lockPathExists() }
     };
   }
 
@@ -384,3 +548,7 @@ module.exports = {
   normalizeState,
   verifySchedulerBearerToken
 };
+
+
+
+

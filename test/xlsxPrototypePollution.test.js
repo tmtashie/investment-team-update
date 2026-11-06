@@ -1,0 +1,70 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "xlsx-prototype-test-"));
+process.env.DATA_DIR = dataDir;
+
+const XLSX = require("xlsx");
+const { importWorkbookIntoInvestments } = require("../server")._test;
+
+const maliciousWorkbook = Buffer.from(
+  "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",
+  "base64"
+);
+
+test("application import safely handles a comment reference that targets Object.prototype", (t) => {
+  const investmentsFile = path.join(dataDir, "investments.json");
+  const existingInvestments = [{
+    id: "existing-investment",
+    entity: "Beaman Ventures",
+    company: "Existing Financial Record",
+    amount: "4000000.00",
+    officialValue: "5250000.00",
+    internalValue: "5500000.00",
+    ownershipPercent: "18.25",
+    entityOwnershipPercent: "11.75",
+    documents: [],
+    recipients: [],
+    createdAt: "2026-10-01T12:00:00.000Z"
+  }];
+  fs.writeFileSync(
+    investmentsFile,
+    JSON.stringify(existingInvestments, null, 2) + "\n",
+    "utf8"
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(Object.prototype, "c"),
+    false,
+    "the process must start without the SheetJS comment property"
+  );
+  t.after(() => {
+    delete Object.prototype.c;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  assert.equal(XLSX.version, "0.20.3");
+  importWorkbookIntoInvestments(
+    maliciousWorkbook,
+    { email: "workbook-test@example.test" },
+    "prototype-pollution.xlsx"
+  );
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(Object.prototype, "c"),
+    false,
+    "parsing the adversarial workbook must not pollute Object.prototype"
+  );
+  const preserved = JSON.parse(fs.readFileSync(investmentsFile, "utf8"))
+    .find((investment) => investment.id === "existing-investment");
+  assert.equal(preserved.amount, existingInvestments[0].amount);
+  assert.equal(preserved.officialValue, existingInvestments[0].officialValue);
+  assert.equal(preserved.internalValue, existingInvestments[0].internalValue);
+  assert.equal(preserved.ownershipPercent, existingInvestments[0].ownershipPercent);
+  assert.equal(
+    preserved.entityOwnershipPercent,
+    existingInvestments[0].entityOwnershipPercent
+  );
+});

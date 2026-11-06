@@ -130,6 +130,57 @@ test("a failed run preserves its checkpoint and records a sanitized operational 
   assert.ok(state.nextRetryAt);
 });
 
+test("a polling-state write failure does not strand the acquired lease", async (t) => {
+  const persistenceError = new Error("polling state storage unavailable");
+  const harness = createHarness(t, {
+    fsImpl: {
+      ...fs,
+      writeFileSync(file, ...args) {
+        if (String(file).includes("polling-state.json.")) throw persistenceError;
+        return fs.writeFileSync(file, ...args);
+      }
+    },
+    checkForNewEmails: async () => {
+      throw new Error("intake must not run without durable polling state");
+    }
+  });
+
+  await assert.rejects(
+    harness.service.runScheduled({ user: monitorUser }),
+    persistenceError
+  );
+  assert.equal(fs.existsSync(harness.lockFile), false);
+});
+
+test("a lease initialization write failure removes and closes the new lease", async (t) => {
+  const persistenceError = new Error("lease storage unavailable");
+  let lockDescriptor;
+  const harness = createHarness(t, {
+    fsImpl: {
+      ...fs,
+      openSync(file, ...args) {
+        const descriptor = fs.openSync(file, ...args);
+        if (String(file).endsWith("polling.lock")) lockDescriptor = descriptor;
+        return descriptor;
+      },
+      writeFileSync(file, ...args) {
+        if (file === lockDescriptor) throw persistenceError;
+        return fs.writeFileSync(file, ...args);
+      }
+    },
+    checkForNewEmails: async () => {
+      throw new Error("intake must not run without a durable lease");
+    }
+  });
+
+  await assert.rejects(
+    harness.service.runScheduled({ user: monitorUser }),
+    persistenceError
+  );
+  assert.equal(fs.existsSync(harness.lockFile), false);
+  assert.throws(() => fs.fstatSync(lockDescriptor), { code: "EBADF" });
+});
+
 test("a restarted service resumes a persisted continuation cursor without replaying completed work", async (t) => {
   let firstPageProcessed = 0;
   const first = createHarness(t, {
@@ -348,3 +399,629 @@ test("long-running Graph request refreshes its lease and blocks stale recovery b
   assert.equal((await pending).status, "completed");
   assert.equal(heartbeatCleared, true);
 });
+
+function createLeaseService({
+  stateFile,
+  lockFile,
+  now,
+  checkForNewEmails,
+  setIntervalImpl = setInterval,
+  clearIntervalImpl = clearInterval
+}) {
+  const readJsonFile = (file, fallback) => {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (error) {
+      return fallback;
+    }
+  };
+  const writeJsonFile = (file, value) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n", "utf8");
+  };
+  return createAiEmailPollingService({
+    stateFile,
+    lockFile,
+    readJsonFile,
+    writeJsonFile,
+    enabled: true,
+    lockTtlMinutes: 1,
+    maxRetries: 0,
+    retryBaseMs: 0,
+    now,
+    sleep: async () => {},
+    checkForNewEmails,
+    setIntervalImpl,
+    clearIntervalImpl
+  });
+}
+
+test("an expired lease during a long Graph request fails the old worker and recovers without duplicate processing", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-lease-expiry-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const current = { value: new Date("2026-10-30T12:00:00.000Z") };
+  let finishOldRequest;
+  let finishNewRequest;
+  let proposalWrites = 0;
+  let sourceWasProcessed = false;
+
+  const oldWorker = createLeaseService({
+    stateFile,
+    lockFile,
+    now: () => new Date(current.value),
+    setIntervalImpl: () => ({ unref() {} }),
+    clearIntervalImpl: () => {},
+    checkForNewEmails: () => new Promise((resolve) => {
+      finishOldRequest = () => {
+        if (!sourceWasProcessed) {
+          sourceWasProcessed = true;
+          proposalWrites += 1;
+        }
+        resolve({
+          configured: true,
+          checked: 1,
+          processed: 1,
+          skipped: 0,
+          failed: 0,
+          proposalsCreated: 1,
+          continuationCursor: ""
+        });
+      };
+    })
+  });
+
+  const oldRun = oldWorker.runScheduled({
+    user: { email: "old-worker@example.test", role: "master-editor" }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const oldLock = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+
+  current.value = new Date("2026-10-30T12:01:01.000Z");
+  const newWorker = createLeaseService({
+    stateFile,
+    lockFile,
+    now: () => new Date(current.value),
+    checkForNewEmails: () => new Promise((resolve) => {
+      finishNewRequest = () => resolve({
+        configured: true,
+        checked: 1,
+        processed: 0,
+        skipped: sourceWasProcessed ? 1 : 0,
+        failed: 0,
+        proposalsCreated: 0,
+        continuationCursor: ""
+      });
+    })
+  });
+  const newRun = newWorker.runScheduled({
+    user: { email: "new-worker@example.test", role: "master-editor" }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const newLock = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+  assert.notEqual(newLock.runId, oldLock.runId);
+
+  finishOldRequest();
+  const oldResult = await oldRun;
+  assert.equal(oldResult.status, "error");
+  assert.match(oldResult.error, /lost its persistent lease/);
+  assert.equal(JSON.parse(fs.readFileSync(lockFile, "utf8")).runId, newLock.runId);
+
+  finishNewRequest();
+  const newResult = await newRun;
+  assert.equal(newResult.status, "completed");
+  assert.equal(newResult.counts.skipped, 1);
+  assert.equal(newResult.counts.proposalsCreated, 0);
+  assert.equal(proposalWrites, 1);
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.equal(
+    newWorker.readState().alerts.some((alert) => alert.type === "stale-lock-recovered"),
+    true
+  );
+});
+
+test("replacement completion before the stale Graph request still prevents duplicate processing", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-lease-replacement-first-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const current = { value: new Date("2026-10-30T12:00:00.000Z") };
+  let finishOldRequest;
+  let finishNewRequest;
+  let proposalWrites = 0;
+  let sourceWasProcessed = false;
+
+  const processSource = () => {
+    const duplicate = sourceWasProcessed;
+    if (!duplicate) {
+      sourceWasProcessed = true;
+      proposalWrites += 1;
+    }
+    return {
+      configured: true,
+      checked: 1,
+      processed: duplicate ? 0 : 1,
+      skipped: duplicate ? 1 : 0,
+      failed: 0,
+      proposalsCreated: duplicate ? 0 : 1,
+      continuationCursor: ""
+    };
+  };
+
+  const oldWorker = createLeaseService({
+    stateFile,
+    lockFile,
+    now: () => new Date(current.value),
+    setIntervalImpl: () => ({ unref() {} }),
+    clearIntervalImpl: () => {},
+    checkForNewEmails: () => new Promise((resolve) => {
+      finishOldRequest = () => resolve(processSource());
+    })
+  });
+  const oldRun = oldWorker.runScheduled({
+    user: { email: "old-worker@example.test", role: "master-editor" }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const oldLock = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+
+  current.value = new Date("2026-10-30T12:01:01.000Z");
+  const newWorker = createLeaseService({
+    stateFile,
+    lockFile,
+    now: () => new Date(current.value),
+    checkForNewEmails: () => new Promise((resolve) => {
+      finishNewRequest = () => resolve(processSource());
+    })
+  });
+  const newRun = newWorker.runScheduled({
+    user: { email: "new-worker@example.test", role: "master-editor" }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const newLock = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+  assert.notEqual(newLock.runId, oldLock.runId);
+
+  finishNewRequest();
+  const newResult = await newRun;
+  assert.equal(newResult.status, "completed");
+  assert.equal(newResult.counts.processed, 1);
+  assert.equal(newResult.counts.proposalsCreated, 1);
+  const completedState = newWorker.readState();
+  assert.equal(completedState.status, "idle");
+  assert.equal(completedState.lastRunId, newResult.runId);
+  assert.equal(fs.existsSync(lockFile), false);
+
+  finishOldRequest();
+  const oldResult = await oldRun;
+  assert.equal(oldResult.status, "error");
+  assert.match(oldResult.error, /lost its persistent lease/);
+  assert.equal(oldResult.counts.processed, 0);
+  assert.equal(oldResult.counts.proposalsCreated, 0);
+  assert.equal(proposalWrites, 1);
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.deepEqual(newWorker.readState(), completedState);
+});
+
+test("a competing worker fails closed while the active lease heartbeat is temporarily unreadable", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-lease-heartbeat-write-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const current = { value: new Date("2026-10-30T12:00:00.000Z") };
+  let finishActiveRequest;
+
+  const activeWorker = createLeaseService({
+    stateFile,
+    lockFile,
+    now: () => new Date(current.value),
+    checkForNewEmails: () => new Promise((resolve) => {
+      finishActiveRequest = () => resolve({
+        configured: true,
+        checked: 0,
+        processed: 0,
+        skipped: 0,
+        failed: 0,
+        proposalsCreated: 0,
+        continuationCursor: ""
+      });
+    })
+  });
+  const activeRun = activeWorker.runScheduled({
+    user: { email: "active-worker@example.test", role: "master-editor" }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  current.value = new Date("2026-10-30T12:00:20.000Z");
+  let simulateHeartbeatWriteWindow = true;
+  const fsImpl = {
+    ...fs,
+    readFileSync(file, ...args) {
+      if (file === lockFile && simulateHeartbeatWriteWindow) {
+        simulateHeartbeatWriteWindow = false;
+        return "{";
+      }
+      return fs.readFileSync(file, ...args);
+    }
+  };
+  const competingWorker = createAiEmailPollingService({
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try {
+        return JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch (error) {
+        return fallback;
+      }
+    },
+    writeJsonFile: (file, value) => fs.writeFileSync(file, JSON.stringify(value), "utf8"),
+    enabled: true,
+    lockTtlMinutes: 1,
+    maxRetries: 0,
+    retryBaseMs: 0,
+    now: () => new Date(current.value),
+    fsImpl,
+    checkForNewEmails: async () => {
+      throw new Error("a competing worker must not run while the active lease is fresh");
+    }
+  });
+
+  const competingResult = await competingWorker.runScheduled({
+    user: { email: "competing-worker@example.test", role: "master-editor" }
+  });
+  finishActiveRequest();
+  const activeResult = await activeRun;
+
+  assert.equal(competingResult.status, "locked");
+  assert.equal(competingResult.httpStatus, 409);
+  assert.equal(activeResult.status, "completed");
+  assert.equal(fs.existsSync(lockFile), false);
+});
+
+test("an unreadable lease is recoverable after its filesystem age exceeds the TTL", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-corrupt-stale-lease-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const current = new Date("2026-10-30T12:02:00.000Z");
+  fs.writeFileSync(lockFile, "{", { encoding: "utf8", mode: 0o600 });
+
+  const staleMtime = new Date("2026-10-30T12:00:00.000Z").getTime();
+  const fsImpl = {
+    ...fs,
+    statSync(file, ...args) {
+      const stats = fs.statSync(file, ...args);
+      return file === lockFile ? { ...stats, mtimeMs: staleMtime } : stats;
+    }
+  };
+  const service = createAiEmailPollingService({
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try {
+        return JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch (error) {
+        return fallback;
+      }
+    },
+    writeJsonFile: (file, value) => fs.writeFileSync(file, JSON.stringify(value), "utf8"),
+    enabled: true,
+    lockTtlMinutes: 1,
+    maxRetries: 0,
+    retryBaseMs: 0,
+    now: () => new Date(current),
+    fsImpl,
+    checkForNewEmails: async () => ({
+      configured: true,
+      checked: 0,
+      processed: 0,
+      skipped: 0,
+      failed: 0,
+      proposalsCreated: 0,
+      continuationCursor: ""
+    })
+  });
+
+  const result = await service.runScheduled({
+    user: { email: "recovery-worker@example.test", role: "master-editor" }
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(
+    service.readState().alerts.some((alert) => alert.type === "stale-lock-recovered"),
+    true
+  );
+  assert.equal(fs.existsSync(lockFile), false);
+});
+
+test("an unreadable lease fails closed when its filesystem age cannot be inspected", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-uninspectable-lease-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  fs.writeFileSync(lockFile, "{", { encoding: "utf8", mode: 0o600 });
+  let unlinkAttempted = false;
+
+  const permissionError = Object.assign(new Error("permission denied"), { code: "EACCES" });
+  const fsImpl = {
+    ...fs,
+    statSync(file, ...args) {
+      if (file === lockFile) throw permissionError;
+      return fs.statSync(file, ...args);
+    },
+    unlinkSync(file) {
+      if (file === lockFile) unlinkAttempted = true;
+      return fs.unlinkSync(file);
+    }
+  };
+  const service = createAiEmailPollingService({
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try {
+        return JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch (error) {
+        return fallback;
+      }
+    },
+    writeJsonFile: (file, value) => fs.writeFileSync(file, JSON.stringify(value), "utf8"),
+    enabled: true,
+    lockTtlMinutes: 1,
+    now: () => new Date("2026-10-30T12:02:00.000Z"),
+    fsImpl,
+    checkForNewEmails: async () => {
+      throw new Error("intake must not run while lease age is unknown");
+    }
+  });
+
+  const result = await service.runScheduled({
+    user: { email: "blocked-worker@example.test", role: "master-editor" }
+  });
+
+  assert.equal(result.status, "locked");
+  assert.equal(result.httpStatus, 409);
+  assert.equal(unlinkAttempted, false);
+  assert.equal(fs.readFileSync(lockFile, "utf8"), "{");
+});
+
+test("status reports a malformed lease path as active", (t) => {
+  const { service, lockFile } = createHarness(t, {
+    checkForNewEmails: async () => ({ configured: true })
+  });
+
+  assert.equal(service.getStatus().lock.active, false);
+  fs.writeFileSync(lockFile, "{", { encoding: "utf8", mode: 0o600 });
+
+  assert.equal(service.getStatus().lock.active, true);
+});
+
+test("stale recovery rechecks filesystem age when a heartbeat becomes unreadable", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-recovery-heartbeat-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const recoveryFile = `${lockFile}.recovery`;
+  const current = new Date("2026-11-01T12:00:00.000Z");
+  const staleAt = new Date("2026-11-01T11:00:00.000Z");
+  fs.writeFileSync(lockFile, JSON.stringify({
+    runId: "active-worker",
+    startedAt: staleAt.toISOString(),
+    heartbeatAt: staleAt.toISOString()
+  }) + "\n");
+  fs.utimesSync(lockFile, staleAt, staleAt);
+  let recoveryGuardOpened = false;
+  let lockUnlinked = false;
+
+  const fsImpl = {
+    ...fs,
+    openSync(file, flags, ...args) {
+      const descriptor = fs.openSync(file, flags, ...args);
+      if (file === recoveryFile && flags === "wx") {
+        recoveryGuardOpened = true;
+        fs.writeFileSync(lockFile, "", "utf8");
+        fs.utimesSync(lockFile, current, current);
+      }
+      return descriptor;
+    },
+    unlinkSync(file) {
+      if (file === lockFile) lockUnlinked = true;
+      return fs.unlinkSync(file);
+    }
+  };
+  const service = createAiEmailPollingService({
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try {
+        return JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch (error) {
+        return fallback;
+      }
+    },
+    writeJsonFile: (file, value) => fs.writeFileSync(file, JSON.stringify(value), "utf8"),
+    enabled: true,
+    lockTtlMinutes: 1,
+    now: () => new Date(current),
+    fsImpl,
+    checkForNewEmails: async () => ({ configured: true })
+  });
+
+  const result = service.tryAcquireLock("competing-worker");
+
+  assert.equal(recoveryGuardOpened, true);
+  assert.equal(result.acquired, false);
+  assert.equal(result.recovered, false);
+  assert.equal(lockUnlinked, false);
+  assert.equal(fs.existsSync(lockFile), true);
+  assert.equal(fs.existsSync(recoveryFile), false);
+});
+
+test("a crashed stale-recovery guard cannot block lease recovery forever", (t) => {
+  const current = { value: new Date("2026-11-01T12:00:00.000Z") };
+  const { service, lockFile } = createHarness(t, {
+    current,
+    lockTtlMinutes: 1,
+    checkForNewEmails: async () => ({ configured: true })
+  });
+  const staleAt = new Date("2026-11-01T11:00:00.000Z");
+  fs.writeFileSync(lockFile, JSON.stringify({
+    runId: "stale-worker",
+    startedAt: staleAt.toISOString(),
+    heartbeatAt: staleAt.toISOString()
+  }) + "\n");
+  const recoveryFile = `${lockFile}.recovery`;
+  fs.writeFileSync(recoveryFile, JSON.stringify({ runId: "crashed-recovery" }) + "\n");
+  fs.utimesSync(recoveryFile, staleAt, staleAt);
+
+  const result = service.tryAcquireLock("replacement-worker");
+
+  assert.equal(result.acquired, true);
+  assert.equal(result.recovered, true);
+  assert.equal(JSON.parse(fs.readFileSync(lockFile, "utf8")).runId, "replacement-worker");
+  assert.equal(fs.existsSync(recoveryFile), false);
+  assert.deepEqual(
+    fs.readdirSync(path.dirname(lockFile)).filter((name) => name.includes(".claim")),
+    []
+  );
+});
+
+test("a crashed stale-recovery guard cannot strand a releasable lease", (t) => {
+  const current = { value: new Date("2026-11-01T12:00:00.000Z") };
+  const { service, lockFile } = createHarness(t, {
+    current,
+    lockTtlMinutes: 1,
+    checkForNewEmails: async () => ({ configured: true })
+  });
+  const acquired = service.tryAcquireLock("finishing-worker");
+  assert.equal(acquired.acquired, true);
+
+  const recoveryFile = `${lockFile}.recovery`;
+  const staleAt = new Date("2026-11-01T11:00:00.000Z");
+  fs.writeFileSync(
+    recoveryFile,
+    JSON.stringify({ runId: "crashed-recovery" }) + "\n"
+  );
+  fs.utimesSync(recoveryFile, staleAt, staleAt);
+
+  const released = service.releaseLock("finishing-worker");
+
+  assert.equal(released, true);
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.equal(fs.existsSync(recoveryFile), false);
+  assert.deepEqual(
+    fs.readdirSync(path.dirname(lockFile)).filter((name) => name.includes(".claim")),
+    []
+  );
+});
+
+test("lease heartbeat serializes with competing stale recovery", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-heartbeat-race-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const current = { value: new Date("2026-11-01T12:00:00.000Z") };
+  let heartbeat;
+  let finishPage;
+  let triggerCompetition = false;
+  let competitorResult;
+  const serviceOptions = {
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (error) { return fallback; }
+    },
+    writeJsonFile: (file, value) => value,
+    enabled: true,
+    lockTtlMinutes: 1,
+    maxRetries: 0,
+    now: () => new Date(current.value),
+    checkForNewEmails: async () => ({ configured: true })
+  };
+  const competitor = createAiEmailPollingService(serviceOptions);
+  const worker = createAiEmailPollingService({
+    ...serviceOptions,
+    checkForNewEmails: () => new Promise((resolve) => { finishPage = resolve; }),
+    setIntervalImpl: (callback) => {
+      heartbeat = callback;
+      return { unref() {} };
+    },
+    clearIntervalImpl: () => {},
+    fsImpl: {
+      ...fs,
+      openSync(file, flags, ...args) {
+        const descriptor = fs.openSync(file, flags, ...args);
+        if (file === lockFile && flags === "r+" && triggerCompetition) {
+          triggerCompetition = false;
+          competitorResult = competitor.tryAcquireLock("replacement-worker");
+        }
+        return descriptor;
+      }
+    }
+  });
+
+  const pending = worker.runScheduled({ user: { email: "worker@example.test", role: "master-editor" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  current.value = new Date("2026-11-01T12:01:01.000Z");
+  triggerCompetition = true;
+  heartbeat();
+
+  assert.equal(competitorResult.acquired, false);
+  assert.notEqual(JSON.parse(fs.readFileSync(lockFile, "utf8")).runId, "replacement-worker");
+  finishPage({ configured: true, checked: 0, processed: 0, skipped: 0, failed: 0, proposalsCreated: 0 });
+  assert.equal((await pending).status, "completed");
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.equal(fs.existsSync(`${lockFile}.recovery`), false);
+});
+
+test("lease release serializes with competing stale recovery", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-release-race-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const staleAt = new Date("2026-11-01T11:00:00.000Z");
+  fs.writeFileSync(lockFile, JSON.stringify({
+    runId: "finishing-worker",
+    startedAt: staleAt.toISOString(),
+    heartbeatAt: staleAt.toISOString()
+  }) + "\n");
+
+  const serviceOptions = {
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (error) { return fallback; }
+    },
+    writeJsonFile: (file, value) => value,
+    checkForNewEmails: async () => ({ configured: true }),
+    enabled: true,
+    lockTtlMinutes: 1,
+    now: () => new Date("2026-11-01T12:00:00.000Z")
+  };
+  const competitor = createAiEmailPollingService(serviceOptions);
+  let competitorResult;
+  let triggerCompetition = true;
+  const releasingWorker = createAiEmailPollingService({
+    ...serviceOptions,
+    fsImpl: {
+      ...fs,
+      readFileSync(file, ...args) {
+        const content = fs.readFileSync(file, ...args);
+        if (file === lockFile && triggerCompetition) {
+          triggerCompetition = false;
+          competitorResult = competitor.tryAcquireLock("replacement-worker");
+        }
+        return content;
+      }
+    }
+  });
+
+  assert.equal(releasingWorker.releaseLock("finishing-worker"), true);
+  assert.equal(competitorResult.acquired, false);
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.equal(fs.existsSync(`${lockFile}.recovery`), false);
+});
+
+
+
+
