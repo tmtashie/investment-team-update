@@ -152,6 +152,32 @@ test("a polling-state write failure does not strand the acquired lease", async (
   assert.equal(fs.existsSync(harness.lockFile), false);
 });
 
+test("a polling-state rename failure removes its temporary files", async (t) => {
+  const persistenceError = new Error("polling state rename unavailable");
+  const harness = createHarness(t, {
+    fsImpl: {
+      ...fs,
+      renameSync(source, destination) {
+        if (destination.endsWith("polling-state.json")) throw persistenceError;
+        return fs.renameSync(source, destination);
+      }
+    },
+    checkForNewEmails: async () => {
+      throw new Error("intake must not run without durable polling state");
+    }
+  });
+
+  await assert.rejects(
+    harness.service.runScheduled({ user: monitorUser }),
+    persistenceError
+  );
+  assert.deepEqual(
+    fs.readdirSync(harness.directory).filter((name) => name.endsWith(".tmp")),
+    []
+  );
+  assert.equal(fs.existsSync(harness.lockFile), false);
+});
+
 test("a lease initialization write failure removes and closes the new lease", async (t) => {
   const persistenceError = new Error("lease storage unavailable");
   let lockDescriptor;
@@ -1021,6 +1047,7 @@ test("lease release serializes with competing stale recovery", (t) => {
   assert.equal(fs.existsSync(lockFile), false);
   assert.equal(fs.existsSync(`${lockFile}.recovery`), false);
 });
+
 
 
 

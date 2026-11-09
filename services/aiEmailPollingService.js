@@ -138,12 +138,25 @@ function createAiEmailPollingService({
     const normalized = normalizeState(state);
     fsImpl.mkdirSync(path.dirname(stateFile), { recursive: true });
     const tempFile = `${stateFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
-    fsImpl.writeFileSync(tempFile, JSON.stringify(normalized, null, 2) + "\n", {
-      encoding: "utf8",
-      mode: 0o600
-    });
-    fsImpl.renameSync(tempFile, stateFile);
-    return normalized;
+    try {
+      fsImpl.writeFileSync(tempFile, JSON.stringify(normalized, null, 2) + "\n", {
+        encoding: "utf8",
+        mode: 0o600
+      });
+      fsImpl.renameSync(tempFile, stateFile);
+      return normalized;
+    } catch (error) {
+      try {
+        fsImpl.unlinkSync(tempFile);
+      } catch (cleanupError) {
+        if (!cleanupError || cleanupError.code !== "ENOENT") {
+          if (error && typeof error === "object" && !Object.prototype.hasOwnProperty.call(error, "cause")) {
+            error.cause = cleanupError;
+          }
+        }
+      }
+      throw error;
+    }
   }
 
   function appendAlert(state, type, message, createdAt = now()) {
@@ -548,6 +561,7 @@ module.exports = {
   normalizeState,
   verifySchedulerBearerToken
 };
+
 
 
 
