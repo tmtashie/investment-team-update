@@ -232,8 +232,22 @@ function createAiEmailPollingService({
     }
   }
 
-  function tryAcquireLock(runId) {
+  function hasActiveRecoveryGuard(recoveryFile) {
+    try {
+      fsImpl.lstatSync(recoveryFile);
+    } catch (error) {
+      if (error && error.code === "ENOENT") return false;
+      throw error;
+    }
+    return !clearStaleRecoveryGuard(recoveryFile);
+  }
+
+  function tryAcquireLock(runId, recoveryGuardOwned = false) {
     fsImpl.mkdirSync(path.dirname(lockFile), { recursive: true });
+    const recoveryFile = `${lockFile}.recovery`;
+    if (!recoveryGuardOwned && hasActiveRecoveryGuard(recoveryFile)) {
+      return { acquired: false, recovered: false, lock: readLock() };
+    }
     const startedAt = now().toISOString();
     const lock = { runId, startedAt, heartbeatAt: startedAt };
     let descriptor;
@@ -246,7 +260,6 @@ function createAiEmailPollingService({
       if (ageMs === null || ageMs <= config.lockTtlMinutes * 60 * 1000) {
         return { acquired: false, recovered: false, lock: existing };
       }
-      const recoveryFile = `${lockFile}.recovery`;
       let recoveryDescriptor;
       try {
         recoveryDescriptor = fsImpl.openSync(recoveryFile, "wx", 0o600);
@@ -271,7 +284,7 @@ function createAiEmailPollingService({
         } catch (unlinkError) {
           if (!unlinkError || unlinkError.code !== "ENOENT") throw unlinkError;
         }
-        const acquired = tryAcquireLock(runId);
+        const acquired = tryAcquireLock(runId, true);
         return { ...acquired, recovered: acquired.acquired };
       } finally {
         if (recoveryDescriptor !== null && recoveryDescriptor !== undefined) {
@@ -290,6 +303,13 @@ function createAiEmailPollingService({
       fsImpl.writeFileSync(descriptor, JSON.stringify(lock) + "\n", "utf8");
       fsImpl.closeSync(descriptor);
       descriptor = null;
+      if (!recoveryGuardOwned && hasActiveRecoveryGuard(recoveryFile)) {
+        const current = fsImpl.statSync(lockFile);
+        if (current.dev === createdLockStat.dev && current.ino === createdLockStat.ino) {
+          fsImpl.unlinkSync(lockFile);
+        }
+        return { acquired: false, recovered: false, lock: readLock() };
+      }
       return { acquired: true, recovered: false, lock };
     } catch (error) {
       let cleanupFailure = null;

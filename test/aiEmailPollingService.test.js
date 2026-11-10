@@ -178,6 +178,44 @@ test("a polling-state rename failure removes its temporary files", async (t) => 
   assert.equal(fs.existsSync(harness.lockFile), false);
 });
 
+test("lease acquisition refuses overlap with an active recovery guard", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-acquire-release-race-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, "polling-state.json");
+  const lockFile = path.join(directory, "polling.lock");
+  const recoveryFile = `${lockFile}.recovery`;
+  let guardInjected = false;
+  const service = createAiEmailPollingService({
+    stateFile,
+    lockFile,
+    readJsonFile: (file, fallback) => {
+      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (error) { return fallback; }
+    },
+    writeJsonFile: (file, value) => fs.writeFileSync(file, JSON.stringify(value), "utf8"),
+    enabled: true,
+    now: () => new Date("2026-11-10T12:00:00.000Z"),
+    fsImpl: {
+      ...fs,
+      openSync(file, flags, ...args) {
+        const descriptor = fs.openSync(file, flags, ...args);
+        if (file === lockFile && flags === "wx") {
+          fs.writeFileSync(recoveryFile, JSON.stringify({ runId: "finishing-worker" }) + "\n");
+          guardInjected = true;
+        }
+        return descriptor;
+      }
+    },
+    checkForNewEmails: async () => ({ configured: true })
+  });
+
+  const result = service.tryAcquireLock("new-worker");
+
+  assert.equal(guardInjected, true);
+  assert.equal(result.acquired, false);
+  assert.equal(fs.existsSync(lockFile), false);
+  assert.equal(fs.existsSync(recoveryFile), true);
+});
+
 test("a lease initialization write failure removes and closes the new lease", async (t) => {
   const persistenceError = new Error("lease storage unavailable");
   let lockDescriptor;
