@@ -555,7 +555,13 @@ function createAiEmailPollingService({
       };
     } finally {
       if (heartbeat !== null) clearIntervalImpl(heartbeat);
-      releaseLock(runId);
+      const released = releaseLock(runId);
+      if (!released) {
+        const remainingLock = readLock();
+        if (remainingLock && remainingLock.runId === runId) {
+          throw new Error("Scheduled intake could not release its persistent lease.");
+        }
+      }
     }
   }
 

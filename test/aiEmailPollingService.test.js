@@ -979,6 +979,32 @@ test("a crashed stale-recovery guard cannot strand a releasable lease", (t) => {
   );
 });
 
+test("a run cannot report success while its owned lease remains after cleanup", async (t) => {
+  let recoveryFile;
+  const harness = createHarness(t, {
+    setIntervalImpl: () => ({ unref() {} }),
+    clearIntervalImpl: () => {
+      fs.writeFileSync(recoveryFile, JSON.stringify({ runId: "competing-recovery" }) + "\n");
+    },
+    checkForNewEmails: async () => ({
+      configured: true,
+      checked: 0,
+      processed: 0,
+      skipped: 0,
+      failed: 0,
+      proposalsCreated: 0
+    })
+  });
+  recoveryFile = `${harness.lockFile}.recovery`;
+
+  await assert.rejects(
+    harness.service.runScheduled({ user: monitorUser }),
+    /could not release its persistent lease/
+  );
+  assert.equal(fs.existsSync(harness.lockFile), true);
+  assert.equal(fs.existsSync(recoveryFile), true);
+});
+
 test("lease heartbeat serializes with competing stale recovery", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-heartbeat-race-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
