@@ -6435,6 +6435,8 @@ module.exports = {
     applyNewDealEdits,
     canApprovePotentialNewDeal,
     canViewStoredUpload,
+    buildInvestmentsWorkbookBuffer,
+    importWorkbookIntoInvestments,
     isPipelinePerformanceRecord
   }
 };
