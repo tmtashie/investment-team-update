@@ -1005,6 +1005,32 @@ test("a run cannot report success while its owned lease remains after cleanup", 
   assert.equal(fs.existsSync(recoveryFile), true);
 });
 
+test("a run cannot report success while its lease path becomes malformed during cleanup", async (t) => {
+  let lockFile;
+  const harness = createHarness(t, {
+    setIntervalImpl: () => ({ unref() {} }),
+    clearIntervalImpl: () => {
+      fs.writeFileSync(lockFile, "{", "utf8");
+    },
+    checkForNewEmails: async () => ({
+      configured: true,
+      checked: 0,
+      processed: 0,
+      skipped: 0,
+      failed: 0,
+      proposalsCreated: 0
+    })
+  });
+  lockFile = harness.lockFile;
+
+  await assert.rejects(
+    harness.service.runScheduled({ user: monitorUser }),
+    /could not release its persistent lease/
+  );
+  assert.equal(fs.readFileSync(lockFile, "utf8"), "{");
+  assert.equal(fs.existsSync(`${lockFile}.recovery`), false);
+});
+
 test("lease heartbeat serializes with competing stale recovery", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-email-heartbeat-race-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
