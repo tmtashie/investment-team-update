@@ -1,6 +1,18 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { canViewStoredUpload } = require("../server")._test;
+const { canViewStoredUpload, decodeBase64FileData } = require("../server")._test;
+
+test("document uploads reject malformed Base64 before writing files", () => {
+  const content = Buffer.from("quarterly update", "utf8");
+  const padded = content.toString("base64");
+
+  assert.deepEqual(decodeBase64FileData(padded), content);
+  assert.deepEqual(decodeBase64FileData(padded.replace(/=+$/, "")), content);
+  assert.equal(decodeBase64FileData("!!!!"), null);
+  assert.equal(decodeBase64FileData(`${padded}invalid`), null);
+  assert.equal(decodeBase64FileData("AA=A"), null);
+  assert.equal(decodeBase64FileData("="), null);
+});
 
 test("unassociated uploads fail closed", () => {
   assert.equal(canViewStoredUpload({ role: "master-editor" }, "orphan.pdf"), false);
