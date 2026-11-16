@@ -486,6 +486,21 @@ function safeFilename(filename) {
   return `${basename || "document"}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}${extension}`;
 }
 
+function decodeBase64FileData(value) {
+  const encoded = String(value || "").trim();
+  if (
+    !encoded ||
+    encoded.length % 4 === 1 ||
+    !/^[a-z0-9+/]*={0,2}$/i.test(encoded)
+  ) {
+    return null;
+  }
+
+  const buffer = Buffer.from(encoded, "base64");
+  const canonical = buffer.toString("base64").replace(/=+$/, "");
+  return buffer.length > 0 && canonical === encoded.replace(/=+$/, "") ? buffer : null;
+}
+
 function getContentType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return (
@@ -5803,10 +5818,16 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      const fileBuffer = decodeBase64FileData(fileData);
+      if (!fileBuffer) {
+        sendJson(response, 400, { error: "Document file data must be valid Base64." });
+        return;
+      }
+
       ensureDataFile();
       const storedName = safeFilename(filename);
       const filePath = path.join(UPLOADS_DIR, storedName);
-      fs.writeFileSync(filePath, Buffer.from(fileData, "base64"));
+      fs.writeFileSync(filePath, fileBuffer);
 
       sendJson(response, 201, {
         document: {
@@ -5858,10 +5879,16 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      const fileBuffer = decodeBase64FileData(fileData);
+      if (!fileBuffer) {
+        sendJson(response, 400, { error: "Document file data must be valid Base64." });
+        return;
+      }
+
       ensureDataFile();
       const storedName = safeFilename(filename);
       const filePath = path.join(UPLOADS_DIR, storedName);
-      fs.writeFileSync(filePath, Buffer.from(fileData, "base64"));
+      fs.writeFileSync(filePath, fileBuffer);
 
       const document = saveCompanyDocument({
         company,
@@ -6354,6 +6381,7 @@ module.exports = {
     applyNewDealEdits,
     canApprovePotentialNewDeal,
     canViewStoredUpload,
+    decodeBase64FileData,
     isPipelinePerformanceRecord
   }
 };
