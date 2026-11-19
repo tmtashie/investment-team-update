@@ -30,3 +30,6 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Run synthetic Messages tests
+        run: python3 -m unittest discover -s test -p 'test_imessage_bridge.py' -v
