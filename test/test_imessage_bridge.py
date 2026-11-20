@@ -46,6 +46,10 @@ class BridgeTests(unittest.TestCase):
         con = sqlite3.connect(self.db); con.execute('INSERT INTO chat_handle_join VALUES (1,3)'); con.commit(); con.close()
         with self.assertRaises(bridge.BridgeError): bridge.read_recent_messages('allowed')
 
+    def test_non_string_tool_name_fails_with_generic_error(self):
+        with self.assertRaisesRegex(bridge.BridgeError, '^Invalid request$'):
+            interface.dispatch([], {})
+
     def test_membership_and_messages_share_one_snapshot(self):
         con = sqlite3.connect(self.db)
         con.execute('PRAGMA journal_mode=WAL')

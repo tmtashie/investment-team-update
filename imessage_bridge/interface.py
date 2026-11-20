@@ -10,7 +10,7 @@ TOOLS = [
 
 def dispatch(name, arguments):
     definitions = {tool['name']: tool for tool in TOOLS}
-    if name not in definitions or not isinstance(arguments, dict):
+    if not isinstance(name, str) or name not in definitions or not isinstance(arguments, dict):
         raise bridge.BridgeError('Invalid request')
     schema = definitions[name]['inputSchema']
     if set(arguments) - set(schema['properties']) or not set(schema.get('required', [])) <= set(arguments):
