@@ -60,6 +60,8 @@ def _read(thread_id, limit, query):
     con = _connect()
     try:
         with con:
+            # SELECT alone does not start a transaction in Python's sqlite3.
+            con.execute('BEGIN')
             chats = con.execute('SELECT ROWID FROM chat WHERE guid = ?', (thread_id,)).fetchall()
             if len(chats) != 1:
                 raise BridgeError('Thread unavailable')
@@ -94,3 +96,4 @@ def _read(thread_id, limit, query):
         raise BridgeError('Messages database unavailable or unsupported') from None
     finally:
         con.close()
+

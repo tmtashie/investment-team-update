@@ -46,6 +46,37 @@ class BridgeTests(unittest.TestCase):
         con = sqlite3.connect(self.db); con.execute('INSERT INTO chat_handle_join VALUES (1,3)'); con.commit(); con.close()
         with self.assertRaises(bridge.BridgeError): bridge.read_recent_messages('allowed')
 
+    def test_membership_and_messages_share_one_snapshot(self):
+        con = sqlite3.connect(self.db)
+        con.execute('PRAGMA journal_mode=WAL')
+        con.close()
+        connect = bridge._connect
+        changed = []
+
+        def connect_with_concurrent_change():
+            reader = connect()
+
+            def mutate_before_message_query(statement):
+                if 'SELECT m.guid' not in statement or changed:
+                    return
+                changed.append(True)
+                writer = sqlite3.connect(self.db)
+                writer.execute('INSERT INTO chat_handle_join VALUES (1,3)')
+                writer.execute("INSERT INTO message VALUES ('m4','new private content',4000000000,1,0)")
+                writer.execute('INSERT INTO chat_message_join VALUES (1,4)')
+                writer.commit()
+                writer.close()
+
+            reader.set_trace_callback(mutate_before_message_query)
+            return reader
+
+        with patch.object(bridge, '_connect', side_effect=connect_with_concurrent_change):
+            rows = bridge.read_recent_messages('allowed')
+        self.assertTrue(changed)
+        self.assertEqual([row['text'] for row in rows], ['second', 'first'])
+        with self.assertRaises(bridge.BridgeError):
+            bridge.read_recent_messages('allowed')
+
     def test_no_sql_paths_or_write_operations(self):
         for args in ({'thread_id': 'allowed', 'sql': 'DELETE FROM message'}, {'thread_id': 'allowed', 'path': '/tmp/x'}):
             with self.assertRaises(bridge.BridgeError): interface.dispatch('read_recent_messages', args)
@@ -65,3 +96,4 @@ class BridgeTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
